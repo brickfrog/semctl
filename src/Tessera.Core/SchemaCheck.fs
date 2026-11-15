@@ -195,8 +195,8 @@ let legacySqlType (systemTypeName: string) : DataType option =
     | "bit" -> Some DataType.Boolean
     | _ -> None
 
-/// SQL Server types for an M partition (Sql.Database). Power Query's own mapping isn't documented
-/// by Microsoft, so only the types whose model type isn't in doubt are compared. Numeric types other
+/// SQL Server types for an M partition (Sql.Database). tess found no Microsoft documentation of
+/// Power Query's mapping, so only the types whose model type isn't in doubt are compared. Numeric types other
 /// than int/bigint/float/real (decimal, numeric, money, smallmoney, smallint, tinyint), time,
 /// datetimeoffset, uniqueidentifier and binary types are not compared.
 let mSqlType (systemTypeName: string) : DataType option =
@@ -531,8 +531,11 @@ let update (db: Database) (report: Report) (dropRemoved: bool) : Result<Mutation
                         else
                             let c = new DataColumn(Name = srcName, SourceColumn = srcName, DataType = dt)
 
+                            // As `tess add` (and Desktop) makes a column in a Power BI model: a lineage
+                            // tag and the SummarizationSetBy annotation. A model without lineage tags gets neither.
                             if hasLineage then
                                 c.LineageTag <- Guid.NewGuid().ToString()
+                                c.Annotations.Add(new Annotation(Name = "SummarizationSetBy", Value = "Automatic"))
 
                             c.SummarizeBy <-
                                 (if dt = DataType.Int64 || dt = DataType.Double || dt = DataType.Decimal then

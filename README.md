@@ -1822,7 +1822,7 @@ Only commands given a server contact anything, and only these, all through the c
 
 tess adds no telemetry and no other calls. The test suite checks, on the compiled assemblies, that
 `Tessera.Core` uses no network type outside the explicit BPA rule download, that the CLI uses none itself, and that
-in `Tessera.Xmla` only the live connector does.
+in `Tessera.Xmla` only the live connector (and `schemacheck`'s live SQL describer, `LiveSql`) does.
 
 #### Remote models in other commands
 
@@ -3337,7 +3337,7 @@ table whose partition names a different database from the one in `--source` (a d
 Data types: for a **query partition**, SQL types map as TE2 maps them (`int`, `bigint`, `smallint`, `tinyint` to
 `int64`; `float`, `real` to `double`; `decimal`, `numeric`, `money`, `smallmoney` to `decimal`; the date and time
 types to `dateTime`; `bit` to `boolean`; character types to `string`; `binary`, `varbinary` to `binary`), without
-TE2's guesses for other names. For an **M partition**, Power Query's own mapping isn't documented, so only
+TE2's guesses for other names. For an **M partition**, tess found no Microsoft documentation of Power Query's mapping, so only
 `int`/`bigint` (`int64`), `float`/`real` (`double`), `bit`, character types, and `date`/`datetime`/`datetime2`/
 `smalldatetime` are compared. Other types (`decimal`, `numeric`, `money`, `smallint`, `tinyint`, `time`,
 `datetimeoffset`, `uniqueidentifier`, ...) are not compared, and `--update` won't add a column of such a type.
@@ -3359,7 +3359,9 @@ service principal is never sent to a server that isn't one of those hosts.** Not
 
 The connection is always encrypted (`Encrypt=Mandatory`) and the server's certificate must be trusted. For a local
 test server with a self-signed certificate, `TESS_SQL_TRUST_SERVER_CERTIFICATE=1` accepts it (still encrypted); it
-is off unless you set it. A server that can't be reached, or refuses the sign-in, fails the whole command (exit 5).
+is off unless you set it. tess uses SqlClient's managed network layer on every OS (it ships without SqlClient's
+native Windows library). On Windows, Microsoft documents that layer as meant for testing and debugging, and it
+doesn't do non-domain Windows authentication. A server that can't be reached, or refuses the sign-in, fails the whole command (exit 5).
 
 **What is sent, and to whom:** only to the server in `--source`, and only once a table needs describing (a model
 with no SQL-readable table connects to nothing): the sign-in, then for each table its query, as the text of a call to
@@ -3374,7 +3376,8 @@ shows the changes unless `--save` or `--save-to`, `--stat`, `--name-only`, `--fo
 set. The findings go to stderr.
 
 - A **new source column** becomes a data column named and sourced as the source names it, with its mapped type
-  (summarized by sum if numeric, a lineage tag if the table has one). A column with no exactly mapped type, or
+  (summarized by sum if numeric; in a table with a lineage tag, also a lineage tag and `SummarizationSetBy`,
+  as `tess add` makes a column). A column with no exactly mapped type, or
   whose name the table already uses, isn't added; a warning says why.
 - A **changed type** is changed on the column itself; everything else about it (name, format string, description,
   folders, relationships, translations) stays.
@@ -3628,11 +3631,11 @@ nothing (`get --properties`'s `value`, a change's `before` / `after`) and a BLAN
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | the "negative" result of the Unix tool a command mirrors: `find` found nothing (like grep); `diff` found differences (like diff); `bpa`/`validate`/`lint` found issues at or above `--fail-on` (default `error`); `test run` had a failed or errored test, an invalid suite, or no test that reached a verdict; `test compare` found differences; `format --check` found DAX that isn't formatted; an edit's `--save` refused because it would introduce errors |
+| 1 | the "negative" result of the Unix tool a command mirrors: `find` found nothing (like grep); `diff` found differences (like diff); `bpa`/`validate`/`lint`/`schemacheck` found issues at or above `--fail-on` (default `error`); `test run` had a failed or errored test, an invalid suite, or no test that reached a verdict; `test compare` found differences; `format --check` found DAX that isn't formatted; an edit's `--save` refused because it would introduce errors |
 | 2 | usage error, including invalid arguments for an editing command: an invalid new name (`rename`, `add`), a property `set` can't write or a value it can't take, or an option `add` doesn't take for that kind |
-| 3 | input error: model not found, unrecognised, ambiguous or failed to load. For the editing commands also a name that's taken, a missing object or parent, an object that can't be created, removed or moved there, an object others still refer to (`remove`), an edit that would change what other references mean (`rename`, `move`), a translation file that can't be applied (`translations import`), or an object a perspective can't hold. For `script`, also a script that can't be read or applied, or an object a script can't hold. For `bpa`, also a rule file you named that can't be read; for `bpa rules`, a rule ID that isn't there (or already is, for `add`) or an object that can't carry an ignore annotation. For `format`, DAX that can't be read (malformed) |
+| 3 | input error: model not found, unrecognised, ambiguous or failed to load. For the editing commands also a name that's taken, a missing object or parent, an object that can't be created, removed or moved there, an object others still refer to (`remove`), an edit that would change what other references mean (`rename`, `move`), a translation file that can't be applied (`translations import`), or an object a perspective can't hold. For `script`, also a script that can't be read or applied, or an object a script can't hold. For `bpa`, also a rule file you named that can't be read; for `bpa rules`, a rule ID that isn't there (or already is, for `add`) or an object that can't carry an ignore annotation. For `format`, DAX that can't be read (malformed). For `schemacheck`, a `--source` that can't be used (a missing or malformed schema file, a bad `sql:` address) |
 | 4 | output error (destination not empty, write failed); `deploy --execute` on a database that exists, without `--overwrite` |
-| 5 | a server couldn't be reached, refused the credentials (or none are configured), has no such database, or reported an error (a failed `query`, `deploy` or `refresh`) |
+| 5 | a server couldn't be reached, refused the credentials (or none are configured), has no such database, or reported an error (a failed `query`, `deploy` or `refresh`), including `schemacheck`'s SQL server |
 | 70 | internal error |
 
 ## Development

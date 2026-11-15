@@ -553,6 +553,14 @@ let tests =
                     Expect.equal region.SourceColumn "Region" ""
                     Expect.equal region.DataType DataType.String ""
                     Expect.isFalse (String.IsNullOrEmpty region.LineageTag) "the table has lineage tags"
+
+                    Expect.equal
+                        (region.Annotations.Find "SummarizationSetBy").Value
+                        "Automatic"
+                        "as `tess add` makes it"
+
+                    let price = db.Model.Tables.["Product"]
+                    Expect.isTrue (String.IsNullOrEmpty price.LineageTag) "Product has no lineage tag"
                     Expect.equal sales.Columns.["Amount"].DataType DataType.Decimal ""
                     Expect.isNotNull (sales.Columns.Find "Old") "kept"
                     let key = db.Model.Tables.["Product"].Columns.["Key"]

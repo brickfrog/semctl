@@ -95,11 +95,31 @@ type private Describer(address: SqlAddress, env: Credentials.Environment) =
             c
         with
         | :? MsalException as e ->
-            fail (AuthenticationFailed(address.Server, scrub e.Message, Some(describe credential)))
+            fail (
+                AuthenticationFailed(
+                    address.Server,
+                    scrub e.Message,
+                    Some $"(signed in with {describe credential}; {Var.auth} picks how)"
+                )
+            )
         | :? SqlException as e when e.Number = 18456 ->
-            fail (AuthenticationFailed(address.Server, scrub e.Message, Some(describe credential)))
+            fail (
+                AuthenticationFailed(
+                    address.Server,
+                    scrub e.Message,
+                    Some $"(signed in with {describe credential}; {Var.auth} picks how)"
+                )
+            )
         | :? SqlException as e when e.Number = 4060 -> fail (DatabaseNotFound(address.Server, address.Database, []))
-        | e -> fail (ConnectionFailed(address.Server, scrub e.Message, None))
+        | e ->
+            let hint =
+                if trustServerCertificate env then
+                    None
+                else
+                    Some
+                        $"If the server's certificate isn't trusted (a test server's self-signed one), {Var.trustServerCertificate}=1 accepts it."
+
+            fail (ConnectionFailed(address.Server, scrub e.Message, hint))
 
     interface ISqlDescriber with
         member _.Describe(query: string) =
