@@ -1503,7 +1503,7 @@ Options:
 - Text output has `validate`'s layout, plus a line saying how many findings `--fix` would fix.
 - `--json` writes the [findings envelope](#findings-json-and-ci-annotations). Each finding has `ruleName`, a
   `category` (TE3's `Improvement` or `Readability`, or `Correctness` for `TS001`) and `fixable`. The envelope
-  adds a top-level `fixable` count.
+  adds a top-level `fixable` count, and `ignored`: the findings suppressed by annotations (see below).
 
 With `--fix`, `lint` is an [editing command](#editing-commands):
 - It is a dry run unless `--save` or `--save-to`. `--stat` and `--name-only` work as for the other editing
@@ -1518,7 +1518,17 @@ With `--fix`, `lint` is an [editing command](#editing-commands):
   refused with `--fix` (exit 2), as are `--save`, `--save-to`, `--force`, `--stat` and `--name-only`
   without it.
 
-Findings can't be suppressed on individual objects yet.
+To suppress findings, give the object a `TesseraLint_IgnoreRules` annotation listing rule ids, in the format of
+TE's BPA ignore annotation: `{"RuleIDs":["DI004","DR014"]}` (TE's plain array form, `["DI004"]`, works too; ids are
+case-insensitive). It covers every expression the object holds (a measure's KPI and format string expressions
+too, and a role's row filters). On the model, it turns the rules off for every expression; that is also the way
+to ignore a rule on a calculation item, which TOM gives no annotations. Ignored findings are counted under the
+report (`ignored` in JSON), don't count for `--fail-on`, and `--fix` leaves them alone. TE has no convention for
+suppressing its code actions, so the annotation is tess's own; TE leaves it alone. To set it:
+
+```
+tess set ./Sales.pbip 'measure:Sales/Margin' -p 'annotations.TesseraLint_IgnoreRules={"RuleIDs":["DI004"]}' --save
+```
 
 ### Formatting DAX (`format`)
 

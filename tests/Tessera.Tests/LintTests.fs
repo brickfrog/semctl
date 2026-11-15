@@ -578,3 +578,45 @@ let propertyTests =
             let crlf, _ = fix (expr.Replace("\n", "\r\n"))
             crlf = lf.Replace("\n", "\r\n")
     ]
+
+let private ignore (o: MetadataObject) (value: string) =
+    match o with
+    | :? Measure as m -> m.Annotations.Add(new Annotation(Name = Lint.ignoreAnnotation, Value = value))
+    | :? Model as m -> m.Annotations.Add(new Annotation(Name = Lint.ignoreAnnotation, Value = value))
+    | o -> failtestf "%A" o
+
+[<Tests>]
+let suppressionTests =
+    testList "Lint suppression" [
+        testCase "an object's annotation suppresses those rules on its expressions"
+        <| fun () ->
+            let db = withMeasure "SUM([Amount]) + 'Sales'[Total]"
+            let m = db.Model.Tables.["Sales"].Measures.["M"]
+            ignore m """{"RuleIDs":["di004"]}"""
+            let findings, ignored = Lint.lintWithIgnored db
+
+            let on (fs: Lint.Finding list) =
+                fs
+                |> List.filter (fun f -> f.Ref = measureRef "M")
+                |> List.map (fun f -> f.Rule.Id)
+
+            Expect.equal (on findings) [ "DI003" ] "DI003 still reported"
+            Expect.equal (on ignored) [ "DI004" ] "DI004 suppressed, case-insensitively"
+            Expect.equal (fixedIn db (measureRef "M") "expression" "") "SUM([Amount]) + [Total]" "--fix leaves it"
+
+        testCase "on the model, for every expression; TE's array form works too"
+        <| fun () ->
+            let db = withMeasure "SUM([Amount])"
+            ignore db.Model """["DI004"]"""
+            let findings, ignored = Lint.lintWithIgnored db
+            Expect.isEmpty (findings |> List.filter (fun f -> f.Rule.Id = "DI004")) ""
+            Expect.isNonEmpty ignored ""
+            Expect.isEmpty (Lint.fix db (fun _ -> true)).Fixes ""
+
+        testCase "an unreadable annotation suppresses nothing"
+        <| fun () ->
+            let db = withMeasure "SUM([Amount])"
+            ignore db.Model.Tables.["Sales"].Measures.["M"] "DI004"
+            Expect.equal (found "SUM([Amount])") [ "DI004", true ] "baseline"
+            Expect.isNonEmpty (Lint.lint db) ""
+    ]

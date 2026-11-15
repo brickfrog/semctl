@@ -1154,11 +1154,72 @@ let lintSource (ctx: Context) (src: Deps.DaxSource) : Finding list =
     })
     |> List.sortBy (fun f -> f.Offset, rules |> List.findIndex (fun r -> r.Id = f.Rule.Id))
 
-/// Lint every DAX expression in the model, in model order.
-let lint (db: Database) : Finding list =
+// ---- Suppressing findings -----------------------------------------------------------------------
+
+/// The annotation that turns lint rules off: on an object, for its expressions; on the model, for
+/// every expression. Tabular Editor has no such convention for its code actions, so this one is
+/// tess's own, holding a value in the format of TE's BPA ignore annotation
+/// (`BestPracticeAnalyzer_IgnoreRules`): `{"RuleIDs":["DI004","DR014"]}`.
+let ignoreAnnotation = "TesseraLint_IgnoreRules"
+
+/// The rule ids (upper case) an object's ignore annotation lists. TOM has no common interface for
+/// annotations, so this reads them by reflection; objects without any (calculation items) list none.
+let ignoredOn (o: MetadataObject) : Set<string> =
+    let value =
+        match o.GetType().GetProperty("Annotations") with
+        | null -> None
+        | p ->
+            match p.GetValue o with
+            | :? Collections.IEnumerable as coll ->
+                coll
+                |> Seq.cast<obj>
+                |> Seq.tryPick (fun a ->
+                    match a with
+                    | :? Annotation as a when a.Name = ignoreAnnotation && not (String.IsNullOrEmpty a.Value) ->
+                        Some a.Value
+                    | _ -> None)
+            | _ -> None
+
+    match value with
+    | Some json ->
+        BpaRules.parseIgnoreList json
+        |> List.map (fun id -> id.Trim().ToUpperInvariant())
+        |> Set.ofList
+    | None -> Set.empty
+
+/// Whether an expression's owner (or the model) ignores a finding's rule.
+let private ignoredIn (db: Database) =
+    let onModel = ignoredOn db.Model
+    let cache = Dictionary<MetadataObject, Set<string>>(HashIdentity.Reference)
+
+    fun (src: Deps.DaxSource) (f: Finding) ->
+        let own =
+            match cache.TryGetValue src.Owner.Object with
+            | true, s -> s
+            | _ ->
+                let s = ignoredOn src.Owner.Object
+                cache.[src.Owner.Object] <- s
+                s
+
+        onModel.Contains f.Rule.Id || own.Contains f.Rule.Id
+
+/// Lint every DAX expression in the model, in model order: the findings, and those the ignore
+/// annotation suppresses.
+let lintWithIgnored (db: Database) : Finding list * Finding list =
     let entries = objects db
     let ctx = context entries
-    Deps.daxSources entries |> List.collect (lintSource ctx)
+    let ignored = ignoredIn db
+
+    let all = [
+        for src in Deps.daxSources entries do
+            for f in lintSource ctx src -> f, ignored src f
+    ]
+
+    all |> List.filter (snd >> not) |> List.map fst, all |> List.filter snd |> List.map fst
+
+/// Lint every DAX expression in the model, in model order (without the findings the ignore
+/// annotation suppresses).
+let lint (db: Database) : Finding list = fst (lintWithIgnored db)
 
 // ---- Fixing -------------------------------------------------------------------------------------
 
@@ -1232,6 +1293,7 @@ let private fixSource (ctx: Context) (select: Finding -> bool) (src: Deps.DaxSou
     pass 0 src.Dax []
 
 /// Fix the selected findings across the model (without changing it): what each expression becomes.
+/// Findings the ignore annotation suppresses are left alone.
 let fix (db: Database) (select: Finding -> bool) : FixResult =
     let entries = objects db
     let ctx = context entries
@@ -1239,7 +1301,11 @@ let fix (db: Database) (select: Finding -> bool) : FixResult =
     let remaining = ResizeArray<Finding>()
     let unsettled = ResizeArray<Deps.DaxSource>()
 
+    let ignored = ignoredIn db
+
     for src in Deps.daxSources entries do
+        let select (f: Finding) = select f && not (ignored src f)
+
         match fixSource ctx select src with
         | Ok(after, fixedIds, left) ->
             remaining.AddRange left

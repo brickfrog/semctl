@@ -217,4 +217,32 @@ let tests =
             Expect.equal (expression path "Unqualified") "SUM([Amount])" "the source is untouched"
             let relint = tess [ "lint"; out; "--rule"; "DI004,DR014" ]
             Expect.equal (lines relint.Out) [| "No issues." |] ""
+
+        testCase "findings suppressed by the TesseraLint_IgnoreRules annotation are counted, and listed in JSON"
+        <| fun () ->
+            use t = new TempDir()
+            let path = lintModel t []
+
+            let set =
+                tess [
+                    "set"
+                    path
+                    "measure:Sales/Unqualified"
+                    "-p"
+                    "annotations.TesseraLint_IgnoreRules={\"RuleIDs\":[\"DI004\"]}"
+                    "--save"
+                ]
+
+            Expect.equal set.Code ExitCode.ok set.Err
+            let r = tess [ "lint"; path ]
+            Expect.isFalse (r.Out.Contains "measure:Sales/Unqualified") r.Out
+            Expect.stringContains r.Out "1 finding ignored by TesseraLint_IgnoreRules annotations." ""
+
+            let j = tess [ "lint"; path; "--json" ]
+            use doc = json j
+            let ignored = doc.RootElement.GetProperty("ignored")
+            Expect.equal (ignored.GetArrayLength()) 1 ""
+            Expect.equal (ignored.[0].GetProperty("code").GetString()) "DI004" ""
+            let fix = tess [ "lint"; path; "--fix"; "--name-only" ]
+            Expect.isFalse (fix.Out.Contains "measure:Sales/Unqualified") fix.Out
     ]
