@@ -302,14 +302,16 @@ let private display (reportDir: string) (file: string) =
     let parent = Path.GetDirectoryName(fullPath reportDir)
     Path.GetRelativePath(parent, file).Replace('\\', '/')
 
-let private mentions (name: string) (file: string) =
+let private mentionsWith (read: string -> byte array) (name: string) (file: string) =
     try
-        File.ReadAllText(file).Contains(name, StringComparison.OrdinalIgnoreCase)
+        Encoding.UTF8.GetString(read file).Contains(name, StringComparison.OrdinalIgnoreCase)
     with _ ->
         false
 
-/// The edits a change needs in these report folders, and warnings about what can't be rewritten.
-let plan (reportDirs: string list) (change: Change) : FileEdit list * string list =
+/// `plan`, reading files through `read` (tess interactive and tess mcp read staged, unsaved
+/// report edits this way, so several renames compose before anything is written).
+let planWith (read: string -> byte array) (reportDirs: string list) (change: Change) : FileEdit list * string list =
+    let mentions = mentionsWith read
     let name = Change.oldName change
     let edits = ResizeArray<FileEdit>()
     let warnings = ResizeArray<string>()
@@ -335,7 +337,7 @@ let plan (reportDirs: string list) (change: Change) : FileEdit list * string lis
                         warnings.Add $"report-level measures in {shown} mention '{name}' and are not updated"
                 else
                     try
-                        let bytes = File.ReadAllBytes file
+                        let bytes = read file
                         let before, after, n, notRewritten = rewriteBytes change bytes
 
                         if notRewritten > 0 then
@@ -373,6 +375,16 @@ let plan (reportDirs: string list) (change: Change) : FileEdit list * string lis
             )
 
     List.ofSeq edits, List.ofSeq warnings
+
+/// The edits a change needs in these report folders, and warnings about what can't be rewritten.
+let plan (reportDirs: string list) (change: Change) : FileEdit list * string list =
+    planWith File.ReadAllBytes reportDirs change
+
+/// Whether a file starts with a UTF-8 byte order mark.
+let startsWithBom (bytes: byte array) = hasBom bytes
+
+/// The folder of a report file to show it from (as FileEdit.Display does).
+let displayOf (reportDir: string) (file: string) = display reportDir file
 
 let private utf8 (withBom: bool) = UTF8Encoding(withBom)
 

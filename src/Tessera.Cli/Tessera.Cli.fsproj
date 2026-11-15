@@ -18,6 +18,7 @@
     <Compile Include="Findings.fs" />
     <Compile Include="Sarif.fs" />
     <Compile Include="Changes.fs" />
+    <Compile Include="Staging.fs" />
     <Compile Include="Mutation.fs" />
     <Compile Include="Watch.fs" />
     <Compile Include="Commands/InfoCommand.fs" />

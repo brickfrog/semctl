@@ -29,7 +29,8 @@ type Args =
             | Save -> Mutation.Usage.save
             | Save_To _ -> Mutation.Usage.saveTo
             | Force ->
-                "remove even what other DAX refers to, leaving those references broken; save even if the change "
+                "remove even what other DAX or a report next to the model refers to, leaving those references broken; "
+                + "save even if the change "
                 + "introduces new errors; with --save-to, overwrite a non-empty destination."
             | Stat -> Mutation.Usage.stat
             | Name_Only -> Mutation.Usage.nameOnly
@@ -55,4 +56,12 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             Force = opts.Force
         }
 
-        Mutation.run ctx "remove" opts model (fun db -> RemoveObject.remove db spec)
+        // Refused while a report next to the model uses what would go (unless --force). With
+        // --save-to the reports keep their model, so they don't stop a copy.
+        Mutation.runWith ctx "remove" opts model (fun source db ->
+            let check =
+                match opts.Target with
+                | Mutation.SaveTo _ -> fun _ -> []
+                | _ -> Staging.reportCheckFor source
+
+            RemoveObject.removeWith check db spec |> Result.map (fun effect -> effect, []))

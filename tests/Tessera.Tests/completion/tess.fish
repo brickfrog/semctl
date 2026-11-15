@@ -192,7 +192,7 @@ function __tess_options
             printf '%s\t%s\n' '--if-exists' 'skip objects that don\'t exist (with a note) instead of failing'
             printf '%s\t%s\n' '--save' 'write the change back to the model, in place (default: dry run, nothing written)'
             printf '%s\t%s\n' '--save-to' 'write the changed model here instead (format inferred like `convert`: *.bim, *.SemanticModel, otherwise a tmdl folder)'
-            printf '%s\t%s\n' '--force' 'remove even what other DAX refers to, leaving those references broken; save even if the change introduces new errors; with --save-to, overwrite a non-empty destination'
+            printf '%s\t%s\n' '--force' 'remove even what other DAX or a report next to the model refers to, leaving those references broken; save even if the change introduces new errors; with --save-to, overwrite a non-empty destination'
             printf '%s\t%s\n' '--stat' 'show one line per changed object instead of a full diff'
             printf '%s\t%s\n' '--name-only' 'show only the references of the changed objects'
             printf '%s\t%s\n' '--json' 'write machine-readable JSON to stdout'

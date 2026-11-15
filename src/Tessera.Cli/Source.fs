@@ -19,7 +19,11 @@ let access (ctx: Ctx) : Remote.Access = {
 
 /// Load a model from a path, or from a server for `xmla:<server>[;<database>]`.
 let load (ctx: Ctx) (model: string) : Result<ModelSource * Database, TessError> =
-    if XmlaAddress.isRemote model then
-        XmlaAddress.parse model |> Result.bind (Remote.loadModel (access ctx))
-    else
-        ModelIO.loadPath model
+    match ModelIO.Override.tryLoad model with
+    | Some loaded -> Ok loaded
+    | None ->
+
+        if XmlaAddress.isRemote model then
+            XmlaAddress.parse model |> Result.bind (Remote.loadModel (access ctx))
+        else
+            ModelIO.loadPath model

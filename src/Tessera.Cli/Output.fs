@@ -106,6 +106,7 @@ let tessErrorJson (e: TessError) =
         error.["source"] <- str source
         error.["line"] <- num line
         error.["column"] <- num column
+    | UsedByReport(_, usages) -> json.["error"].AsObject().["usages"] <- arr (usages |> List.map str)
     | _ -> ()
 
     json

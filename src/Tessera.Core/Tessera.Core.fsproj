@@ -49,6 +49,7 @@
     <Compile Include="BpaRuleEdit.fs" />
     <Compile Include="BpaFetch.fs" />
     <Compile Include="Report.fs" />
+    <Compile Include="ReportUsage.fs" />
     <Compile Include="Format.fs" />
     <Compile Include="QueryResult.fs" />
     <Compile Include="Deploy.fs" />

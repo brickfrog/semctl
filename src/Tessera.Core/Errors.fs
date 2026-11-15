@@ -108,6 +108,17 @@ type TessError =
     | RoleNotFound of role: string * existing: string list
     /// None of these roles (name, permission) may query data.
     | RoleCannotRead of roles: (string * string) list
+    /// Objects can't be removed: a PBIR report next to the model uses them (usages as
+    /// "<report>: page '<page>', visual <id> (<type>)  (n references)").
+    | UsedByReport of objects: string list * usages: string list
+    /// No connection profile of this name in the user config (with the names it has).
+    | ProfileNotFound of name: string * existing: string list
+    /// `@`-style model arguments and `tess connect` show/use need an active connection.
+    | NoActiveConnection of reason: string
+    /// The user config file (profiles) or a session state file can't be read or written.
+    | InvalidConfig of path: string * reason: string
+    /// `tess interactive` ended unattended with staged edits that were never saved.
+    | UnsavedChanges of count: int
 
 module TessError =
 
@@ -176,6 +187,11 @@ module TessError =
         | NoTestSuites _ -> "no-test-suites"
         | RoleNotFound _ -> "role-not-found"
         | RoleCannotRead _ -> "role-cannot-read"
+        | UsedByReport _ -> "used-by-report"
+        | ProfileNotFound _ -> "profile-not-found"
+        | NoActiveConnection _ -> "no-active-connection"
+        | InvalidConfig _ -> "invalid-config"
+        | UnsavedChanges _ -> "unsaved-changes"
 
     let rec message =
         function
@@ -330,6 +346,28 @@ module TessError =
                 |> String.concat ", "
 
             $"Members of {list} can't query data: a role needs the Read, ReadRefresh or Administrator permission"
+        | UsedByReport(objects, usages) ->
+            let list = usages |> List.map (fun u -> $"  {u}") |> String.concat "\n"
+            let it = if objects.Length = 1 then "it" else "them"
+            let names = String.concat ", " objects
+
+            $"Can't remove {names}: a report uses {it}:\n{list}\n"
+            + $"Change those visuals first, or use --force to remove {it} anyway and leave them broken."
+        | ProfileNotFound(name, existing) ->
+            match existing with
+            | [] -> $"No profile '{name}': there are no profiles yet (`tess profile set {name} ...` makes one)"
+            | names -> $"No profile '{name}'; there are: " + String.concat ", " names
+        | NoActiveConnection reason -> $"No active connection: {reason}"
+        | InvalidConfig(path, reason) -> $"Can't use {path}: {reason}"
+        | UnsavedChanges count ->
+            let changes =
+                if count = 1 then
+                    "1 unsaved change"
+                else
+                    $"{count} unsaved changes"
+
+            $"The session ended with {changes}, which were not saved. End the input with `save` "
+            + "(or `exit --force` to discard them on purpose)."
 
     /// Close matches for what wasn't found ("did you mean"), for the JSON error's `suggestions`.
     let rec suggestions =
