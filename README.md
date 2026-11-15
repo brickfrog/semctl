@@ -91,6 +91,7 @@ tess test init ./MyReport.pbip --data ./fixtures  # a test suite to fill in: one
 tess test run ./MyReport.pbip --ci github         # run .tess-tests/*.test.yaml offline, over the fixture data
 tess validate ./MyReport.pbip --watch            # again on every save, until Ctrl+C (also lint, bpa, test run)
 tess completion bash > ~/.local/share/bash-completion/completions/tess   # shell completion (zsh, fish, pwsh too)
+tess vertipaq ./MyReport.pbip --data ./fixtures --columns --top 10   # VertiPaq statistics; sizes estimated offline
 ```
 
 ### Accepted model paths
@@ -1209,6 +1210,13 @@ As in TE, a `BestPracticeAnalyzer_IgnoreRules` annotation holds `{"RuleIDs": ["R
 TE's older spelling, `BestPractizeAnalyzer_IgnoreRules`, is read too. TOM calculation items have no
 annotations, so ignore their findings on the model. `tess bpa rules ignore` writes these annotations.
 
+#### VertiPaq statistics (`--vpax`)
+
+Rules that read VertiPaq Analyzer statistics (`GetAnnotation("Vertipaq_RowCount")` and the rest of that family)
+find nothing on a model without them. `--vpax <file.vpax>` puts a file's statistics on the model as those
+annotations for this run, in memory; `tess vertipaq ... --annotate --save` keeps them in the model. See
+[VertiPaq statistics](#vertipaq-statistics-vertipaq).
+
 #### Managing rules (`bpa rules`)
 
 ```sh
@@ -2043,14 +2051,12 @@ Where this differs from `te refresh`, and why:
 
 #### Not in tess yet
 
-`vertipaq`, sessions and profiles (`te connect` keeps an active connection; tess doesn't), interactive
+Sessions and profiles (`te connect` keeps an active connection; tess doesn't), interactive
 browser sign-in, and certificate and managed-identity sign-in.
 
 What each needs, for whoever picks it up:
 - **Refresh overrides:** `Refresh.Request` (Core) would carry the TMSL `overrides` array; the builder writes it
   after `objects`. `IXmlaSession.ExecuteTraced` is the trace seam, if something else needs server events.
-- **`vertipaq`:** DMV queries (`$SYSTEM.DISCOVER_STORAGE_TABLE_COLUMNS` and friends). `IXmlaSession.Query` runs
-  them as it stands; Dax.Model.Extractor would instead need the raw connection, which the seam deliberately hides.
 - **Sessions and profiles:** somewhere to keep an address and auth mode (never a secret) per shell, and a decision
   on where; then `Source.load` reads it when no model is given.
 - **Interactive sign-in:** needs the MSAL broker the single-file builds leave out (see `Tessera.Cli.fsproj`).
@@ -3246,6 +3252,145 @@ and the exit codes are those of `run`; a test either side's local engine refuses
 - Not there: `te test spec` and the JSON Schema for editors, and `test use`.
 - The suite format was matched to te's published reference, not to its binary: `matrix` (both shapes are accepted
   here) and `compare` (read and ignored) are the parts that reference doesn't spell out.
+
+### VertiPaq statistics (`vertipaq`)
+
+`tess vertipaq` shows what VertiPaq Analyzer shows: for each table, column, relationship, user hierarchy and
+partition, its rows, distinct values (cardinality) and size in VertiPaq's storage, and the rows that break
+referential integrity. The statistics come from one of three places:
+
+```sh
+tess vertipaq ./Sales.pbip --data ./fixtures                  # offline: model files + fixture data
+tess vertipaq "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales"   # a model on a server
+tess vertipaq --import stats.vpax                             # a VertiPaq Analyzer file (DAX Studio, Bravo, TE3)
+
+tess vertipaq ./Sales.pbip --data ./fixtures --columns --top 10     # the 10 largest columns
+tess vertipaq ./Sales.pbip --data ./fixtures Sales Customer --all   # every view, for two tables
+tess vertipaq "xmla:...;Sales" --export stats.vpax                  # write a .vpax for DAX Studio
+tess vertipaq --import stats.vpax --export shared.vpax --obfuscate  # obfuscate a file before sharing it
+tess vertipaq ./Sales.pbip --import stats.vpax --annotate --save    # stats as annotations, for BPA rules
+tess bpa ./Sales.pbip --vpax stats.vpax                             # ... or for one BPA run, in memory
+```
+
+**Views.** The default is the table view; `--columns`, `--relationships`, `--partitions` and `--hierarchies`
+choose others (several at once is fine), `--all` shows them all. Each view lists the largest objects first
+(unknown sizes last) and `--top N` keeps the first N. Table names after the model show only those tables (a
+relationship stays if either end is one of them); a name that isn't a table is an error with suggestions. `te
+vertipaq` shows columns by default; tess follows VertiPaq Analyzer, which opens on tables. `te`'s `--detail`,
+`--fields` and `--stats` aren't there: `--json` has every field.
+
+**Unknown is never 0.** A statistic tess couldn't read is `?` in text and left out of JSON, and so is every total
+that needs it (a table's size, then the model's). stderr says why, once per cause.
+
+#### From fixture data (`--data`)
+
+The rows, cardinalities, missing keys and invalid rows are **exact**: counted in the fixture's rows (the same
+fixture `query --data` uses, see [Fixture data](#fixture-data-data)). A fixture with errors is refused (exit 3), as
+for `preview`: its invalid values would be counted as BLANK. Data columns are counted in the fixture itself;
+calculated columns, calculated tables and calculation groups are computed by the [local
+engine](#the-local-dax-engine-query---data), with VertiPaq Analyzer's own DAX (`DISTINCTCOUNT`, and `COUNTROWS (
+ALLNOBLANKROW ( ... ) )` for a field parameter's column). Where the engine refuses, that column's statistics are
+unknown, with a warning. Nothing leaves the machine.
+
+- **Cardinality:** distinct values, BLANK counting as one, text compared as the model's collation compares it.
+- **Missing keys / invalid rows:** the many side's distinct keys, and its rows, that have no match on the one
+  side: the rows DAX puts on the one side's blank row. A BLANK key is a violation unless the one side has a BLANK
+  key too. Inactive relationships are checked like active ones.
+- **Partitions:** a table has one fixture file, so a table with one partition gives it the table's rows and data;
+  with several, the partitions are listed without statistics (a warning names those tables). Segments are
+  unknown: how many there are depends on the server.
+
+**Sizes are estimates** (`"estimated": true` in JSON, `(sizes estimated)` in text). The real sizes depend on how
+VertiPaq sorts, encodes and compresses each segment, which only a refresh decides, so tess models the
+uncompressed layout, assuming hash encoding everywhere:
+
+| Structure | Estimate |
+|---|---|
+| column data | ceil(rows x b / 8) bytes, b = ceil(log2(cardinality)), at least 1 bit |
+| dictionary | 16 bytes per distinct value, plus 2 bytes per character of the distinct text values |
+| attribute hierarchy | 8 bytes per distinct value; 0 for a column with `IsAvailableInMDX` false |
+| user hierarchy | 8 bytes per distinct combination of each level with the levels above it |
+| relationship | ceil(From cardinality x ceil(log2(To cardinality)) / 8) bytes, charged to the From table |
+
+Use them to compare a model's tables and columns with each other (a long text key, a high-cardinality date-time),
+not with a server's numbers. The encoding VertiPaq chose (HASH or VALUE) is only known from a server; offline the
+column view shows the model's `EncodingHint` when it isn't `Default`.
+
+#### From a server
+
+For an `xmla:` model, tess reads the model, then runs the read-only storage DMVs and DAX queries VertiPaq Analyzer
+runs (SQLBI's Dax.Model.Extractor), over the same connection, against that database only, and closes it. These are
+all the queries it sends (the DAX ones in batches of 50 tables or columns, and 10 relationships):
+
+| Query | For |
+|---|---|
+| `SELECT DIMENSION_NAME, TABLE_ID, ROWS_COUNT FROM $SYSTEM.DISCOVER_STORAGE_TABLES WHERE RIGHT ( LEFT ( TABLE_ID, 2 ), 1 ) <> '$'` | rows, and the tables' storage ids |
+| `SELECT DIMENSION_NAME, COLUMN_ID, ATTRIBUTE_NAME, DICTIONARY_SIZE, COLUMN_ENCODING FROM $SYSTEM.DISCOVER_STORAGE_TABLE_COLUMNS WHERE COLUMN_TYPE = 'BASIC_DATA'` | dictionaries, encodings, column ids |
+| `SELECT DIMENSION_NAME, TABLE_ID, ROWS_COUNT - 3 FROM $SYSTEM.DISCOVER_STORAGE_TABLES WHERE LEFT ( TABLE_ID, 2 ) = 'H$'` | cardinality, where DAX doesn't give it |
+| `SELECT DIMENSION_NAME, PARTITION_NAME, COLUMN_ID, SEGMENT_NUMBER, RECORDS_COUNT, USED_SIZE FROM $SYSTEM.DISCOVER_STORAGE_TABLE_COLUMN_SEGMENTS WHERE RIGHT ( LEFT ( TABLE_ID, 2 ), 1 ) <> '$'` | column data, by partition and segment |
+| `... DISCOVER_STORAGE_TABLE_COLUMN_SEGMENTS WHERE LEFT ( TABLE_ID, 2 ) = 'H$'` / `'U$'` / `'R$'` | attribute hierarchies, user hierarchies, relationships |
+| `SELECT [ID], [Name] FROM $SYSTEM.TMSCHEMA_HIERARCHIES` and `SELECT [ID], [FromTableID], [FromColumnID], [ToTableID], [ToColumnID] FROM $SYSTEM.TMSCHEMA_RELATIONSHIPS` | matching storage ids to names |
+| `EVALUATE UNION ( ROW ( "Table", "0000Sales", "Cardinality", COUNTROWS ( 'Sales' ) ), ... )` | exact rows |
+| `EVALUATE UNION ( ROW ( "Table", ..., "Column", ..., "Cardinality", DISTINCTCOUNT ( 'Sales'[Key] ) ), ... )` | exact cardinality |
+| `CALCULATETABLE ( ROW ( "RelationshipId", 1, "MissingKeys", DISTINCTCOUNT ( 'Sales'[Key] ), "InvalidRows", COUNTROWS ( 'Sales' ) ), ISBLANK ( 'Product'[Key] ), USERELATIONSHIP ( 'Sales'[Key], 'Product'[Key] ) )` | missing keys and invalid rows |
+
+The full texts are in `src/Tessera.Xmla/VertipaqServer.fs`. Tables in DirectQuery, Dual or Direct Lake mode get
+no DAX queries (they would query the source, or page columns into memory): their statistics come from the DMVs
+only, and a warning names them. A query that fails (a DMV the server doesn't have, a user without the permission
+to run it) leaves its statistics unknown, with a warning, and the rest is read: Tabular Editor 3's "fall back to
+metadata-only statistics". Nothing else is sent, and nothing is written to the server. **Like the rest of
+connected mode, this has been tested against a fake server only.**
+
+#### `.vpax` files (`--import`, `--export`, `--obfuscate`)
+
+A `.vpax` is a zip of `DaxModel.json` (the statistics and the model's metadata), `DaxVpaView.json`, `Model.bim`
+and `CompatabilityMode.txt` (sic). tess reads and writes them with SQLBI's own libraries (Dax.Vpax, MIT), so DAX
+Studio, Bravo and Tabular Editor 3 open what tess writes and tess reads what they write. The tests check an
+exported file with Dax.ViewModel, the view model DAX Studio's VertiPaq Analyzer pane is built on; DAX Studio itself
+has not been run on one.
+
+- `--import <file>` reads one. It needs no model: `tess vertipaq --import stats.vpax`. With a model first
+  (`tess vertipaq ./Sales.pbip --import stats.vpax`), the model is what `--annotate` writes to. A file made
+  without reading statistics from data says so, and its missing keys and invalid rows are unknown.
+- `--export <file>` writes one, from any source; `--import a.vpax --export b.vpax` copies the file's own
+  statistics unchanged. An existing file is replaced only with `--force` (exit 4). The file says which tool made
+  it; a file tess made from fixture data is marked as an estimate, and reads back as one. The format has no
+  "unknown": tess writes 0 (what VertiPaq Analyzer writes for a statistic it didn't read) and says which ones on
+  stderr. A column's data with no known partition goes in the table's first partition.
+- `--obfuscate` (with `--export`) obfuscates the names and expressions with SQLBI's Dax.Vpax.Obfuscator, as Bravo
+  does, and writes only `DaxModel.json` (no `Model.bim`, which would carry the real names). Names that are
+  reserved in DAX (a table called `Date` or `Currency`) can't be changed and stay readable; stderr lists them. The
+  dictionary that maps the obfuscated names back is written next to the file as `<name>.dict` (replaced only with
+  `--force`): it holds the real names, so keep it, and don't send it with the file. `--dictionary <old.dict>`
+  extends an earlier dictionary, so the same names obfuscate the same way in a new file.
+
+#### Annotations (`--annotate`)
+
+`--annotate` writes the statistics into the model as annotations, through the same dry run / `--save` /
+`--save-to` as every [editing command](#editing-commands), so Best Practice rules that read them work offline. The
+names are those of Michael Kovalsky's VertiPaq Analyzer scripts for Tabular Editor, which the rules in
+[microsoft/Analysis-Services](https://github.com/microsoft/Analysis-Services/tree/master/BestPracticeRules) read
+(`Convert.ToInt64(GetAnnotation("Vertipaq_Cardinality")) > 100000`):
+
+| On | Annotations |
+|---|---|
+| the model | `Vertipaq_ModelSize`; tess's own `Tessera_Vertipaq_Estimated` = `true` when the sizes are estimates |
+| a table | `Vertipaq_RowCount`, `Vertipaq_TableSize`, `Vertipaq_TableSizePctOfModel` |
+| a column | `Vertipaq_Cardinality`, `Vertipaq_ColumnSize`, `Vertipaq_DataSize`, `Vertipaq_DictionarySize`, `Vertipaq_ColumnHierarchySize`, `Vertipaq_ColumnSizePctOfTable`, `Vertipaq_ColumnSizePctOfModel` |
+| a relationship | `Vertipaq_MaxFromCardinality`, `Vertipaq_MaxToCardinality`, `Vertipaq_RelationshipSize`, `Vertipaq_RIViolationInvalidRows` |
+| a user hierarchy | `Vertipaq_UserHierarchySize` |
+| a partition | `Vertipaq_RecordCount`, `Vertipaq_SegmentCount`, `Vertipaq_RecordsPerSegment` |
+
+Values are integers, and fractions rounded to 3 decimals (`0.125`), in the invariant culture. Only known values
+are written; an annotation of the family whose value is now unknown is removed, so the model never mixes two
+runs. Running it again with the same statistics changes nothing. Relationships are matched by their columns, not
+their names (a model's files and its server copy name them differently). With table names, only those tables'
+objects (and their relationships) are annotated, and the model's own annotations are left alone. `te`'s `--push`
+(annotating the model on the server) isn't there: `--save` is refused for a server model, as for every edit, so
+`--save-to` files and `tess deploy` them.
+
+`tess bpa <model> --vpax <file>` puts a `.vpax`'s statistics on the model the same way, in memory, for that run
+only: the model's files aren't changed. It can't be combined with `--fix`, which would save them.
 
 ### Findings JSON and CI annotations
 

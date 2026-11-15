@@ -22,7 +22,7 @@ let summary =
 type Args =
     | [<MainCommand>] Target of model_and_tables: string list
     | Data of directory: string
-    | Import of vpax: string
+    | Import of file: string
     | Tables
     | Columns
     | Relationships
@@ -30,7 +30,7 @@ type Args =
     | Hierarchies
     | All
     | Top of n: int
-    | Export of vpax: string
+    | Export of file: string
     | Obfuscate
     | Dictionary of path: string
     | Annotate

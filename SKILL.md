@@ -38,8 +38,8 @@ option; the README has the details.
 - **No network.** tess makes no network call unless the command names a server: an `xmla:<server>;<database>`
   model argument (any command), `connect`, the server `deploy` compares with and deploys to (even on a dry run),
   or `bpa --allow-external-rules` with a rule URL. There's no telemetry and no update check. `format` formats
-  locally and never calls daxformatter.com. A `query`, `preview` or `test run` with `--data` stays on the
-  machine.
+  locally and never calls daxformatter.com. A `query`, `preview`, `test run` or `vertipaq` with `--data` stays
+  on the machine, and so does `vertipaq --import`.
 - **Credentials come from the environment** (`TESS_XMLA_TOKEN`, `TESS_XMLA_CLIENT_ID` / `_TENANT_ID` /
   `_CLIENT_SECRET`, ...), never from the command line: a secret in an argument is refused. tess never prints a
   secret.
@@ -80,6 +80,20 @@ tess test run ./Sales.pbip --data ./fixture --json    # run the suites offline (
 
 The engine never returns a wrong answer: anything it doesn't implement exactly is an error with the code
 `not-supported`, naming what it refused. Treat that as "unknown", not as a failure of the model.
+
+VertiPaq statistics (rows, cardinality, sizes, referential-integrity violations), as VertiPaq Analyzer shows them:
+
+```sh
+tess vertipaq ./Sales.pbip --data ./fixture --all --json      # offline: counts exact, sizes estimated
+tess vertipaq --import stats.vpax --columns --top 20 --json   # a .vpax from DAX Studio, Bravo or Tabular Editor 3
+tess vertipaq ./Sales.pbip --import stats.vpax --annotate --save   # Vertipaq_* annotations, for BPA rules
+tess bpa ./Sales.pbip --vpax stats.vpax --json                # the same statistics, in memory only
+tess vertipaq ./Sales.pbip --data ./fixture --export out.vpax [--obfuscate]
+```
+
+A statistic tess couldn't read is left out of the JSON (never 0). `"estimated": true` means the sizes are
+estimates from fixture data, not VertiPaq's: compare them with each other, not with a server. `--obfuscate` writes
+`<name>.dict` next to the file; it holds the real names, so don't send it with the `.vpax`.
 
 ## Good habits
 
