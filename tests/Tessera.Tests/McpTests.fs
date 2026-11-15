@@ -515,6 +515,32 @@ let tests =
                 Expect.equal ((ok s 3).GetProperty("formatted").GetString()) "SUM ( Sales[Amount] )" ""
                 Expect.equal ((ok s 4).GetProperty("ref").GetString()) "measure:Sales/Total" ""
 
+            testCase "validate_model runs the syntax-tree rules too, as `tess validate` does"
+            <| fun () ->
+                use t = project ()
+                let model = Path.Combine(t.Path, "Sales.SemanticModel")
+
+                let add =
+                    CliHarness.tess [
+                        "add"
+                        model
+                        "measure:Sales/Bad"
+                        "--expression"
+                        "COUNTROWS ( { IGNORE ( 1 ) } )"
+                        "--save"
+                        "--force"
+                    ]
+
+                Expect.equal add.Code 0 add.Err
+
+                let s = serve [ t.Path ] [ callTool 1 "validate_model" noArgs ]
+
+                let codes = [
+                    for f in (ok s 1).GetProperty("findings").EnumerateArray() -> f.GetProperty("code").GetString()
+                ]
+
+                Expect.contains codes "ignore-outside-summarizecolumns" ""
+
             testCase "bpa: rules and findings; never a URL"
             <| fun () ->
                 use t = project ()
