@@ -1,0 +1,1 @@
+CALCULATE(SUM([Test]),FILTER('New Calculated Table',[Test]="1"),FILTER('New Calculated Table',[Test]="2"))

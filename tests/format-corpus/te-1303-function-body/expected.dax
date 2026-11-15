@@ -1,0 +1,10 @@
+( baseMeasure: ANYREF ) =>
+    VAR ValueCurrentPeriod = Model.TimeIntel.CY ( baseMeasure )
+    VAR ValuePreviousPeriod = Model.TimeIntel.PY ( baseMeasure )
+    VAR Result =
+        IF (
+            NOT ISBLANK ( ValueCurrentPeriod ) && NOT ISBLANK ( ValuePreviousPeriod ),
+            ValueCurrentPeriod - ValuePreviousPeriod
+        )
+    RETURN
+        Result

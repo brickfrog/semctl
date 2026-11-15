@@ -1,0 +1,5 @@
+{
+  "source": "https://www.sqlbi.com/articles/rules-for-dax-code-formatting/ (\"If an expression has to be split in more rows, the operator is the first character in a new line\"; \"A function call in an expression splitted in more rows has to be always in a new row, preceded by an operator\"); derived by hand at width 75",
+  "options": { "width": 75 },
+  "expect": "same"
+}

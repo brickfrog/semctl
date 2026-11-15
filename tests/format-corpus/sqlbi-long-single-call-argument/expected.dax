@@ -1,0 +1,3 @@
+COUNTROWS (
+    VALUES ( Product[Name] )
+)

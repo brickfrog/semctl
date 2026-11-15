@@ -1027,6 +1027,38 @@ let private layout (opts: FormatOptions) (nl: string) (tree: Tree) (tail: Commen
         | Juxt ns -> List.exists hasCall ns
         | VarBlock _ -> true
 
+    /// --long: "Always put arguments on a new line if the function call has 2 or more arguments",
+    /// and "Write a function inline only if it has a single argument that is not a function call".
+    let isStrict (g: Group) =
+        g.Items.Length > 1
+        || g.Items
+           |> List.exists (fun it ->
+               match it.Arg with
+               | Some(Call _) -> true
+               | _ -> false)
+
+    /// A call --long writes on several lines, anywhere in the node: the node can't be on one line.
+    let rec hasStrictCall (n: Node) =
+        match n with
+        | Call(_, g) ->
+            isStrict g
+            || g.Items |> List.exists (fun it -> it.Arg |> Option.exists hasStrictCall)
+        | Atom _ -> false
+        | Paren g -> g.Items |> List.exists (fun it -> it.Arg |> Option.exists hasStrictCall)
+        | Unary(_, x) -> hasStrictCall x
+        | Chain(f, rest) -> hasStrictCall f || rest |> List.exists (snd >> hasStrictCall)
+        | Juxt ns -> List.exists hasStrictCall ns
+        | VarBlock _ -> false
+
+    // `CALCULATE ( 4 )`, `CALCULATE ( 4 ) * 2`, but not `42 + CALCULATE ( 4 )`.
+    let rec startsWithCall (n: Node) =
+        match n with
+        | Call _ -> true
+        | Unary(_, x) -> startsWithCall x
+        | Chain(f, _) -> startsWithCall f
+        | Juxt(p :: _) -> startsWithCall p
+        | _ -> false
+
     let rec flat (o: Out) (indent: int) (n: Node) =
         match n with
         | Atom ts -> glued o indent ts
@@ -1097,7 +1129,12 @@ let private layout (opts: FormatOptions) (nl: string) (tree: Tree) (tail: Commen
             if skipped then
                 noLeading.Remove first |> ignore
 
-            let w = if scratch.Broken then None else Some scratch.Col
+            let w =
+                if scratch.Broken || (opts.Long && hasStrictCall n) then
+                    None
+                else
+                    Some scratch.Col
+
             flatWidths.[box n] <- w
             w
 
@@ -1120,16 +1157,7 @@ let private layout (opts: FormatOptions) (nl: string) (tree: Tree) (tail: Commen
         match n with
         | VarBlock(defs, ret, body) -> renderVars o c defs ret body extra
         | Call(name, g) ->
-            let strict =
-                opts.Long
-                && (g.Items.Length > 1
-                    || g.Items
-                       |> List.exists (fun it ->
-                           match it.Arg with
-                           | Some(Call _) -> true
-                           | _ -> false))
-
-            if not strict && fits () then
+            if fits () then
                 flat o indent n
             else
                 tok o c false name
@@ -1170,7 +1198,11 @@ let private layout (opts: FormatOptions) (nl: string) (tree: Tree) (tail: Commen
                 // Operators start the continuation lines, indented one step from the line the chain
                 // starts on, except right after a closing bracket on a line of its own
                 // (`) / 'Rate'[Rate]`). Arithmetic and `&` pack operands onto a line while they
-                // fit; an operand with a function call in it always starts a line.
+                // fit; an operand with a function call in it always starts a line, and after a
+                // closing bracket so does an operand that starts with one: "A function call in an
+                // expression splitted in more rows has to be always in a new row, preceded by an
+                // operator" (SQLBI's rules, whose example has `) > 42 + ...` but then puts
+                // `- CALCULATE ( 4 )` on a new row after a multi-line CALCULATE).
                 let cont = (if startsLine then indent else o.LineIndent) + 4
                 let fill = rest |> List.forall (fun (op, _) -> level op >= 6)
                 render o c first 0
@@ -1189,7 +1221,7 @@ let private layout (opts: FormatOptions) (nl: string) (tree: Tree) (tail: Commen
                             | Some w -> o.Col + 1 + opWidth + 1 + w + tailWidth <= width
                             | None -> false)
 
-                    if not o.Pending && (closesLine o || packs ()) then
+                    if not o.Pending && ((closesLine o && not (startsWithCall x)) || packs ()) then
                         o.Space()
                     else
                         o.Newline cont
@@ -1505,6 +1537,18 @@ let private targetKey (r: Deps.Reference) =
     | Deps.Resolved t -> "R:" + ObjectRef.format t
     | Deps.Unresolved text -> "U:" + String(text |> Seq.filter (Char.IsWhiteSpace >> not) |> Array.ofSeq)
 
+/// An expression in a model that starts on the line after its definition (`Measure :=` then a
+/// line break, as SQLBI's rules write a definition "in the row before") keeps starting there:
+/// one line break before the formatted DAX, where the source has a line break before its first
+/// token or comment.
+let private startsBelow (source: string) (formatted: string) =
+    let lead = source.Length - source.TrimStart([| ' '; '\t'; '\r'; '\n' |]).Length
+
+    if source.Substring(0, lead).Contains '\n' && formatted <> "" then
+        (if source.Contains "\r\n" then "\r\n" else "\n") + formatted
+    else
+        formatted
+
 /// Format the selected DAX expressions of a model, without changing it. Each result is checked
 /// twice: by tokens (as `format` does) and by what its references resolve to.
 let formatModel (opts: FormatOptions) (db: Database) (sel: Selection) : Result<ModelFormat, TessError> =
@@ -1561,6 +1605,7 @@ let formatModel (opts: FormatOptions) (db: Database) (sel: Selection) : Result<M
             |> List.map (fun src ->
                 let result =
                     formatWith names opts src.Dax
+                    |> Result.map (startsBelow src.Dax)
                     |> Result.bind (fun after ->
                         if after = src.Dax || targets src = targets { src with Dax = after } then
                             Ok after

@@ -1,0 +1,1 @@
+[Sales Amount]-calculate([Sales Amount],sameperiodlastyear('Date'[Date]))

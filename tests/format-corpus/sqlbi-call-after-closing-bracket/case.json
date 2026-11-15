@@ -1,0 +1,5 @@
+{
+  "source": "https://www.sqlbi.com/articles/rules-for-dax-code-formatting/ (a function call in a split expression is in a new row, preceded by an operator, as `- CALCULATE ( 4 )` in the article's example; arguments indented 4 from the beginning of the call; the closing parenthesis aligned with it); derived by hand",
+  "options": { "long": true },
+  "expect": "same"
+}
