@@ -1471,6 +1471,7 @@ Findings can't be suppressed on individual objects yet.
 tess format --expr "calculate(sum(Sales[Amount]),all('Date'))"   # loose DAX, to stdout
 tess format - < measure.dax                                     # stdin
 tess format query.dax --json                                    # {success, formatted, errors}
+tess format query.dax --save                                    # format the file in place
 tess format ./Sales.pbip                                        # every DAX expression in a model (a dry run)
 tess format ./Sales.pbip "[Revenue]" -t Date --save             # some of them, and save
 tess format ./Sales.pbip --check                                # CI: exit 1 if anything isn't formatted
@@ -1516,7 +1517,8 @@ The style:
 - **Operators** are spaced. A chain of operators that doesn't fit is split before an operator, and continues
   one indent in. Arithmetic and `&` keep as many operands on a line as fit, but an operand containing a function
   call starts a line of its own. `&&`, `||` and comparisons put each operand on a line. After a multi-line
-  operand, the next operator follows its closing bracket: `) / 'Budget Rate'[Rate]`.
+  operand, the next operator follows its closing bracket: `) / 'Budget Rate'[Rate]`, unless the operand after it
+  starts with a function call, which starts a row of its own, as in SQLBI's example (`- CALCULATE ( 4 )`).
 - **VAR/RETURN:** a `VAR`'s value stays on the `VAR` line if it fits, otherwise it goes on the next line,
   indented. `RETURN` is on a line of its own, with its expression indented below it.
 - **Queries:** `DEFINE`, `EVALUATE`, `ORDER BY` and `START AT` start lines. Definitions are indented under
@@ -1531,12 +1533,16 @@ The style:
   unquoted, `'Sales'[x]` stays quoted), and comments. A comment on a token's line stays on that line, and a
   comment on a line of its own stays on a line of its own. A comment after an argument moves past its comma.
   One blank line is kept where the source had blank lines between `VAR`s, definitions and comments.
+- **A model expression that starts on the next line** (a line break before its first token, as Power BI and
+  Tabular Editor often store measures) keeps one line break there, as SQLBI's rules put the definition "in the row
+  before" and as Tabular Editor does
+  ([TabularEditor#638](https://github.com/TabularEditor/TabularEditor/issues/638)).
 - Line endings follow the input (CRLF in, CRLF out).
 
 Options:
 - `--width N`: the line width to fit (default 100; the article doesn't give one).
 - `--long`: SQLBI's strict rule. A call with two or more arguments, or whose only argument is a function call,
-  always has its arguments on separate lines, even when it would fit.
+  always has its arguments on separate lines, even when it would fit, inside an operator chain or a `VAR` too.
 - `--no-space-after-function`: `SUM( x )` rather than `SUM ( x )`.
 - `--semicolons` (loose DAX only): the input separates arguments with `;` and writes decimals with `,`
   (`IF ( [a] > 1,5; 2; 3 )`). The output keeps that dialect. Without the option, a `;` is an error, so
@@ -1565,6 +1571,10 @@ Output and exit codes:
   `te util format-dax`. Each error has `line`, `column` (1-based) and `message`. DAX that can't be read
   (unbalanced brackets, an unterminated string, an operator without an operand, `VAR` without `RETURN`, ...) exits
   3 with its errors on stderr, nothing on stdout, and the input file left alone.
+- A DAX file with `--save`: the formatted DAX is written back to the file (keeping its line endings and any UTF-8
+  byte order mark), and a line on stderr says so. Nothing is written if the file is formatted already or can't be
+  read. `--json` adds `"saved": {"path"}` when it wrote. `--save` with `-` or `--expr`, or with `--check`, is a usage
+  error; `--save-to`, `--force`, `--stat` and `--name-only` are for models.
 - A model is an [editing command](#editing-commands): a dry run unless `--save` or `--save-to`, the change shown
   as a diff (`--stat`, `--name-only`, `--json` as usual). Expressions that can't be read are left as they are,
   with a warning each.
@@ -1572,6 +1582,10 @@ Output and exit codes:
   For a model it lists the expressions that would change, one `<ref> <property>` per line. With `--json` it
   writes `{"check": true, "expressions", "unformatted": [{ref, kind, property}], "failed", "warnings"}`. For loose
   DAX, `--json` adds `"changed"`.
+
+Regression corpus: [tests/format-corpus](tests/format-corpus) holds cases from public formatter bug reports
+(Tabular Editor, DAX Studio, DAX Formatter) and from SQLBI's rules, each citing its source, including the known
+differences from the rules (quotes around table names, the article's hand-broken example).
 
 Not done: the formatter doesn't rewrite code. It doesn't qualify column references or remove table names from
 measure references, as SQLBI's rules also ask; `lint` does those. It doesn't add or remove quotes around table

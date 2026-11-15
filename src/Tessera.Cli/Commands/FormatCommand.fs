@@ -45,7 +45,7 @@ type Args =
             | Semicolons ->
                 "loose DAX only: the input separates arguments with ';' and writes decimals with ','; so does the output."
             | Check -> "change nothing; exit 1 if anything isn't formatted, and list it."
-            | Save -> Mutation.Usage.save
+            | Save -> Mutation.Usage.save + " For a DAX file: write the formatted DAX back to it."
             | Save_To _ -> Mutation.Usage.saveTo
             | Force -> Mutation.Usage.force
             | Stat -> Mutation.Usage.stat
@@ -81,43 +81,96 @@ let private exitOf =
     | Format.Syntax _ -> ExitCode.input
     | Format.Unsafe _ -> ExitCode.internalError
 
-/// Format loose DAX: print it (or with --check, say whether it's formatted).
-let private loose (ctx: Ctx) (opts: Format.FormatOptions) (check: bool) (name: string) (dax: string) =
+/// A DAX file's text, and whether it starts with a UTF-8 byte order mark (kept on --save).
+let private readDaxFile (path: string) : Result<string * bool, TessError> =
+    try
+        let bytes = File.ReadAllBytes path
+
+        let bom =
+            bytes.Length >= 3
+            && bytes.[0] = 0xEFuy
+            && bytes.[1] = 0xBBuy
+            && bytes.[2] = 0xBFuy
+
+        let offset = if bom then 3 else 0
+        Ok(Text.UTF8Encoding(false, true).GetString(bytes, offset, bytes.Length - offset), bom)
+    with
+    | :? FileNotFoundException
+    | :? DirectoryNotFoundException -> Error(PathNotFound(Path.GetFullPath path))
+    | e -> Error(LoadFailed(path, e.Message))
+
+/// --save on a DAX file: write the formatted DAX back, with the file's byte order mark (line
+/// endings follow the input already). Nothing is written if nothing changed.
+let private saveDax (path: string) (bom: bool) (formatted: string) : Result<unit, TessError> =
+    try
+        File.WriteAllText(path, formatted, Text.UTF8Encoding(bom))
+        Ok()
+    with e ->
+        Error(SaveFailed(path, e.Message))
+
+/// Format loose DAX: print it (or with --check, say whether it's formatted; with --save, write
+/// it back to its file).
+let private loose
+    (ctx: Ctx)
+    (opts: Format.FormatOptions)
+    (check: bool)
+    (save: (string * bool) option)
+    (name: string)
+    (dax: string)
+    =
     let result = Format.format opts dax
 
-    if ctx.Json then
-        let o =
-            match result with
-            | Ok formatted -> obj [ "success", bool true; "formatted", str formatted; "errors", arr [] ] :?> JsonObject
-            | Error e ->
-                obj [
-                    "success", bool false
-                    "formatted", null
-                    "errors", arr (errorsOf e |> List.map problemJson)
-                ]
-                :?> JsonObject
+    let saved =
+        match result, save with
+        | Ok formatted, Some(path, bom) when formatted <> dax ->
+            Some(saveDax path bom formatted |> Result.map (fun () -> path))
+        | _ -> None
 
-        if check then
-            o.["changed"] <-
+    match saved with
+    | Some(Error e) -> Failed e
+    | _ ->
+        if ctx.Json then
+            let o =
                 match result with
-                | Ok formatted -> bool (formatted <> dax)
-                | Error _ -> null
+                | Ok formatted ->
+                    obj [ "success", bool true; "formatted", str formatted; "errors", arr [] ] :?> JsonObject
+                | Error e ->
+                    obj [
+                        "success", bool false
+                        "formatted", null
+                        "errors", arr (errorsOf e |> List.map problemJson)
+                    ]
+                    :?> JsonObject
 
-        writeJson ctx.Out o
-    else
+            if check then
+                o.["changed"] <-
+                    match result with
+                    | Ok formatted -> bool (formatted <> dax)
+                    | Error _ -> null
+
+            match saved with
+            | Some(Ok path) -> o.["saved"] <- obj [ "path", str (Path.GetFullPath path) ]
+            | _ -> ()
+
+            writeJson ctx.Out o
+        else
+            match result with
+            | Ok formatted when check ->
+                if formatted <> dax then
+                    ctx.Err.WriteLine($"{name} is not formatted.")
+            | Ok _ when save.IsSome ->
+                match saved with
+                | Some _ -> ctx.Err.WriteLine($"Formatted {name}.")
+                | None -> ctx.Err.WriteLine($"{name} is formatted already; nothing to save.")
+            | Ok formatted -> ctx.Out.WriteLine(formatted)
+            | Error e ->
+                for p in errorsOf e do
+                    ctx.Err.WriteLine($"tess: {name}: line {p.Line}, column {p.Column}: {p.Message}")
+
         match result with
-        | Ok formatted when check ->
-            if formatted <> dax then
-                ctx.Err.WriteLine($"{name} is not formatted.")
-        | Ok formatted -> ctx.Out.WriteLine(formatted)
-        | Error e ->
-            for p in errorsOf e do
-                ctx.Err.WriteLine($"tess: {name}: line {p.Line}, column {p.Column}: {p.Message}")
-
-    match result with
-    | Error e -> DoneWith(exitOf e)
-    | Ok formatted when check && formatted <> dax -> DoneWith ExitCode.findings
-    | Ok _ -> Done
+        | Error e -> DoneWith(exitOf e)
+        | Ok formatted when check && formatted <> dax -> DoneWith ExitCode.findings
+        | Ok _ -> Done
 
 let private describe (o: Format.Outcome) =
     $"{ObjectRef.format o.Source.Owner.Ref} {o.Source.Property}"
@@ -200,6 +253,15 @@ let private effect (result: Format.ModelFormat) : Tessera.Mutation.Effect =
             Warnings = warnings result
     }
 
+/// --save is the only editing switch given (the one loose DAX in a file also takes).
+let private savesOnly (args: ParseResults<Args>) =
+    not (
+        args.Contains Args.Save_To
+        || args.Contains Args.Force
+        || args.Contains Args.Stat
+        || args.Contains Args.Name_Only
+    )
+
 let run (ctx: Ctx) (args: ParseResults<Args>) =
     let targets = args.GetResult(Args.Targets, defaultValue = [])
     let expr = args.TryGetResult Args.Expr
@@ -222,7 +284,15 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
         ]
         |> List.exists id
 
-    let modelOnly = args.Contains Args.Kind || args.Contains Args.Table || editSwitches
+    let modelOnly =
+        args.Contains Args.Kind
+        || args.Contains Args.Table
+        || (editSwitches && not (args.Contains Args.Save && savesOnly args))
+
+    let daxFile =
+        match expr, targets with
+        | None, [ path ] when path <> "-" && isDaxFile path -> Some path
+        | _ -> None
 
     let isLoose =
         expr.IsSome
@@ -237,22 +307,30 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
     | _ :: _ when expr.IsSome -> UsageError "--expr formats the DAX it's given; it doesn't take a file or model"
     | [] when expr.IsNone -> UsageError "expected DAX to format: `-` (stdin), --expr \"<dax>\", a DAX file, or a model"
     | _ when isLoose && modelOnly ->
-        UsageError "-k, -t, --save, --save-to, --force, --stat and --name-only are for models, not loose DAX"
+        UsageError
+            "-k, -t, --save-to, --force, --stat and --name-only are for models, not loose DAX (--save also takes a DAX file)"
+    | _ when isLoose && args.Contains Args.Save && daxFile.IsNone ->
+        UsageError "--save writes a DAX file or a model back; stdin and --expr have nowhere to save to"
+    | _ when isLoose && args.Contains Args.Save && checking ->
+        UsageError "--check only reports; it doesn't combine with --save"
     | _ when isLoose ->
         let input =
             match expr, targets with
-            | Some dax, _ -> Ok("--expr", dax)
-            | None, [ "-" ] -> Ok("<stdin>", Console.In.ReadToEnd())
-            | None, path :: _ ->
-                try
-                    Ok(path, File.ReadAllText path)
-                with e ->
-                    Error(LoadFailed(path, e.Message))
+            | Some dax, _ -> Ok("--expr", dax, false)
+            | None, [ "-" ] -> Ok("<stdin>", Console.In.ReadToEnd(), false)
+            | None, path :: _ -> readDaxFile path |> Result.map (fun (dax, bom) -> path, dax, bom)
             | None, [] -> Error(PathNotFound "-")
 
         match input with
         | Error e -> Failed e
-        | Ok(name, dax) -> loose ctx opts checking name dax
+        | Ok(name, dax, bom) ->
+            let save =
+                if args.Contains Args.Save then
+                    daxFile |> Option.map (fun path -> path, bom)
+                else
+                    None
+
+            loose ctx opts checking save name dax
     | model :: selectors ->
         let selection =
             parseKindsWith (args.GetResults Args.Kind)
