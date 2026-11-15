@@ -127,6 +127,10 @@ type TessError =
     | PackageNotInstalled of packageId: string * installed: string list
     /// `pkg`: the model's package metadata (TabularEditor_ModelDaxPkgTable) can't be read.
     | InvalidPackageMetadata of reason: string
+    /// `csharp`: the script doesn't compile (diagnostics as "file(line,col): error CSxxxx: ...").
+    | CSharpCompileFailed of path: string * diagnostics: string list
+    /// `csharp`: the script threw, or called Error().
+    | CSharpScriptFailed of path: string * reason: string
 
 module TessError =
 
@@ -204,6 +208,8 @@ module TessError =
         | PackageConflict _ -> "package-conflict"
         | PackageNotInstalled _ -> "package-not-installed"
         | InvalidPackageMetadata _ -> "invalid-package-metadata"
+        | CSharpCompileFailed _ -> "script-compile-failed"
+        | CSharpScriptFailed _ -> "script-failed"
 
     let rec message =
         function
@@ -387,6 +393,11 @@ module TessError =
                 $"Package '{id}' is not installed in the model; it has: "
                 + String.concat ", " ids
         | InvalidPackageMetadata reason -> $"The model's DAX package metadata can't be read: {reason}"
+        | CSharpCompileFailed(path, diagnostics) ->
+            let n = diagnostics.Length
+            let errors = if n = 1 then "1 error" else $"{n} errors"
+            $"{path} doesn't compile ({errors}):\n" + String.concat "\n" diagnostics
+        | CSharpScriptFailed(path, reason) -> $"{path} failed: {reason}"
 
     /// Close matches for what wasn't found ("did you mean"), for the JSON error's `suggestions`.
     let rec suggestions =

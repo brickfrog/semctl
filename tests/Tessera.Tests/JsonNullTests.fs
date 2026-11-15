@@ -73,6 +73,8 @@ let tests =
             let data = t.Combine "data"
             let script = t.Combine "script.dax"
             File.WriteAllText(script, "MEASURE Sales[Scripted] = 1\n")
+            let csharp = t.Combine "s.csx"
+            File.WriteAllText(csharp, "Model.Tables[\"Sales\"].Measures[\"Total\"].Description = \"x\";\n")
 
             write
                 (t.Combine(".tess-tests", "s.test.yaml"))
@@ -146,6 +148,7 @@ let tests =
                 [ "pkg"; "show"; "TimeSeries.MovingAverage"; "--from"; pkgSource ]
                 [ "pkg"; "install"; model; "TimeSeries.MovingAverage"; "--from"; pkgSource ]
                 [ "pkg"; "update"; model; "--from"; pkgSource ]
+                [ "csharp"; model; csharp ]
             ]
 
             let failures = [

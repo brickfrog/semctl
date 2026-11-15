@@ -4,7 +4,7 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp pkg' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp pkg csharp' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
@@ -80,6 +80,7 @@ _tess_options() {
         'pkg install') _tess_r='--from --offline --prerelease --overwrite --skip-existing --ignore-dependencies --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'pkg update') _tess_r='--from --offline --prerelease --discard-changes --keep-changes --overwrite --skip-existing --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'pkg remove') _tess_r='--discard-changes --keep-changes --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'csharp') _tess_r='--save --save-to --force --stat --name-only --json -j --help -h' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -290,6 +291,7 @@ _tess_value() {
         'pkg update|--from') _tess_r='path' ;;
         'pkg update|--save-to') _tess_r='path' ;;
         'pkg remove|--save-to') _tess_r='path' ;;
+        'csharp|--save-to') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -394,6 +396,8 @@ _tess_positional() {
         'pkg update|'*) _tess_r='text' ;;
         'pkg remove|0') _tess_r='path' ;;
         'pkg remove|'*) _tess_r='text' ;;
+        'csharp|0') _tess_r='path' ;;
+        'csharp|1') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }

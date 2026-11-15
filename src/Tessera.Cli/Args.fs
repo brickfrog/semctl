@@ -37,6 +37,7 @@ type CliArgs =
     | [<CliPrefix(CliPrefix.None)>] Completion of ParseResults<CompletionCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Mcp of ParseResults<McpCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Pkg of ParseResults<PkgCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Csharp of ParseResults<CsharpCommand.Args>
     | [<Hidden; CliPrefix(CliPrefix.None); CustomCommandLine("__complete")>] Complete of
         ParseResults<CompletionCommand.CompleteArgs>
 
@@ -75,4 +76,5 @@ type CliArgs =
             | Completion _ -> CompletionCommand.summary
             | Mcp _ -> McpCommand.summary
             | Pkg _ -> PkgCommand.summary
+            | Csharp _ -> CsharpCommand.summary
             | Complete _ -> "candidates for the completion scripts."

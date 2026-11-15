@@ -35,6 +35,7 @@ function __tess_children
             printf '%s\t%s\n' 'completion' 'print a shell completion script for bash, zsh, fish or pwsh (see the README to install it)'
             printf '%s\t%s\n' 'mcp' 'serve a model to an AI agent: an MCP server over stdio (tools by --allow; changes in memory unless --save)'
             printf '%s\t%s\n' 'pkg' 'DAX function packages (daxlib.org): list, search, show, install, update, remove (dry run unless --save)'
+            printf '%s\t%s\n' 'csharp' 'run a C# script (.csx) against the model\'s TOM objects, then show its changes (dry run unless --save)'
         case 'bpa'
             printf '%s\t%s\n' 'rules' 'list, show, add or remove rules, and ignore rules on objects: `tess bpa rules --help`'
         case 'bpa rules'
@@ -772,6 +773,16 @@ function __tess_options
             printf '%s\t%s\n' '-j' 'write machine-readable JSON to stdout'
             printf '%s\t%s\n' '--help' 'display this list of options'
             printf '%s\t%s\n' '-h' 'display this list of options'
+        case 'csharp'
+            printf '%s\t%s\n' '--save' 'write the change back to the model, in place (default: dry run, nothing written)'
+            printf '%s\t%s\n' '--save-to' 'write the changed model here instead (format inferred like `convert`: *.bim, *.SemanticModel, otherwise a tmdl folder)'
+            printf '%s\t%s\n' '--force' 'save even if the change introduces new errors; with --save-to, overwrite a non-empty destination'
+            printf '%s\t%s\n' '--stat' 'show one line per changed object instead of a full diff'
+            printf '%s\t%s\n' '--name-only' 'show only the references of the changed objects'
+            printf '%s\t%s\n' '--json' 'write machine-readable JSON to stdout'
+            printf '%s\t%s\n' '-j' 'write machine-readable JSON to stdout'
+            printf '%s\t%s\n' '--help' 'display this list of options'
+            printf '%s\t%s\n' '-h' 'display this list of options'
     end
 end
 
@@ -1184,6 +1195,8 @@ function __tess_value
             echo 'path'
         case 'pkg remove|--save-to'
             echo 'path'
+        case 'csharp|--save-to'
+            echo 'path'
     end
 end
 
@@ -1349,6 +1362,10 @@ function __tess_positional
         case 'pkg update|0'
             echo 'path'
         case 'pkg remove|0'
+            echo 'path'
+        case 'csharp|0'
+            echo 'path'
+        case 'csharp|1'
             echo 'path'
         case 'remove|''*'
             echo 'dyn'

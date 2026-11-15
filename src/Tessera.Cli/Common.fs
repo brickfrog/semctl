@@ -91,6 +91,8 @@ module ExitCode =
         | PackageNotInstalled _
         | InvalidPackageMetadata _ -> input
         | PackageFetchFailed _ -> remote
+        | CSharpCompileFailed _
+        | CSharpScriptFailed _ -> input
 
 let version () =
     let asm = Assembly.GetExecutingAssembly()

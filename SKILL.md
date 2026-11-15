@@ -92,6 +92,12 @@ tess pkg update ./Sales.pbip --from daxlib --json                  # `daxlib` = 
 tess pkg remove ./Sales.pbip DaxLib.SVG --save                     # refused while DAX calls its functions
 ```
 
+C# scripts against the model's TOM (`Model`), shown as a diff like any edit; output goes to stderr:
+
+```sh
+tess csharp ./Sales.pbip fix.csx --json               # dry run; --save writes; a compile error names the script's line
+```
+
 ## Good habits
 
 - Run `validate` after an edit you saved, and `format --check` / `lint` before committing DAX.

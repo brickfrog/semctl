@@ -3327,6 +3327,50 @@ doesn't have). Error codes: `no-package-source` (exit 2), `package-not-found`, `
 `invalid-package`, `package-source-unreadable`, `package-conflict`, `package-not-installed`,
 `invalid-package-metadata` (exit 3), `package-fetch-failed` (exit 5).
 
+### C# scripts (`csharp`)
+
+`tess csharp` runs a C# script against the model's TOM objects, then shows what it changed, as the
+[editing commands](#editing-commands) do: a dry run unless `--save` or `--save-to`, with the save gate,
+`--stat`, `--name-only` and `--json`. The command's name is provisional (`script` is taken by DAX scripts).
+
+```sh
+tess csharp ./Sales.pbip format-measures.csx           # dry run: the diff
+tess csharp ./Sales.pbip format-measures.csx --save
+```
+
+```csharp
+// format-measures.csx
+foreach (var m in Model.Tables.SelectMany(t => t.Measures).Where(m => m.Name.EndsWith("%")))
+{
+    m.FormatString = "0.0%";
+    Info($"formatted {m.Name}");
+}
+```
+
+- **The script** is a C# file of top-level statements. `using` directives, local functions and classes work as in
+  any C# file.
+- **In scope:**
+  - `System`, `System.Linq`, `System.Collections.Generic` and `Microsoft.AnalysisServices.Tabular`;
+  - `Model`, the model's TOM `Model`;
+  - `Info(text)`, `Warning(text)` and `Output(value)`, which write to stderr;
+  - `Error(text)`, which fails the script.
+- **The `TESS` symbol** is defined, so `#if TESS` tells a script it runs under tess.
+- **TE scripts:** scripts written against Tabular Editor's own object model, such as `Model.AllMeasures`,
+  `Selected` or `FormatDax`, don't compile here. Only scripts that stay within raw TOM run unchanged.
+- **Output:** everything the script writes, its `Console` output included, goes to stderr, so `--json` on stdout
+  stays clean.
+- **Errors:**
+  - a compile error is reported at the script's own file, line and column (`script-compile-failed`, exit 3);
+  - an exception or `Error()` is `script-failed` (exit 3);
+  - a failed script saves nothing.
+
+**Security.** The script must be a local file: tess never fetches one (a URL is refused) and never runs one on its
+own. It runs inside tess with your rights and can do anything you can, network included. tess's offline guarantee
+covers tess, not the code you give it. Treat a script like any program you run. It is compiled in memory with
+Roslyn's C# compiler and needs no files of its own on disk, so it works in the single-file binary. The
+measurements and the design are in [docs/scripting-design.md](docs/scripting-design.md). It has been run on
+Linux only so far.
+
 ### Findings JSON and CI annotations
 
 `validate`, `bpa`, `lint` and `test` (and later `schemacheck`) report findings in one shape, the one the Tabular
