@@ -69,7 +69,7 @@ type EmbedArgs =
             | Target _ -> "the model, the fixture directory, and where to write the model with the data inside it."
             | Format _ ->
                 "output format: bim | tmdl | pbip | database.json. Default: inferred from the destination "
-                + "(*.bim -> bim, *.SemanticModel -> pbip, otherwise a tmdl folder)."
+                + "(*.bim -> bim, *.SemanticModel -> pbip, otherwise a tmdl folder). bim adds .bim to a path without it."
             | Force -> "overwrite a non-empty destination."
 
 type Args =
@@ -452,9 +452,14 @@ let private embed (ctx: Ctx) (args: ParseResults<EmbedArgs>) =
                     $"""unknown format '{f}'{Suggest.hint (Suggest.closest ModelIO.OutputFormat.tokens f)} (expected {String.Join(", ", ModelIO.OutputFormat.tokens)})"""
             )
 
-    match format with
+    // `--format bim out` writes out.bim (see ModelIO.OutputFormat.destinationFor).
+    let target =
+        format
+        |> Result.bind (fun f -> ModelIO.OutputFormat.destinationFor f destination |> Result.map (fun d -> f, d))
+
+    match target with
     | Error message -> UsageError message
-    | Ok format ->
+    | Ok(format, destination) ->
         let result =
             ModelIO.loadPath model
             |> Result.bind (fun (source, db) ->

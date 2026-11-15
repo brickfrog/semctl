@@ -157,6 +157,25 @@ module OutputFormat =
         else
             TmdlFolder
 
+    /// Where a save in `format` to `destination` goes. tess tells a .bim file by its extension, so a
+    /// .bim file whose path doesn't end in .bim gets it added (`--format bim out` writes out.bim);
+    /// a folder can't be one. Folder formats go where they're told (tess reads a folder whatever its
+    /// name). Error: why the destination can't take this format, for a usage error.
+    let destinationFor (format: OutputFormat) (destination: string) : Result<string, string> =
+        match format with
+        | BimFile ->
+            let trimmed = destination.TrimEnd('/', '\\')
+
+            if trimmed.Length < destination.Length || Directory.Exists destination then
+                Error $"--format bim writes a .bim file, and '{destination}' is a folder"
+            elif trimmed.EndsWith(".bim", StringComparison.OrdinalIgnoreCase) then
+                Ok destination
+            else
+                Ok(destination + ".bim")
+        | TmdlFolder
+        | PbipFolder
+        | DatabaseJsonFolder -> Ok destination
+
 /// What a save produced.
 type SavedModel = {
     Format: OutputFormat

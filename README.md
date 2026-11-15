@@ -124,6 +124,11 @@ Unless you pass `--format`, the format is inferred from the destination:
 `--serialization` is another name for `--format` (as in TE's CLI). Its values are a fixed list:
 `bim`, `tmdl`, `pbip` and `database.json`.
 
+tess tells a `.bim` file from other files by its extension, so `--format bim` adds `.bim` to a destination that
+doesn't end in it (`--format bim ./out` writes `./out.bim`; the output line and `--json` give the real path), and
+refuses a destination that is a folder (exit 2). The folder formats write wherever they're told. `init` and
+`data embed` do the same.
+
 The defaults match Power BI Desktop's output:
 
 - tabs for indentation
