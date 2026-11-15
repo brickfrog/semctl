@@ -4,7 +4,7 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp vertipaq' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
@@ -31,7 +31,7 @@ _tess_options() {
         'rename') _tess_r='--save --save-to --force --stat --name-only --json -j --help -h' ;;
         'remove') _tess_r='--cascade --if-exists --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'move') _tess_r='--display-folder --save --save-to --force --stat --name-only --json -j --help -h' ;;
-        'bpa') _tess_r='--rules -r --no-builtin --no-default-rules --no-model-rules --min-severity --category -c --list-rules --trx --sarif --fail-on --ci --builtin-only --no-config --allow-external-rules --path --watch --fix --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'bpa') _tess_r='--rules -r --no-builtin --no-default-rules --no-model-rules --min-severity --category -c --list-rules --trx --sarif --fail-on --ci --builtin-only --no-config --allow-external-rules --path --watch --fix --save --save-to --force --stat --name-only --vpax --json -j --help -h' ;;
         'bpa rules') _tess_r='--json -j --help -h' ;;
         'bpa rules list') _tess_r='--layer --rules -r --no-builtin --no-default-rules --builtin-only --no-model-rules --no-config --allow-external-rules --json -j --help -h' ;;
         'bpa rules show') _tess_r='--rules -r --no-builtin --no-default-rules --builtin-only --no-model-rules --no-config --allow-external-rules --json -j --help -h' ;;
@@ -72,6 +72,7 @@ _tess_options() {
         'test list') _tess_r='--filter --tag --json -j --help -h' ;;
         'completion') _tess_r='--json -j --help -h' ;;
         'mcp') _tess_r='--allow --data --server --save --audit-log --json -j --help -h' ;;
+        'vertipaq') _tess_r='--data --import --tables --columns --relationships --partitions --hierarchies --all --top --export --obfuscate --dictionary --annotate --save --save-to --force --stat --name-only --json -j --help -h' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -131,6 +132,7 @@ _tess_value() {
         'bpa|--ci') _tess_r='choice github azdo none' ;;
         'bpa|--path') _tess_r='text' ;;
         'bpa|--save-to') _tess_r='path' ;;
+        'bpa|--vpax') _tess_r='path' ;;
         'bpa rules list|--layer') _tess_r='choice builtin model config env cli' ;;
         'bpa rules list|--rules') _tess_r='path' ;;
         'bpa rules list|-r') _tess_r='path' ;;
@@ -275,6 +277,12 @@ _tess_value() {
         'mcp|--data') _tess_r='dir' ;;
         'mcp|--server') _tess_r='text' ;;
         'mcp|--audit-log') _tess_r='path' ;;
+        'vertipaq|--data') _tess_r='dir' ;;
+        'vertipaq|--import') _tess_r='path' ;;
+        'vertipaq|--top') _tess_r='text' ;;
+        'vertipaq|--export') _tess_r='path' ;;
+        'vertipaq|--dictionary') _tess_r='path' ;;
+        'vertipaq|--save-to') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -370,6 +378,8 @@ _tess_positional() {
         'test list|'*) _tess_r='path' ;;
         'completion|0') _tess_r='text' ;;
         'mcp|0') _tess_r='path' ;;
+        'vertipaq|0') _tess_r='path' ;;
+        'vertipaq|'*) _tess_r='text' ;;
         *) _tess_r='' ;;
     esac
 }

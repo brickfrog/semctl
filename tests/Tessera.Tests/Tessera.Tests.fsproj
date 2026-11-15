@@ -126,6 +126,7 @@
     <Compile Include="BpaFixCommandTests.fs" />
     <Compile Include="PreviewCommandTests.fs" />
     <Compile Include="AddCalendarTests.fs" />
+    <Compile Include="VertipaqTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
 
@@ -136,6 +137,8 @@
 
   <ItemGroup>
     <PackageReference Include="Expecto" Version="11.1.1" />
+    <!-- MIT (SQLBI). The view model DAX Studio's VertiPaq Analyzer builds from a .vpax: tests open exported files with it. -->
+    <PackageReference Include="Dax.ViewModel" Version="1.12.1" />
     <PackageReference Include="Expecto.FsCheck" Version="11.1.1" />
     <PackageReference Include="YoloDev.Expecto.TestSdk" Version="0.16.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />

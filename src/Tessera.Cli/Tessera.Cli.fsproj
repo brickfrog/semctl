@@ -53,6 +53,7 @@
     <Compile Include="Mcp/JsonRpc.fs" />
     <Compile Include="Mcp/Server.fs" />
     <Compile Include="Commands/McpCommand.fs" />
+    <Compile Include="Commands/VertipaqCommand.fs" />
     <!-- New commands: add Commands/<Name>Command.fs above, a case in Args.fs, a line in App.fs. -->
     <Compile Include="Args.fs" />
     <Compile Include="App.fs" />

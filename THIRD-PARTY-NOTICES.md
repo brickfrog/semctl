@@ -45,6 +45,10 @@ talks only to the server you name.
 | FSharp.Core | © Microsoft Corporation (.NET Foundation) |
 | Argu | © 2019 Argu contributors (<https://github.com/fsprojects/Argu>) |
 | YamlDotNet | © Antoine Aubry and contributors (<https://github.com/aaubry/YamlDotNet>) |
+| Dax.Vpax, Dax.Metadata, Dax.ViewVpaExport (VertiPaq Analyzer), Dax.Vpax.Obfuscator, Dax.Vpax.Obfuscator.Common, Dax.Tokenizer; the DMV and DAX queries of Dax.Model.Extractor, followed in `src/Tessera.Xmla/VertipaqServer.fs`; `tests/Tessera.Tests/vertipaq/Contoso.vpax` (test data, not shipped) | © 2019 SQLBI (<https://github.com/sql-bi/VertiPaq-Analyzer>, <https://github.com/sql-bi/Vpax-Obfuscator>) |
+| Newtonsoft.Json | © James Newton-King (<https://www.newtonsoft.com/json>) |
+| System.IO.Packaging | © Microsoft Corporation (.NET Foundation) |
+| The `Vertipaq_*` annotation names, from Michael Kovalsky's Tabular Editor scripts (`VertipaqAnnotations.cs`, `VpaxToTabularEditor.cs`) | © Michael Kovalsky (<https://github.com/m-kovalsky/Tabular>) |
 | Tabular Editor 2: small portions adapted in `src/Tessera.Core` (for example the BPA token codes in `BpaDaxToken.fs`, and the database.json folder format in `FolderFormat.fs`), marked in the source; a TE2 test fixture in `tests/Tessera.Tests/Te2Fixture.fs` | © 2017 Daniel Otykier (<https://github.com/TabularEditor/TabularEditor>) |
 
 The MIT license text:
@@ -71,6 +75,14 @@ The MIT license text:
 
 Licensed under the Apache License, Version 2.0; the full text is in `licenses/Apache-2.0.txt`
 (<https://www.apache.org/licenses/LICENSE-2.0>). Distributed unmodified.
+
+## Components under the BSD 3-Clause License
+
+| Component | Copyright |
+|---|---|
+| Antlr4.Runtime.Standard (used by Dax.Vpax.Obfuscator) | © 2012-2022 The ANTLR Project (<https://www.antlr.org/>) |
+
+The full text is in `licenses/BSD-3-Clause-ANTLR.txt`. Distributed unmodified.
 
 ## Used only by the tests (not shipped)
 

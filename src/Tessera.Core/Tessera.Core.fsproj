@@ -89,6 +89,9 @@
     <Compile Include="TestSuite.fs" />
     <Compile Include="TestRun.fs" />
     <Compile Include="SourceLocations.fs" />
+    <Compile Include="Vertipaq.fs" />
+    <Compile Include="VertipaqFixture.fs" />
+    <Compile Include="VertipaqVpax.fs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -101,6 +104,11 @@
     <PackageReference Include="System.Linq.Dynamic.Core" Version="1.7.4" />
     <!-- MIT. Reads `tess test` suites (YAML); it makes no network calls. -->
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <!-- MIT (SQLBI). Reads and writes VertiPaq Analyzer files (.vpax) for `tess vertipaq`; brings Dax.Metadata,
+         Dax.ViewVpaExport, Newtonsoft.Json (MIT) and System.IO.Packaging (MIT). No network calls. -->
+    <PackageReference Include="Dax.Vpax" Version="1.12.1" />
+    <!-- MIT (SQLBI). `vertipaq` export with obfuscate; brings Antlr4.Runtime.Standard (BSD-3-Clause). -->
+    <PackageReference Include="Dax.Vpax.Obfuscator" Version="1.2.1" />
   </ItemGroup>
 
 </Project>
