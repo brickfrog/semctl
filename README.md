@@ -741,6 +741,8 @@ tess add ./Sales.pbip expression:Server -m '"localhost" meta [IsParameterQuery=t
 tess add ./Sales.pbip function:My.Double -e "(x: INT64) => x * 2"
 tess add ./Sales.pbip "partition:Sales/Sales 2024" -m "let Source = ... in Source"
 cat margin.dax | tess add ./Sales.pbip measure:Sales/Margin -e - --save            # DAX from stdin
+tess add ./Sales.pbip calendar:Date/Gregorian --category Year=Year --category "Month=Year Month,Month Name" \
+    --category Date=Date --time-related Weekday                                        # calendar (CL 1701+)
 ```
 
 | Kind | Needs | Optional |
@@ -758,6 +760,7 @@ cat margin.dax | tess add ./Sales.pbip measure:Sales/Margin -e - --save         
 | `expression:N` | `-m <M>` | `--description` |
 | `function:N` | `-e <DAX>` | `--description`, `--hidden` |
 | `partition:T/N` | `-m <M>` | `--mode`, `--description` |
+| `calendar:T/N` | `--category <category>=<column>[,<associated>...]` (repeatable) | `--time-related <column>` (repeatable or comma-separated), `--description` |
 
 An option a kind doesn't take, such as `--levels` on a measure, is a usage error. `-e -` or `-m -` reads the
 expression from stdin, without its trailing line break. Only one option per command can read stdin.
@@ -817,7 +820,20 @@ suggests close names.
 - calculation items outside calculation groups, and a level on a column that's already in the hierarchy
 - relationships from a table to itself, or over columns another relationship already joins (in either direction)
 - calculation groups below compatibility level 1470, calculation item ordinals below 1500, and functions below 1702
-- data sources and calendars, which `add` doesn't create
+- data sources, which `add` doesn't create
+
+**Calendars** (TE3's calendar editor; the metadata [calendar-based time
+intelligence](#calendar-based-time-intelligence) reads) need compatibility level 1701 or higher, as Microsoft Learn
+says of TOM's `Calendar`. Each `--category` names a category, its primary column and any associated columns:
+"Each category has a primary column and can have zero or more associated columns" (Learn). The categories are
+Learn's: `Year`, `Quarter`, `QuarterOfYear`, `Month`, `MonthOfYear`, `MonthOfQuarter`, `Week`, `WeekOfYear`,
+`WeekOfQuarter`, `WeekOfMonth`, `Date`, `DayOfYear`, `DayOfQuarter`, `DayOfMonth`, `DayOfWeek` (case, spaces and
+hyphens don't matter: `"Month of Year"`). TOM's semester units are refused: no page describes them. `add` refuses
+what the engine would: a category given twice, a column in two categories, a column whose category differs from
+the one another calendar of the table gives it ("Columns must have a consistent category across calendars"), and a
+column that is both in a category and time-related, in this calendar or another. A calendar is named like a table:
+no table or other calendar may have its name. A calendar without a `Date` category is added with a warning, as the
+local engine refuses time intelligence over one. Calendars on calculation groups are refused.
 
 **`--if-not-exists`:** if an object with that reference already exists, in any case, `add` does nothing, notes
 it, and exits 0. For a relationship, an existing relationship over the same columns counts too. A different kind

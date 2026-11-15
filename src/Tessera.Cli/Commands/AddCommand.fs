@@ -36,6 +36,8 @@ type Args =
     | Permission of permission: string
     | Filter of table_filter: string
     | Include of object: string
+    | Category of category_columns: string
+    | Time_Related of columns: string
     | If_Not_Exists
     | Save
     | Save_To of path: string
@@ -74,6 +76,13 @@ type Args =
             | Permission _ -> "role: read (default), readrefresh, refresh, administrator or none."
             | Filter _ -> "role: a row filter, 'Table'=<DAX> (repeatable)."
             | Include _ -> "perspective: a table, column, measure or hierarchy to include (repeatable)."
+            | Category _ ->
+                "calendar: <category>=<primary column>[,<associated column>...], e.g. Year=Year or "
+                + "\"Month of Year=Month,Month Number\" (repeatable; categories: "
+                + (calendarCategories |> List.map string |> String.concat ", ")
+                + ")."
+            | Time_Related _ ->
+                "calendar: columns that are time-related without a category (repeatable or comma-separated)."
             | If_Not_Exists -> "if the object already exists, do nothing (exit 0) instead of failing."
             | Save -> Mutation.Usage.save
             | Save_To _ -> Mutation.Usage.saveTo
@@ -122,6 +131,8 @@ let private kindOptions: (string * (ParseResults<Args> -> bool) * ObjectKind lis
     "--permission", (fun a -> a.Contains Args.Permission), [ ObjectKind.Role ]
     "--filter", (fun a -> a.Contains Args.Filter), [ ObjectKind.Role ]
     "--include", (fun a -> a.Contains Args.Include), [ ObjectKind.Perspective ]
+    "--category", (fun a -> a.Contains Args.Category), [ ObjectKind.Calendar ]
+    "--time-related", (fun a -> a.Contains Args.Time_Related), [ ObjectKind.Calendar ]
 ]
 
 /// The new object's reference. `relationship` alone (no name) gets a GUID name.
@@ -231,6 +242,27 @@ let private roleFilter (text: string) =
 
 let private sequence (xs: Result<'a, string> list) =
     List.foldBack (fun x acc -> Result.bind (fun v -> Result.map (fun vs -> v :: vs) acc) x) xs (Ok [])
+
+/// --category <category>=<primary>[,<associated>...]
+let private calendarCategory (text: string) : Result<CalendarCategory, string> =
+    match text.IndexOf '=' with
+    | -1 -> Error $"--category '{text}': expected <category>=<column>[,<column>...], e.g. Year=Year"
+    | i ->
+        let name = text.Substring(0, i).Trim()
+
+        match tryCalendarCategory name, parseList [ text.Substring(i + 1) ] with
+        | None, _ ->
+            let names = calendarCategories |> List.map string
+            let close = Suggest.closest names name
+            let known = String.concat ", " names
+            Error $"--category '{text}': unknown category '{name}'{Suggest.hint close} (expected one of {known})"
+        | Some _, [] -> Error $"--category '{text}': name the category's column after '='"
+        | Some u, primary :: associated ->
+            Ok {
+                Unit = u
+                Primary = primary
+                Associated = associated
+            }
 
 /// `-` reads the value from stdin (once); a trailing line break is dropped.
 let private reader () =
@@ -371,6 +403,15 @@ let private details (args: ParseResults<Args>) (kind: ObjectKind) : Result<Detai
                 opt mode (args.TryGetResult Args.Mode)
                 |> Result.map (fun mode -> Details.Partition(m, mode)))
             (need "-m/--m-expression <M>" m)
+    | ObjectKind.Calendar ->
+        args.GetResults Args.Category
+        |> List.map calendarCategory
+        |> sequence
+        |> Result.bind (fun categories ->
+            if categories.IsEmpty then
+                Error "adding a calendar needs at least one --category <category>=<column>, e.g. --category Date=Date"
+            else
+                Ok(Details.Calendar(categories, parseList (args.GetResults Args.Time_Related))))
     | k -> Error $"tess can't add a {ObjectKind.token k}"
 
 let private spec (args: ParseResults<Args>) (objectText: string) =
