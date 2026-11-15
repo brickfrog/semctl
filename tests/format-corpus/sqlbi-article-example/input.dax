@@ -1,0 +1,1 @@
+calculate(sumx(Orders,Orders[Amount]),filter(all(Customers),calculate(countrows(Sales),all(Calendar[Date]))>42+8-25*(3-1)+2-1+2-1+calculate(2+2-2+2-2)-calculate(4)))

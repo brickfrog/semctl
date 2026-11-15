@@ -1,0 +1,6 @@
+{
+  "source": "https://www.sqlbi.com/articles/rules-for-dax-code-formatting/ (\"Only use single quotes for table name if it is required\"); derived by hand",
+  "options": {},
+  "expect": "differs",
+  "note": "tess never adds or removes quotes (README: \"Kept as written\"), since whether a name needs them depends on reserved words Microsoft does not fully document (see te3-991-quoted-table-stays-quoted)."
+}

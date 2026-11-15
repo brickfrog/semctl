@@ -1,0 +1,5 @@
+{
+  "source": "https://www.sqlbi.com/articles/rules-for-dax-code-formatting/ (\"Write a function inline only if it has a single argument that is not a function call\"); derived by hand",
+  "options": { "long": true },
+  "expect": "same"
+}

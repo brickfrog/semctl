@@ -1,0 +1,5 @@
+{
+  "source": "https://github.com/TabularEditor/TabularEditor/issues/1303 (a function body was left unformatted; expected: \"far fewer tabs\"); expected derived by hand from the SQLBI rules (space before parenthesis, arguments indented 4 from the call) and the README VAR/RETURN rules",
+  "options": {},
+  "expect": "same"
+}

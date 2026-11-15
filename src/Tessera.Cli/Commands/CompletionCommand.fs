@@ -149,6 +149,8 @@ let private optionOverride (command: string) (option: string) : Value option =
 let private positionalOverride (command: string) : (Value list * Value option) option =
     match command with
     | "query" -> Some([ Path ], Some Text)
+    // The model, then a table's name (completion doesn't open the model to list them).
+    | "preview" -> Some([ Path; Text ], None)
     // Its objects are on a server (model files are refused), and completion never connects.
     | "refresh" -> Some([ Text ], Some Text)
     | "deploy" -> Some([ Path; Text; Text ], None)

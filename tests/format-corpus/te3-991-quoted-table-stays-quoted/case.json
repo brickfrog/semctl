@@ -1,0 +1,5 @@
+{
+  "source": "https://github.com/TabularEditor/TabularEditor3/issues/991 (a formatter removed the quotes from a table named status, a reserved word, and broke the DAX); expected derived by hand: tess keeps quotes as written",
+  "options": {},
+  "expect": "same"
+}

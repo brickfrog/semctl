@@ -30,6 +30,10 @@ With the .NET 10 SDK, you can install it as a .NET tool instead. Download `tesse
 dotnet tool install -g tessera --add-source ./folder-with-the-nupkg
 ```
 
+**For AI agents:** [SKILL.md](SKILL.md) tells an agent how to drive tess (JSON output, exit codes, dry runs and
+`--save`, no network). It ships next to the binary in every release archive, and in the .NET tool package (at its
+root and next to `tess.dll`).
+
 ## Usage
 
 ```sh
@@ -247,7 +251,12 @@ The default compatibility level is 1702:
 - Power BI Desktop raises a model's level when a feature needs a higher one, but never lowers it
 
 Pass `--compatibility-level` for older engines. The minimum is 1520, the lowest level that supports
-`sourceQueryCulture`. `init` won't write over a non-empty destination without `--force`.
+`sourceQueryCulture`. `init` won't write over a non-empty destination without `--force` (exit 4).
+
+Re-running `init` is safe: if the destination already holds the model `init` would create (the same name,
+compatibility level, culture and properties, nothing else in it, and the format it would write), it writes nothing
+and exits 0, saying so. With `--json`: `{"created": false, "reason", "model", "output": {"format", "path"}}`. Any
+other model there is still refused.
 
 To open the model in Power BI Desktop, you also need a `.pbip` file and a `X.Report` folder that points at it.
 
@@ -791,6 +800,8 @@ tess add ./Sales.pbip expression:Server -m '"localhost" meta [IsParameterQuery=t
 tess add ./Sales.pbip function:My.Double -e "(x: INT64) => x * 2"
 tess add ./Sales.pbip "partition:Sales/Sales 2024" -m "let Source = ... in Source"
 cat margin.dax | tess add ./Sales.pbip measure:Sales/Margin -e - --save            # DAX from stdin
+tess add ./Sales.pbip calendar:Date/Gregorian --category Year=Year --category "Month=Year Month,Month Name" \
+    --category Date=Date --time-related Weekday                                        # calendar (CL 1701+)
 ```
 
 | Kind | Needs | Optional |
@@ -808,6 +819,7 @@ cat margin.dax | tess add ./Sales.pbip measure:Sales/Margin -e - --save         
 | `expression:N` | `-m <M>` | `--description` |
 | `function:N` | `-e <DAX>` | `--description`, `--hidden` |
 | `partition:T/N` | `-m <M>` | `--mode`, `--description` |
+| `calendar:T/N` | `--category <category>=<column>[,<associated>...]` (repeatable) | `--time-related <column>` (repeatable or comma-separated), `--description` |
 
 An option a kind doesn't take, such as `--levels` on a measure, is a usage error. `-e -` or `-m -` reads the
 expression from stdin, without its trailing line break. Only one option per command can read stdin.
@@ -867,7 +879,23 @@ suggests close names.
 - calculation items outside calculation groups, and a level on a column that's already in the hierarchy
 - relationships from a table to itself, or over columns another relationship already joins (in either direction)
 - calculation groups below compatibility level 1470, calculation item ordinals below 1500, and functions below 1702
-- data sources and calendars, which `add` doesn't create
+- data sources, which `add` doesn't create
+
+**Calendars** (TE3's calendar editor; the metadata [calendar-based time
+intelligence](#calendar-based-time-intelligence) reads) need compatibility level 1701 or higher, as Microsoft Learn
+says of TOM's `Calendar`. Each `--category` names a category, its primary column and any associated columns:
+"Each category has a primary column and can have zero or more associated columns" (Learn). The categories are
+Learn's: `Year`, `Quarter`, `QuarterOfYear`, `Month`, `MonthOfYear`, `MonthOfQuarter`, `Week`, `WeekOfYear`,
+`WeekOfQuarter`, `WeekOfMonth`, `Date`, `DayOfYear`, `DayOfQuarter`, `DayOfMonth`, `DayOfWeek` (case, spaces and
+hyphens don't matter: `"Month of Year"`). TOM's semester units are refused: no page describes them. `add` refuses
+what the engine would: a category given twice, a column in two categories, a column whose category differs from
+the one another calendar of the table gives it ("Columns must have a consistent category across calendars"), and a
+column that is both in a category and time-related, in this calendar or another. A column's sort-by column counts
+as an associated column of the column's category ("The columns specified in the sort-by-column property are
+automatically considered as associated columns", SQLBI; Tabular Editor 3's calendar editor does the same), or as
+time-related with it, so it can't go anywhere else. A calendar is named like a table:
+no table or other calendar may have its name. A calendar without a `Date` category is added with a warning, as the
+local engine refuses time intelligence over one. Calendars on calculation groups are refused.
 
 **`--if-not-exists`:** if an object with that reference already exists, in any case, `add` does nothing, notes
 it, and exits 0. For a relationship, an existing relationship over the same columns counts too. A different kind
@@ -1576,6 +1604,7 @@ tess set ./Sales.pbip 'measure:Sales/Margin' -p 'annotations.TesseraLint_IgnoreR
 tess format --expr "calculate(sum(Sales[Amount]),all('Date'))"   # loose DAX, to stdout
 tess format - < measure.dax                                     # stdin
 tess format query.dax --json                                    # {success, formatted, errors}
+tess format query.dax --save                                    # format the file in place
 tess format ./Sales.pbip                                        # every DAX expression in a model (a dry run)
 tess format ./Sales.pbip "[Revenue]" -t Date --save             # some of them, and save
 tess format ./Sales.pbip --check                                # CI: exit 1 if anything isn't formatted
@@ -1621,7 +1650,9 @@ The style:
 - **Operators** are spaced. A chain of operators that doesn't fit is split before an operator, and continues
   one indent in. Arithmetic and `&` keep as many operands on a line as fit, but an operand containing a function
   call starts a line of its own. `&&`, `||` and comparisons put each operand on a line. After a multi-line
-  operand, the next operator follows its closing bracket: `) / 'Budget Rate'[Rate]`.
+  operand, the next operator follows its closing bracket: `) / 'Budget Rate'[Rate]`, unless the operand after it
+  starts with a function call, which starts a row of its own, as in SQLBI's example (`- CALCULATE ( 4 )`). An operand
+  with comments on the lines before it still follows the bracket, so its operator isn't left alone on a line.
 - **VAR/RETURN:** a `VAR`'s value stays on the `VAR` line if it fits, otherwise it goes on the next line,
   indented. `RETURN` is on a line of its own, with its expression indented below it.
 - **Queries:** `DEFINE`, `EVALUATE`, `ORDER BY` and `START AT` start lines. Definitions are indented under
@@ -1636,12 +1667,16 @@ The style:
   unquoted, `'Sales'[x]` stays quoted), and comments. A comment on a token's line stays on that line, and a
   comment on a line of its own stays on a line of its own. A comment after an argument moves past its comma.
   One blank line is kept where the source had blank lines between `VAR`s, definitions and comments.
+- **A model expression that starts on the next line** (a line break before its first token, as Power BI and
+  Tabular Editor often store measures) keeps one line break there, as SQLBI's rules put the definition "in the row
+  before" and as Tabular Editor does
+  ([TabularEditor#638](https://github.com/TabularEditor/TabularEditor/issues/638)).
 - Line endings follow the input (CRLF in, CRLF out).
 
 Options:
 - `--width N`: the line width to fit (default 100; the article doesn't give one).
 - `--long`: SQLBI's strict rule. A call with two or more arguments, or whose only argument is a function call,
-  always has its arguments on separate lines, even when it would fit.
+  always has its arguments on separate lines, even when it would fit, inside an operator chain or a `VAR` too.
 - `--no-space-after-function`: `SUM( x )` rather than `SUM ( x )`.
 - `--semicolons` (loose DAX only): the input separates arguments with `;` and writes decimals with `,`
   (`IF ( [a] > 1,5; 2; 3 )`). The output keeps that dialect. Without the option, a `;` is an error, so
@@ -1670,6 +1705,11 @@ Output and exit codes:
   `te util format-dax`. Each error has `line`, `column` (1-based) and `message`. DAX that can't be read
   (unbalanced brackets, an unterminated string, an operator without an operand, `VAR` without `RETURN`, ...) exits
   3 with its errors on stderr, nothing on stdout, and the input file left alone.
+- A DAX file with `--save`: the formatted DAX is written back to the file, in its encoding (UTF-8, or UTF-16 when
+  it starts with that byte order mark), with its byte order mark and line endings, and a line on stderr says so.
+  Nothing is written if the file is formatted already or can't be read, and a file that isn't valid UTF-8 or
+  UTF-16 is refused (exit 3) rather than rewritten. `--json` adds `"saved": {"path"}` when it wrote. `--save` with `-` or `--expr`, or with `--check`, is a usage
+  error; `--save-to`, `--force`, `--stat` and `--name-only` are for models.
 - A model is an [editing command](#editing-commands): a dry run unless `--save` or `--save-to`, the change shown
   as a diff (`--stat`, `--name-only`, `--json` as usual). Expressions that can't be read are left as they are,
   with a warning each.
@@ -1677,6 +1717,10 @@ Output and exit codes:
   For a model it lists the expressions that would change, one `<ref> <property>` per line. With `--json` it
   writes `{"check": true, "expressions", "unformatted": [{ref, kind, property}], "failed", "warnings"}`. For loose
   DAX, `--json` adds `"changed"`.
+
+Regression corpus: [tests/format-corpus](tests/format-corpus) holds cases from public formatter bug reports
+(Tabular Editor, DAX Studio, DAX Formatter) and from SQLBI's rules, each citing its source, including the known
+differences from the rules (quotes around table names, the article's hand-broken example).
 
 Not done: the formatter doesn't rewrite code. It doesn't qualify column references or remove table names from
 measure references, as SQLBI's rules also ask; `lint` does those. It doesn't add or remove quotes around table
@@ -2010,6 +2054,27 @@ What each needs, for whoever picks it up:
 - **Sessions and profiles:** somewhere to keep an address and auth mode (never a secret) per shell, and a decision
   on where; then `Source.load` reads it when no model is given.
 - **Interactive sign-in:** needs the MSAL broker the single-file builds leave out (see `Tessera.Cli.fsproj`).
+### Previewing a table (`preview`)
+
+`tess preview <model> <table>` shows the first rows of a table, like Tabular Editor 3's table preview:
+
+```
+tess preview ./Sales.pbip Customer --data ./fixture                 # offline: the first 10 rows
+tess preview ./Sales.pbip Customer --data ./fixture -n 3 -c Name,Country --csv
+tess preview "xmla:powerbi://api.powerbi.com/v1.0/myorg/Sales;Sales" Customer --json
+```
+
+- Model files need `--data <fixture>`: the local engine evaluates the table (`EVALUATE 'Customer'`) and the first rows
+  in fixture order are shown. Nothing leaves the machine.
+- A server model (`xmla:`, as for [`query`](#query)) runs `EVALUATE TOPN ( N, 'Customer' )`, so the server does
+  only that much work (it asks for N + 1 rows, to know whether there are more). TOPN without an order "does not
+  guarantee any sort order" (dax.guide), so these are the rows the server returns first.
+- `--rows N` / `-n` (default 10), `--columns a,b` / `-c` (repeatable; in that order; names match ignoring case),
+  `--csv`. `--json` writes `{"command": "preview", "source", "table", "results", "durationMs"}`, with `results` in
+  the shape of [`query`](#query)'s; `truncated` is true when the table has more rows than shown.
+- An unknown table or column is exit 3 with close names, as everywhere. On a server, the table is the server's to
+  find, and its error is exit 5.
+
 ### Fixture data (`data`)
 
 A fixture is a directory of data files, one per table, that the local DAX engine evaluates a model against: no

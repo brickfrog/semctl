@@ -1,0 +1,1 @@
+if([Margin]>0,5;divide([Margin];[Sales]);blank())

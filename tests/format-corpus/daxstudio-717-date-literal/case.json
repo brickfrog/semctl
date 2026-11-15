@@ -1,0 +1,5 @@
+{
+  "source": "https://github.com/DaxStudio/DaxStudio/issues/717 (a formatter reported a syntax error on dt\"...\" date literals in DATATABLE); expected derived by hand: the literal is one token, EVALUATE starts its own line (README)",
+  "options": {},
+  "expect": "same"
+}

@@ -4,7 +4,7 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query deploy data refresh test completion mcp' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
@@ -40,7 +40,7 @@ _tess_options() {
         'bpa rules ignore') _tess_r='--save --save-to --force --stat --name-only --json -j --help -h' ;;
         'bpa rules unignore') _tess_r='--save --save-to --force --stat --name-only --json -j --help -h' ;;
         'set') _tess_r='--property -p --unset --save --save-to --force --stat --name-only --json -j --help -h' ;;
-        'add') _tess_r='--expression -e --m-expression -m --format-string --display-folder --description --hidden --data-type --source-column --mode --calculation-group --precedence --column --levels --ordinal --format-string-expression --from --to --inactive --cross-filter --cardinality --permission --filter --include --if-not-exists --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'add') _tess_r='--expression -e --m-expression -m --format-string --display-folder --description --hidden --data-type --source-column --mode --calculation-group --precedence --column --levels --ordinal --format-string-expression --from --to --inactive --cross-filter --cardinality --permission --filter --include --category --time-related --if-not-exists --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'translations') _tess_r='--json -j --help -h' ;;
         'translations export') _tess_r='--culture --format --output -o --only-translated --bom --force --json -j --help -h' ;;
         'translations import') _tess_r='--culture --format --create-cultures --save --save-to --force --stat --name-only --json -j --help -h' ;;
@@ -56,6 +56,7 @@ _tess_options() {
         'format') _tess_r='--expr -e --kind -k --table -t --long --width --no-space-after-function --semicolons --check --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'connect') _tess_r='--json -j --help -h' ;;
         'query') _tess_r='--file -f --csv --max-rows --data --coverage --now --user-name --user-principal-name --user-object-id --user-culture --custom-data --role --formatted --json -j --help -h' ;;
+        'preview') _tess_r='--rows -n --columns -c --data --csv --json -j --help -h' ;;
         'deploy') _tess_r='--execute --overwrite --force --deploy-connections --deploy-partitions --skip-refresh-policy --deploy-shared-expressions --deploy-roles --deploy-role-members --deploy-full --tmsl --ignore --stat --name-only --json -j --help -h' ;;
         'data') _tess_r='--json -j --help -h' ;;
         'data init') _tess_r='--rows --seed --force --json -j --help -h' ;;
@@ -180,6 +181,8 @@ _tess_value() {
         'add|--permission') _tess_r='choice read readrefresh refresh administrator none' ;;
         'add|--filter') _tess_r='text' ;;
         'add|--include') _tess_r='dyn' ;;
+        'add|--category') _tess_r='text' ;;
+        'add|--time-related') _tess_r='text' ;;
         'add|--save-to') _tess_r='path' ;;
         'translations export|--culture') _tess_r='text' ;;
         'translations export|--format') _tess_r='choice csv json' ;;
@@ -222,6 +225,11 @@ _tess_value() {
         'query|--user-culture') _tess_r='text' ;;
         'query|--custom-data') _tess_r='text' ;;
         'query|--role') _tess_r='dyn' ;;
+        'preview|--rows') _tess_r='text' ;;
+        'preview|-n') _tess_r='text' ;;
+        'preview|--columns') _tess_r='text' ;;
+        'preview|-c') _tess_r='text' ;;
+        'preview|--data') _tess_r='dir' ;;
         'deploy|--ignore') _tess_r='text' ;;
         'data init|--rows') _tess_r='text' ;;
         'data init|--seed') _tess_r='text' ;;
@@ -335,6 +343,8 @@ _tess_positional() {
         'connect|0') _tess_r='text' ;;
         'query|0') _tess_r='path' ;;
         'query|'*) _tess_r='text' ;;
+        'preview|0') _tess_r='path' ;;
+        'preview|1') _tess_r='text' ;;
         'deploy|0') _tess_r='path' ;;
         'deploy|1') _tess_r='text' ;;
         'deploy|2') _tess_r='text' ;;

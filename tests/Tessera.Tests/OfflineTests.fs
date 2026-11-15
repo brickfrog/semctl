@@ -275,6 +275,8 @@ let tests =
                     [ "format"; model ]
                     [ "query"; model; "--coverage" ]
                     [ "query"; model; "--data"; p.Path; "EVALUATE { 1 }" ]
+                    [ "preview"; model; "Sales"; "--data"; p.Path ]
+                    [ "add"; model; "calendar:Date/C"; "--category"; "Date=Date" ]
                     [ "--version" ]
                 ] do
                 tess args |> ignore

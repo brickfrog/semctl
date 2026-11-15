@@ -1,0 +1,5 @@
+{
+  "source": "https://www.sqlbi.com/articles/rules-for-dax-code-formatting/ (\"Always put a space before parenthesis\", \"Always put a space before any operand and operator\", \"Always put a space before an argument, if it is in the same line\"); derived by hand",
+  "options": {},
+  "expect": "same"
+}

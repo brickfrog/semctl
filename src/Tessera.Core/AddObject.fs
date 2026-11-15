@@ -78,6 +78,15 @@ module RelationshipSpec =
 
 /// What to create; the case decides the kind, which must match the reference's.
 [<RequireQualifiedAccess>]
+/// One category of a calendar: the time unit, the column that is its primary column, and its
+/// associated columns ("Each category has a primary column and can have zero or more associated
+/// columns", Microsoft Learn).
+type CalendarCategory = {
+    Unit: TimeUnit
+    Primary: string
+    Associated: string list
+}
+
 type Details =
     | Measure of expression: string
     | Column of ColumnSource
@@ -100,6 +109,9 @@ type Details =
     | Function of expression: string
     /// An M partition; the mode defaults to that of the table's existing partitions, else import.
     | Partition of m: string * mode: ModeType option
+    /// A calendar on the table (compatibility level 1701 or higher): its categories, and columns
+    /// that are time-related without a category.
+    | Calendar of categories: CalendarCategory list * timeRelated: string list
 
 module Details =
     let kind =
@@ -117,6 +129,7 @@ module Details =
         | Details.Expression _ -> ObjectKind.Expression
         | Details.Function _ -> ObjectKind.Function
         | Details.Partition _ -> ObjectKind.Partition
+        | Details.Calendar _ -> ObjectKind.Calendar
 
 type AddSpec = {
     /// Where the object goes and its name. A relationship's path may be empty: it then gets a new
@@ -151,6 +164,7 @@ let addableKinds = [
     ObjectKind.Expression
     ObjectKind.Function
     ObjectKind.Partition
+    ObjectKind.Calendar
 ]
 
 /// Which shared metadata each kind has: (description, displayFolder, formatString, hidden).
@@ -166,7 +180,8 @@ let private metadataOf =
     | ObjectKind.Role
     | ObjectKind.Perspective
     | ObjectKind.Expression
-    | ObjectKind.Partition -> true, false, false, false
+    | ObjectKind.Partition
+    | ObjectKind.Calendar -> true, false, false, false
     | _ -> false, false, false, false
 
 /// The shared metadata a kind supports, by name: "description", "displayFolder", "formatString", "hidden".
@@ -185,6 +200,39 @@ let private calculationGroupLevel = 1470
 /// Calculation items have ordinals from 1500.
 let private ordinalLevel = 1500
 let private functionLevel = 1702
+/// "This metadata object is only supported when the compatibility level of the database is at 1701
+/// or above" (Microsoft Learn, the TOM Calendar class).
+let private calendarLevel = 1701
+
+/// The calendar categories `add` takes: those of Microsoft Learn's table "Available column
+/// categories" (TOM's TimeUnit without the semester ones, which no page describes and the local
+/// engine refuses).
+let calendarCategories = [
+    TimeUnit.Year
+    TimeUnit.Quarter
+    TimeUnit.QuarterOfYear
+    TimeUnit.Month
+    TimeUnit.MonthOfYear
+    TimeUnit.MonthOfQuarter
+    TimeUnit.Week
+    TimeUnit.WeekOfYear
+    TimeUnit.WeekOfQuarter
+    TimeUnit.WeekOfMonth
+    TimeUnit.Date
+    TimeUnit.DayOfYear
+    TimeUnit.DayOfQuarter
+    TimeUnit.DayOfMonth
+    TimeUnit.DayOfWeek
+]
+
+/// A category by its name, ignoring case, spaces, hyphens and underscores: `MonthOfYear`,
+/// `month-of-year`, `Month of Year`.
+let tryCalendarCategory (name: string) : TimeUnit option =
+    let squash (s: string) =
+        String(s |> Seq.filter (fun c -> c <> ' ' && c <> '-' && c <> '_') |> Array.ofSeq)
+
+    calendarCategories
+    |> List.tryFind (fun u -> String.Equals(squash (string u), squash name, StringComparison.OrdinalIgnoreCase))
 
 let private ci = StringComparison.OrdinalIgnoreCase
 let private eqCi (a: string) (b: string) = String.Equals(a, b, ci)
@@ -380,6 +428,7 @@ let private applyMetadata (md: Metadata) (o: MetadataObject) =
     | :? Perspective as x -> set md.Description (fun v -> x.Description <- v)
     | :? NamedExpression as x -> set md.Description (fun v -> x.Description <- v)
     | :? Partition as x -> set md.Description (fun v -> x.Description <- v)
+    | :? Calendar as x -> set md.Description (fun v -> x.Description <- v)
     | _ -> ()
 
 // --- Power BI conventions -------------------------------------------------------------------------
@@ -1090,6 +1139,209 @@ let private addPartition (db: Database) entries (spec: AddSpec) (table: string) 
                 })
     }
 
+/// The categories a table's calendars give its columns, and its time-related columns.
+/// Columns with their sort-by columns: "The columns specified in the sort-by-column property are
+/// automatically considered as associated columns" (SQLBI, "Introducing calendar-based time
+/// intelligence in DAX"), and the local engine reads calendars that way.
+let private withSortBy (columns: Column list) =
+    columns
+    @ (columns
+       |> List.choose (fun c ->
+           if isNull c || isNull c.SortByColumn then
+               None
+           else
+               Some c.SortByColumn))
+    |> List.filter (isNull >> not)
+    |> List.distinctBy (fun c -> c.Name)
+
+/// The categories a table's calendars give its columns (sort-by columns included), and its
+/// time-related columns.
+let private calendarTags (t: Table) =
+    let categories =
+        Collections.Generic.Dictionary<Column, TimeUnit * string>(HashIdentity.Reference)
+
+    let related = Collections.Generic.Dictionary<Column, string>(HashIdentity.Reference)
+
+    for cal in t.Calendars do
+        for g in cal.CalendarColumnGroups do
+            match g with
+            | :? TimeUnitColumnAssociation as a ->
+                for c in withSortBy (a.PrimaryColumn :: List.ofSeq a.AssociatedColumns) do
+                    categories.[c] <- (a.TimeUnit, cal.Name)
+            | :? TimeRelatedColumnGroup as r ->
+                for c in withSortBy (List.ofSeq r.Columns) do
+                    related.[c] <- cal.Name
+            | _ -> ()
+
+    categories, related
+
+let private addCalendar
+    (db: Database)
+    entries
+    (spec: AddSpec)
+    (table: string)
+    (name: string)
+    (categories: CalendarCategory list)
+    (timeRelated: string list)
+    =
+    result {
+        let! t = findTable db.Model table
+        let r = ObjectRef.inTable ObjectKind.Calendar t.Name name
+
+        let refuse reason =
+            Error(CannotAdd(ObjectRef.format r, reason))
+
+        return!
+            claim entries spec.IfNotExists r (fun () ->
+                result {
+                    do!
+                        check
+                            (db.CompatibilityLevel >= calendarLevel)
+                            (CannotAdd(
+                                ObjectRef.format r,
+                                $"calendars need compatibility level {calendarLevel} or higher (the model is at {db.CompatibilityLevel})"
+                            ))
+
+                    do!
+                        if not (isNull t.CalculationGroup) then
+                            refuse $"'{t.Name}' is a calculation group"
+                        elif categories.IsEmpty then
+                            refuse "a calendar needs at least one category (--category <category>=<column>)"
+                        else
+                            match categories |> List.countBy _.Unit |> List.tryFind (fun (_, n) -> n > 1) with
+                            | Some(u, _) -> refuse $"the category {u} is given twice"
+                            | None -> Ok()
+
+                    let column (name: string) = findColumn t name
+
+                    let! groups =
+                        categories
+                        |> List.fold
+                            (fun acc c ->
+                                acc
+                                |> Result.bind (fun xs ->
+                                    column c.Primary
+                                    |> Result.bind (fun p ->
+                                        c.Associated
+                                        |> List.fold
+                                            (fun acc a ->
+                                                acc
+                                                |> Result.bind (fun ys ->
+                                                    column a |> Result.map (fun y -> ys @ [ y ])))
+                                            (Ok [])
+                                        |> Result.map (fun assoc -> xs @ [ c.Unit, p, assoc ]))))
+                            (Ok [])
+
+                    let! related =
+                        timeRelated
+                        |> List.fold
+                            (fun acc a -> acc |> Result.bind (fun ys -> column a |> Result.map (fun y -> ys @ [ y ])))
+                            (Ok [])
+
+                    let related = related |> List.distinctBy (fun c -> c.Name)
+                    let existingCategories, existingRelated = calendarTags t
+
+                    // "Columns must have a consistent category across calendars" (Learn); within one
+                    // calendar a column has one category, and a time-related column has none.
+                    // Sort-by columns count as associated columns of their column's category, and as
+                    // time-related with a time-related column.
+                    let given =
+                        groups
+                        |> List.collect (fun (u, p, assoc) -> (p :: assoc) |> List.map (fun c -> c, u))
+
+                    let tagged =
+                        groups
+                        |> List.collect (fun (u, p, assoc) -> withSortBy (p :: assoc) |> List.map (fun c -> c, u))
+
+                    let sortedBy (c: Column) =
+                        t.Columns
+                        |> Seq.tryFind (fun x -> obj.ReferenceEquals(x.SortByColumn, c))
+                        |> Option.map (fun x -> $" (it is the sort-by column of '{x.Name}')")
+                        |> Option.defaultValue ""
+
+                    let relatedWithSortBy = withSortBy related
+
+                    let problem =
+                        given
+                        |> List.groupBy (fun (c, _) -> c.Name)
+                        |> List.tryPick (fun (col, uses) ->
+                            if uses.Length > 1 then
+                                Some $"the column '{col}' is given more than once"
+                            else
+                                None)
+                        |> Option.orElse (
+                            tagged
+                            |> List.groupBy (fun (c, _) -> c.Name)
+                            |> List.tryPick (fun (_, uses) ->
+                                match uses |> List.map snd |> List.distinct with
+                                | a :: b :: _ ->
+                                    let c = fst uses.Head
+                                    Some $"the column '{c.Name}' would have two categories, {a} and {b}{sortedBy c}"
+                                | _ -> None)
+                        )
+                        |> Option.orElse (
+                            tagged
+                            |> List.tryPick (fun (c, u) ->
+                                match existingCategories.TryGetValue c with
+                                | true, (other, cal) when other <> u ->
+                                    Some
+                                        $"the calendar '{cal}' gives the column '{c.Name}' the category {other}{sortedBy c}; a column has the same category in every calendar"
+                                | _ ->
+                                    match existingRelated.TryGetValue c with
+                                    | true, cal ->
+                                        Some
+                                            $"the calendar '{cal}' has the column '{c.Name}' as time-related{sortedBy c}; a column can't also have a category"
+                                    | _ -> None)
+                        )
+                        |> Option.orElse (
+                            relatedWithSortBy
+                            |> List.tryPick (fun c ->
+                                if tagged |> List.exists (fun (x, _) -> obj.ReferenceEquals(x, c)) then
+                                    Some
+                                        $"the column '{c.Name}' has a category{sortedBy c}, so it can't also be time-related"
+                                else
+                                    match existingCategories.TryGetValue c with
+                                    | true, (u, cal) ->
+                                        Some
+                                            $"the calendar '{cal}' gives the column '{c.Name}' the category {u}{sortedBy c}, so it can't be time-related"
+                                    | _ -> None)
+                        )
+
+                    do!
+                        match problem with
+                        | Some why -> refuse why
+                        | None -> Ok()
+
+                    let cal = new Calendar(Name = name, LineageTag = newTag ())
+
+                    for (u, p, assoc) in groups do
+                        let a = new TimeUnitColumnAssociation(u, PrimaryColumn = p)
+
+                        for c in assoc do
+                            a.AssociatedColumns.Add c
+
+                        cal.CalendarColumnGroups.Add a
+
+                    if not related.IsEmpty then
+                        let g = new TimeRelatedColumnGroup()
+
+                        for c in related do
+                            g.Columns.Add c
+
+                        cal.CalendarColumnGroups.Add g
+
+                    applyMetadata spec.Metadata cal
+                    t.Calendars.Add cal
+
+                    let warnings = [
+                        if not (groups |> List.exists (fun (u, _, _) -> u = TimeUnit.Date)) then
+                            "the calendar has no Date category; the local engine refuses time intelligence over a calendar without one"
+                    ]
+
+                    return created r [] warnings
+                })
+    }
+
 /// Create the object `spec` describes, in `db`. Run it through Mutation.apply for the change set.
 let add (db: Database) (spec: AddSpec) : Result<Mutation.Effect, TessError> =
     let r = spec.Ref
@@ -1151,5 +1403,6 @@ let add (db: Database) (spec: AddSpec) : Result<Mutation.Effect, TessError> =
             | Details.Expression m, [ n ] -> addExpression db entries spec n m
             | Details.Function e, [ n ] -> addFunction db entries spec n e
             | Details.Partition(m, mode), [ t; n ] -> addPartition db entries spec t n m mode
+            | Details.Calendar(categories, related), [ t; n ] -> addCalendar db entries spec t n categories related
             | _ -> Error(InvalidObjectRef(refText, "wrong number of name segments"))
     }

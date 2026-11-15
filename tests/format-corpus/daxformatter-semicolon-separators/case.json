@@ -1,0 +1,5 @@
+{
+  "source": "https://github.com/sql-bi/DaxFormatter (README and mcp/tests/daxformatter/serialize.test.ts: ListSeparator \";\" goes with DecimalSeparator \",\"); layout derived by hand from the SQLBI rules with ; in place of ,",
+  "options": { "semicolons": true },
+  "expect": "same"
+}

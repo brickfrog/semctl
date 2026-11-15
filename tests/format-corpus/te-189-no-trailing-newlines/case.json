@@ -1,0 +1,5 @@
+{
+  "source": "https://github.com/TabularEditor/TabularEditor/issues/189 (DAX Formatter's output as quoted in the issue, without the leading and trailing line breaks the issue reports as a bug)",
+  "options": {},
+  "expect": "same"
+}

@@ -64,6 +64,100 @@ let looseTests =
             Expect.equal r.Out "EVALUATE\nROW ( \"a\", 1 )\n" ""
             Expect.equal (File.ReadAllText path) "evaluate row(\"a\", 1)" "the file isn't changed"
 
+        testCase "--save writes a .dax file back, keeping its byte order mark and line endings"
+        <| fun () ->
+            use t = new TempDir()
+            let path = t.Combine "q.dax"
+            File.WriteAllBytes(path, Array.append [| 0xEFuy; 0xBBuy; 0xBFuy |] "var x = sum(T[a])\r\nreturn x"B)
+            let r = tess [ "format"; path; "--save" ]
+            Expect.equal r.Code ExitCode.ok r.Err
+            Expect.equal r.Out "" "nothing on stdout"
+            Expect.stringContains r.Err "Formatted" ""
+            let bytes = File.ReadAllBytes path
+            Expect.equal bytes.[0..2] [| 0xEFuy; 0xBBuy; 0xBFuy |] "BOM kept"
+            Expect.equal (System.Text.Encoding.UTF8.GetString bytes.[3..]) "VAR x = SUM ( T[a] )\r\nRETURN\r\n    x" ""
+
+            // Formatted already: nothing is written, and JSON has no "saved".
+            let stamp = File.GetLastWriteTimeUtc path
+            let r = tess [ "format"; path; "--save"; "--json" ]
+            Expect.equal r.Code ExitCode.ok r.Err
+            Expect.isFalse ((json r).RootElement.TryGetProperty "saved" |> fst) ""
+            Expect.equal (File.GetLastWriteTimeUtc path) stamp "not rewritten"
+
+        testCase "--save --json says where it saved; no BOM is added to a file without one"
+        <| fun () ->
+            use t = new TempDir()
+            let path = t.Combine "m.dax"
+            File.WriteAllText(path, "sum(T[a])")
+            let r = tess [ "format"; path; "--save"; "--json" ]
+            Expect.equal r.Code ExitCode.ok r.Err
+            let j = (json r).RootElement
+            Expect.equal (j.GetProperty("formatted").GetString()) "SUM ( T[a] )" ""
+            Expect.equal (j.GetProperty("saved").GetProperty("path").GetString()) (Path.GetFullPath path) ""
+            Expect.equal (File.ReadAllBytes path) "SUM ( T[a] )"B ""
+
+        testCase "UTF-16 files are read as before, and --save writes them back in UTF-16"
+        <| fun () ->
+            use t = new TempDir()
+
+            for encoding, bom in
+                [
+                    System.Text.UnicodeEncoding(false, true), [| 0xFFuy; 0xFEuy |]
+                    System.Text.UnicodeEncoding(true, true), [| 0xFEuy; 0xFFuy |]
+                ] do
+                let path = t.Combine "w.dax"
+                File.WriteAllText(path, "sum(T[a])", encoding)
+                let r = tess [ "format"; path ]
+                Expect.equal r.Code ExitCode.ok r.Err
+                Expect.equal r.Out "SUM ( T[a] )\n" "read with its byte order mark"
+
+                let r = tess [ "format"; path; "--save" ]
+                Expect.equal r.Code ExitCode.ok r.Err
+                let bytes = File.ReadAllBytes path
+                Expect.equal bytes.[0..1] bom "the same byte order mark"
+                Expect.equal (encoding.GetString(bytes, 2, bytes.Length - 2)) "SUM ( T[a] )" "the same encoding"
+
+        testCase "a file that isn't UTF-8 is shown as before, but --save won't rewrite it"
+        <| fun () ->
+            use t = new TempDir()
+            let path = t.Combine "latin1.dax"
+            // "sum(T[a]) // café" in Latin-1: 0xE9 is not UTF-8.
+            let bytes = Array.append "sum(T[a]) // caf"B [| 0xE9uy |]
+            File.WriteAllBytes(path, bytes)
+            Expect.equal (tess [ "format"; path ]).Code ExitCode.ok "shown, as File.ReadAllText reads it"
+            let r = tess [ "format"; path; "--save" ]
+            Expect.equal r.Code ExitCode.input r.Err
+            Expect.stringContains r.Err "UTF-8" ""
+            Expect.equal (File.ReadAllBytes path) bytes "left alone"
+
+        testCase "--save on malformed DAX: exit 3, the file is left alone"
+        <| fun () ->
+            use t = new TempDir()
+            let path = t.Combine "bad.dax"
+            File.WriteAllText(path, "sum(T[a]")
+            let r = tess [ "format"; path; "--save" ]
+            Expect.equal r.Code ExitCode.input ""
+            Expect.equal (File.ReadAllText path) "sum(T[a]" ""
+
+        testCase "--save needs a file: not with --expr or stdin, nor with --check or the model-only switches"
+        <| fun () ->
+            use t = new TempDir()
+            let path = t.Combine "q.dax"
+            File.WriteAllText(path, "sum(T[a])")
+
+            for args in
+                [
+                    [ "format"; "--expr"; "1"; "--save" ]
+                    [ "format"; "-"; "--save" ]
+                    [ "format"; path; "--save"; "--check" ]
+                    [ "format"; path; "--save"; "--stat" ]
+                    [ "format"; path; "--save-to"; t.Combine "out.dax" ]
+                ] do
+                let r = tess args
+                Expect.equal r.Code ExitCode.usage (String.concat " " args)
+
+            Expect.equal (File.ReadAllText path) "sum(T[a])" "unchanged"
+
         testCase "--semicolons keeps the dialect"
         <| fun () ->
             let r = tess [ "format"; "--expr"; "IF([a] > 1,5;2;3)"; "--semicolons" ]

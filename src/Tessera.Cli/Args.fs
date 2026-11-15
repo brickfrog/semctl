@@ -29,6 +29,7 @@ type CliArgs =
     | [<CliPrefix(CliPrefix.None)>] Format of ParseResults<FormatCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Connect of ParseResults<ConnectCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Query of ParseResults<QueryCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Preview of ParseResults<PreviewCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Deploy of ParseResults<DeployCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Data of ParseResults<DataCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Refresh of ParseResults<RefreshCommand.Args>
@@ -65,6 +66,7 @@ type CliArgs =
             | Format _ -> FormatCommand.summary
             | Connect _ -> ConnectCommand.summary
             | Query _ -> QueryCommand.summary
+            | Preview _ -> PreviewCommand.summary
             | Deploy _ -> DeployCommand.summary
             | Data _ -> DataCommand.summary
             | Refresh _ -> RefreshCommand.summary

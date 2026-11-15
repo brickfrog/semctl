@@ -1,0 +1,5 @@
+{
+  "source": "https://github.com/TabularEditor/TabularEditor/issues/506 (commented-out code `// Calculate()` and `-- Calculate()` must not be erased); expected derived by hand: comments keep their lines",
+  "options": {},
+  "expect": "same"
+}

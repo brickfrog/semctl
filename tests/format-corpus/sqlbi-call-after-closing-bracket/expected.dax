@@ -1,0 +1,6 @@
+CALCULATE (
+    SUM ( T[a] )
+)
+    - CALCULATE (
+          SUM ( T[b] )
+      )

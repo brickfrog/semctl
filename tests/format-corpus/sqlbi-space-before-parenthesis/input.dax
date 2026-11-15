@@ -1,0 +1,1 @@
+calculate([Sales],all('Date'),blank())

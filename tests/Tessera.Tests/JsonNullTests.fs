@@ -129,6 +129,8 @@ let tests =
                     "--formatted"
                     "EVALUATE ROW(\"x\", BLANK())"
                 ]
+                [ "preview"; model; "Sales"; "--data"; data ]
+                [ "init"; model ]
                 [ "test"; "run"; model ]
                 [ "test"; "snapshot"; model ]
                 [ "perspective"; "list"; model; "Sales View" ]

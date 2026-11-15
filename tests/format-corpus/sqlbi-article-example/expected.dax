@@ -1,0 +1,19 @@
+CALCULATE (
+    SUMX (
+        Orders,
+        Orders[Amount]
+    ),
+    FILTER (
+        ALL ( Customers ),
+        CALCULATE (
+            COUNTROWS ( Sales ),
+            ALL ( Calendar[Date] )
+        ) > 42 + 8 - 25 * ( 3 - 1 )
+            + 2 - 1 + 2 - 1
+            + CALCULATE (
+                  2 + 2 - 2
+                  + 2 - 2
+              )
+            - CALCULATE ( 4 )
+    )
+)
