@@ -176,7 +176,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
                                             SupportedCompatibilityLevels = server.SupportedCompatibilityLevels
                                         }
 
-                                        Deploy.plan opts diffOptions target local
+                                        SaveGate.deployPlan opts diffOptions target local
                                         |> Result.mapError (function
                                             | DeployFailed(_, database, messages) ->
                                                 DeployFailed(address.DataSource, database, messages)

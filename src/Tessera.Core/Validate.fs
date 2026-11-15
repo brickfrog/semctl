@@ -68,6 +68,7 @@ let rules = [
     "relationship-self-join", "a relationship from a table to itself"
     "invalid-sort-by", "a column sorted by itself, or by a column that is itself sorted by another"
     "tom-validation", "TOM's own validation, e.g. a property that refers to an object that can't be found"
+    "unknown-function", "a call to a function that is neither a DAX function nor a user-defined function of the model"
 ]
 
 let private issue rule severity (r: ObjectRef) property line message = {
@@ -510,6 +511,53 @@ let private tomValidation (db: Database) (g: Deps.Graph) =
             $"TOM's validation could not run: {ex.Message}"
     ]
 
+// --- unknown-function ----------------------------------------------------------------------------
+
+/// The calls in one DAX source (its body and, for a user-defined function, its parameter defaults),
+/// or None when it doesn't parse (other rules, or the server, report that).
+let callsIn (src: Deps.DaxSource) : DaxAst.NameRef list option =
+    let parsed =
+        if src.Owner.Ref.Kind = ObjectKind.Function && src.Property = "expression" then
+            DaxParser.parseFunction src.Dax |> Result.map DaxAst.functionReferences
+        else
+            DaxParser.parseExpression src.Dax |> Result.map DaxAst.references
+
+    match parsed with
+    | Ok refs -> Some(refs |> List.filter (fun r -> r.Kind = DaxAst.NameKind.Function))
+    | Error _ -> None
+
+/// Calls whose name is neither a DAX function (DaxFunctions) nor one of `functions`, the model's
+/// user-defined functions (names compared case-insensitively, dots and all).
+let unknownCalls (functions: string seq) (calls: DaxAst.NameRef list) : DaxAst.NameRef list =
+    let udfs = HashSet<string>(functions, StringComparer.OrdinalIgnoreCase)
+
+    calls
+    |> List.filter (fun c -> not (DaxFunctions.isBuiltIn c.Name) && not (udfs.Contains c.Name))
+
+let private unknownFunctions (g: Deps.Graph) =
+    let functions =
+        g.Entries
+        |> List.filter (fun e -> e.Ref.Kind = ObjectKind.Function)
+        |> List.map ObjectEntry.name
+
+    [
+        for s in Deps.daxSources g.Entries do
+            match callsIn s with
+            | None -> ()
+            | Some calls ->
+                for c in unknownCalls functions calls do
+                    {
+                        issue
+                            "unknown-function"
+                            Severity.Error
+                            s.Owner.Ref
+                            (Some s.Property)
+                            (Some(lineOf s.Dax c.Span.Start))
+                            $"{c.Name} is not a DAX function or a function of this model" with
+                            Column = Some(columnOf s.Dax c.Span.Start)
+                    }
+    ]
+
 /// Every issue in the model, in model-tree order, given its dependency graph (`Deps.build db`).
 let validateGraph (g: Deps.Graph) (db: Database) : Issue list =
     let order = g.Entries |> List.mapi (fun i e -> e.Ref, i) |> dict
@@ -528,6 +576,7 @@ let validateGraph (g: Deps.Graph) (db: Database) : Issue list =
         yield! relationships g
         yield! sortBy g
         yield! tomValidation db g
+        yield! unknownFunctions g
     ]
     // Stable: issues on one object keep rule order.
     |> List.sortBy position

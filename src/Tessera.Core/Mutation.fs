@@ -40,16 +40,31 @@ let private gatedRules =
         "duplicate-name"
         "invalid-token"
         "tom-validation"
+        "unknown-function"
     ]
 
-let private errors (db: Database) =
-    Validate.validate db
-    |> List.filter (fun i -> i.Severity = Validate.Severity.Error && gatedRules.Contains i.Rule)
+/// Checks the gate runs besides Validate's gated rules; only their error-severity issues gate.
+/// (ValidateSemantic's rules compile after the engine, so they can't be named here: SaveGate passes
+/// them in.)
+type Checks = Deps.Graph -> Database -> Validate.Issue list
 
-/// Apply `edit` to `db` (mutating it). Before-and-after comparison runs on a snapshot, so the
-/// change set is exact. Issues of renamed objects are matched to their old names, so they don't
-/// count as new.
-let apply (db: Database) (edit: Database -> Result<Effect, TessError>) : Result<Applied, TessError> =
+module Checks =
+    let none: Checks = fun _ _ -> []
+
+let private errorsWith (extra: Checks) (db: Database) =
+    let g = Deps.build db
+
+    (Validate.validateGraph g db
+     |> List.filter (fun i -> i.Severity = Validate.Severity.Error && gatedRules.Contains i.Rule))
+    @ (extra g db |> List.filter (fun i -> i.Severity = Validate.Severity.Error))
+
+/// `apply`, gating on `extra` too.
+let applyWith
+    (extra: Checks)
+    (db: Database)
+    (edit: Database -> Result<Effect, TessError>)
+    : Result<Applied, TessError> =
+    let errors = errorsWith extra
     let before = ModelIO.clone db
     let beforeErrors = errors before
 
@@ -83,18 +98,28 @@ let apply (db: Database) (edit: Database -> Result<Effect, TessError>) : Result<
             Effect = effect
         })
 
-/// The errors an edit is judged by (the save gate's): errors of the rules an edit can break.
-let gatedErrors (db: Database) = errors db
+/// Apply `edit` to `db` (mutating it). Before-and-after comparison runs on a snapshot, so the
+/// change set is exact. Issues of renamed objects are matched to their old names, so they don't
+/// count as new. Gates on Validate's rules only; SaveGate.apply adds ValidateSemantic's.
+let apply (db: Database) (edit: Database -> Result<Effect, TessError>) : Result<Applied, TessError> =
+    applyWith Checks.none db edit
 
-/// `apply`, also returning the gated errors present before the edit that are gone after it
-/// ("resolved"). Issues of renamed objects are matched under their old names, as in `apply`.
-let applyResolving
+/// `gatedErrors`, with `extra` too.
+let gatedErrorsWith (extra: Checks) (db: Database) = errorsWith extra db
+
+/// The errors an edit is judged by (the save gate's): errors of the rules an edit can break.
+let gatedErrors (db: Database) = gatedErrorsWith Checks.none db
+
+/// `applyResolving`, gating on `extra` too.
+let applyResolvingWith
+    (extra: Checks)
     (db: Database)
     (edit: Database -> Result<Effect, TessError>)
     : Result<Applied * Validate.Issue list, TessError> =
+    let errors = errorsWith extra
     let before = errors db
 
-    apply db edit
+    applyWith extra db edit
     |> Result.map (fun applied ->
         let oldRefOf =
             applied.Changes
@@ -107,3 +132,11 @@ let applyResolving
             |> Set.ofList
 
         applied, before |> List.filter (fun i -> not (after.Contains(i.Rule, i.Ref, i.Message))))
+
+/// `apply`, also returning the gated errors present before the edit that are gone after it
+/// ("resolved"). Issues of renamed objects are matched under their old names, as in `apply`.
+let applyResolving
+    (db: Database)
+    (edit: Database -> Result<Effect, TessError>)
+    : Result<Applied * Validate.Issue list, TessError> =
+    applyResolvingWith Checks.none db edit

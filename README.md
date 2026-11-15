@@ -527,6 +527,7 @@ summary line such as `2 errors, 1 warning`.
 | `relationship-self-join` | error | a relationship from a table to itself |
 | `invalid-sort-by` | warning | a column sorted by itself, or by a column that has its own sort-by column |
 | `tom-validation` | error | TOM's own validation, e.g. a sort-by column, level or relationship that names a column that doesn't exist |
+| `unknown-function` | error | a call to a function that is neither a DAX function nor one of the model's user-defined functions (ignoring case; `My.Lib.Twice` is one name), e.g. `NoSuchFn ( 1 )`, or a call left behind by `pkg remove --force`. DAX that doesn't parse is skipped |
 | `invalid-culture` | error | a model culture or translation language that isn't a culture name at all (`en US`) |
 | | warning | a well-formed name this system's culture data doesn't list (`English`, `xx-YY`): a server may still know it, as the lists differ by OS |
 | `calculate-variable` | warning | a variable as the first argument of `CALCULATE` or `CALCULATETABLE` (parentheses around it don't matter): it was evaluated where it was defined, so the filters don't change it. Variables as filter arguments are fine, and a function's parameters aren't variables |
@@ -534,8 +535,15 @@ summary line such as `2 errors, 1 warning`.
 | `week-without-weekly-calendar` | warning | a week-based time intelligence function (`DATESWTD`, `TOTALWTD`, `STARTOFWEEK`, `ENDOFWEEK`, `PREVIOUSWEEK`, `NEXTWEEK`, `OPENINGBALANCEWEEK`, `CLOSINGBALANCEWEEK`) in a model that has calendars but none that can tell weeks apart, or over a named calendar that can't. A calendar can when it tags Week, or Week of Year and Year, or another of Learn's "Period Uniqueness" sets, as the [local engine](#calendar-based-time-intelligence) reads them. Models without calendars aren't checked |
 
 The last four follow Tabular Editor 3's semantic analyzer (release notes 3.27.1, 3.18.0, 3.26.2 and 3.24.0).
-They read DAX as a syntax tree, so they skip DAX that doesn't parse. They run in `validate` only: the save gate
-of the editing commands and `deploy` don't use them.
+They read DAX as a syntax tree, so they skip DAX that doesn't parse. Their errors (`invalid-culture` for a name
+that isn't shaped like one, `ignore-outside-summarizecolumns`) gate a save and a deploy like any other error;
+their warnings never do.
+
+`unknown-function` knows DAX's functions from a list built on 2026-11-15 from Microsoft Learn's DAX function
+reference (every function in its table of contents) and dax.guide (which adds visual calculation functions,
+ones Power BI's own queries use, and deprecated ones such as `KEYWORDMATCH`); the list and its sources are in
+`src/Tessera.Core/DaxFunctions.fs`. A function Microsoft adds after that is reported as unknown, and an edit that
+introduces a call to one needs `--force` to save, until the list catches up.
 
 There is no rule for a compatibility level too low for the features a model uses, because TOM already refuses
 to load a `.bim` file or TMDL folder that uses an object, property or value its compatibility level doesn't have
@@ -600,8 +608,9 @@ set of conventions, the same as the Tabular Editor CLI's.
 
 **Safety:** a change that introduces new errors is shown, but `--save` refuses it (exit 1) unless `--force`.
 The checks are the `validate` rules an edit can break: unresolved and circular references, duplicate names,
-invalid tokens, and TOM's validation. Errors the model already had don't count, even on an object the edit
-renamed.
+invalid tokens, unknown functions, TOM's validation, and the errors of the syntax-tree rules (a malformed culture
+name, `IGNORE` outside `SUMMARIZECOLUMNS`). Errors the model already had don't count, even on an object the edit
+renamed. `tess interactive` and `tess mcp` gate their saves on the same checks.
 
 ### Renaming (`rename`)
 
@@ -1964,7 +1973,7 @@ doesn't exist yet takes everything from the model except role members.
 
 Two things stop `--execute`:
 - the database exists and `--overwrite` isn't given (exit 4);
-- the deployed model would have validation errors the current one doesn't, without `--force` (exit 1). The dry run
+- the deployed model would have errors from any `validate` rule that the current one doesn't, without `--force` (exit 1). The dry run
   lists them.
 
 If the server rejects the script or reports errors running it, that is exit 5 with its messages. After a

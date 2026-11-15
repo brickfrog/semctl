@@ -126,6 +126,7 @@
     <Compile Include="WatchTests.fs" />
     <Compile Include="CompletionTests.fs" />
     <Compile Include="ValidateSemanticTests.fs" />
+    <Compile Include="UnknownFunctionTests.fs" />
     <Compile Include="BpaFixTests.fs" />
     <Compile Include="BpaFixCommandTests.fs" />
     <Compile Include="PreviewCommandTests.fs" />

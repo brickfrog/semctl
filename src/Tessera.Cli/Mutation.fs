@@ -173,7 +173,7 @@ and runWith
         let files = ref []
 
         let applied =
-            Mutation.apply db (fun db ->
+            SaveGate.apply db (fun db ->
                 edit source db
                 |> Result.map (fun (effect, fs) ->
                     files.Value <- fs

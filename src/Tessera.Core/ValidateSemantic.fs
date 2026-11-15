@@ -1,7 +1,7 @@
 /// Checks from Tabular Editor 3's semantic analyzer that read DAX as a tree (DaxParser), plus the
 /// model's cultures and calendars. `tess validate` runs them with Validate's rules
-/// (`validateGraph`). The save gate (Mutation) and `deploy` run only `Validate.validate`, so these
-/// never block an edit or a deploy.
+/// (`validateGraph`). The save gate and `deploy` run them too, through SaveGate: their
+/// error-severity issues block an edit or a deploy that introduces one.
 ///
 /// Sources, by rule (TE3's release notes):
 ///   - invalid-culture: 3.27.1 "an invalid culture name was accepted for a model's Culture and a
