@@ -50,6 +50,7 @@ talks only to the server you name, as does `schemacheck --source sql:...`.
 | Newtonsoft.Json | © James Newton-King (<https://www.newtonsoft.com/json>) |
 | System.IO.Packaging | © Microsoft Corporation (.NET Foundation) |
 | The `Vertipaq_*` annotation names, from Michael Kovalsky's Tabular Editor scripts (`VertipaqAnnotations.cs`, `VpaxToTabularEditor.cs`) | © Michael Kovalsky (<https://github.com/m-kovalsky/Tabular>) |
+| Roslyn: Microsoft.CodeAnalysis, Microsoft.CodeAnalysis.CSharp (the C# compiler, for `tess csharp`) | © .NET Foundation and Contributors (<https://github.com/dotnet/roslyn>) |
 | Tabular Editor 2: small portions adapted in `src/Tessera.Core` (for example the BPA token codes in `BpaDaxToken.fs`, and the database.json folder format in `FolderFormat.fs`), marked in the source; a TE2 test fixture in `tests/Tessera.Tests/Te2Fixture.fs` | © 2017 Daniel Otykier (<https://github.com/TabularEditor/TabularEditor>) |
 
 The MIT license text:

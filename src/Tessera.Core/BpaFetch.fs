@@ -1,4 +1,4 @@
-/// The only network code in tessera: fetching an external BPA rule file a model lists, used only
+/// Network code in Tessera.Core (with PkgFetch, for `pkg --from daxlib`): fetching an external BPA rule file a model lists, used only
 /// when the user passes --allow-external-rules. The request carries nothing about the model: no
 /// cookies, no credentials, no body, only a generic User-Agent.
 module Tessera.BpaFetch

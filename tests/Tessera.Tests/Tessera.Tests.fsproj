@@ -132,6 +132,8 @@
     <Compile Include="VertipaqTests.fs" />
     <Compile Include="SchemaCheckTests.fs" />
     <Compile Include="SchemaCheckSqlLiveTests.fs" />
+    <Compile Include="PkgTests.fs" />
+    <Compile Include="CsharpTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
 

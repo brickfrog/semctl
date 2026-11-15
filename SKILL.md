@@ -38,9 +38,10 @@ option; the README has the details.
 - **No network.** tess makes no network call unless the command names a server: an `xmla:<server>;<database>`
   model argument (any command), `active:` or `profile:<name>` when that connection is a server, `connect`, the
   server `deploy` compares with and deploys to (even on a dry run), `bpa --allow-external-rules` with a rule URL,
-  or `schemacheck --source sql:<server>;<database>`. There's no telemetry and no update check. `format` formats
-  locally and never calls daxformatter.com. A `query`, `preview`, `test run` or `vertipaq` with `--data` stays on
-  the machine, and so does `vertipaq --import`.
+  `schemacheck --source sql:<server>;<database>`, or `pkg` with `--from daxlib` (or `TESS_PKG_SOURCE=daxlib`),
+  which reaches only https://api.daxlib.org. There's no telemetry and no update check. `format` formats locally
+  and never calls daxformatter.com. A `query`, `preview`, `test run` or `vertipaq` with `--data` stays on the
+  machine, and so does `vertipaq --import`.
 - **Credentials come from the environment** (`TESS_XMLA_TOKEN`, `TESS_XMLA_CLIENT_ID` / `_TENANT_ID` /
   `_CLIENT_SECRET`, ...; for `schemacheck`'s SQL source `TESS_SQL_TOKEN`, `TESS_SQL_USER` / `TESS_SQL_PASSWORD`), never from the command line: a secret in an argument is refused. tess never prints a
   secret.
@@ -106,6 +107,7 @@ tess vertipaq ./Sales.pbip --data ./fixture --export out.vpax [--obfuscate]
 A statistic tess couldn't read is left out of the JSON (never 0). `"estimated": true` means the sizes are
 estimates from fixture data, not VertiPaq's: compare them with each other, not with a server. `--obfuscate` writes
 `<name>.dict` next to the file; it holds the real names, so don't send it with the `.vpax`.
+
 A session holds one model in memory and stages edits until `save` (the same staged model `tess mcp` serves).
 Pipe a script into it: it stops at the first failing command with that command's exit code, and input that ends
 with unsaved edits fails with exit 1 (`unsaved-changes`), so end with `save` or `exit --force`:
@@ -126,6 +128,22 @@ terminal's active connection, named `active:` as a model argument; `tess profile
 `--server ... --database ...`) names one, used as `profile:<name>` or with `tess connect --profile <name>`. Set
 `TESS_SESSION=<name>` when your commands don't run from one terminal (an agent's shell may start a new one each
 time), and `TESS_STATE_DIR` / `TESS_CONFIG` to keep the state somewhere of your own.
+
+DAX function packages from daxlib.org, installed as Tabular Editor 3 installs them (a source is always named):
+
+```sh
+tess pkg list ./Sales.pbip --json                                  # installed packages, changed functions
+tess pkg search svg --from ./daxlib --json                         # a local daxlib checkout or .daxpkg folder
+tess pkg install ./Sales.pbip DaxLib.SVG --from ./daxlib --json    # dry run; --save writes
+tess pkg update ./Sales.pbip --from daxlib --json                  # `daxlib` = online (daxlib.org); --offline refuses it
+tess pkg remove ./Sales.pbip DaxLib.SVG --save                     # refused while DAX calls its functions
+```
+
+C# scripts against the model's TOM (`Model`), shown as a diff like any edit; output goes to stderr:
+
+```sh
+tess csharp ./Sales.pbip fix.csx --json               # dry run; --save writes; a compile error names the script's line
+```
 
 ## Good habits
 

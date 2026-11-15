@@ -4,7 +4,7 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect profile session query preview deploy data refresh test completion mcp vertipaq schemacheck interactive' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect profile session query preview deploy data refresh test completion mcp vertipaq schemacheck interactive pkg csharp' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
@@ -14,6 +14,7 @@ _tess_children() {
         'session') _tess_r='show list clear prune' ;;
         'data') _tess_r='init check info embed' ;;
         'test') _tess_r='run init snapshot compare list' ;;
+        'pkg') _tess_r='list search show install update remove' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -87,6 +88,14 @@ _tess_options() {
         'vertipaq') _tess_r='--data --import --tables --columns --relationships --partitions --hierarchies --all --top --export --obfuscate --dictionary --annotate --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'schemacheck') _tess_r='--source --fail-on --ci --trx --sarif --update --drop-removed-columns --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'interactive') _tess_r='--echo --batch --no-batch --no-banner --history --json -j --help -h' ;;
+        'pkg') _tess_r='--json -j --help -h' ;;
+        'pkg list') _tess_r='--json -j --help -h' ;;
+        'pkg search') _tess_r='--from --offline --prerelease --json -j --help -h' ;;
+        'pkg show') _tess_r='--from --offline --prerelease --json -j --help -h' ;;
+        'pkg install') _tess_r='--from --offline --prerelease --overwrite --skip-existing --ignore-dependencies --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'pkg update') _tess_r='--from --offline --prerelease --discard-changes --keep-changes --overwrite --skip-existing --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'pkg remove') _tess_r='--discard-changes --keep-changes --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'csharp') _tess_r='--save --save-to --force --stat --name-only --json -j --help -h' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -312,6 +321,14 @@ _tess_value() {
         'schemacheck|--sarif') _tess_r='path' ;;
         'schemacheck|--save-to') _tess_r='path' ;;
         'interactive|--history') _tess_r='path' ;;
+        'pkg search|--from') _tess_r='path' ;;
+        'pkg show|--from') _tess_r='path' ;;
+        'pkg install|--from') _tess_r='path' ;;
+        'pkg install|--save-to') _tess_r='path' ;;
+        'pkg update|--from') _tess_r='path' ;;
+        'pkg update|--save-to') _tess_r='path' ;;
+        'pkg remove|--save-to') _tess_r='path' ;;
+        'csharp|--save-to') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -415,6 +432,17 @@ _tess_positional() {
         'schemacheck|0') _tess_r='path' ;;
         'schemacheck|'*) _tess_r='text' ;;
         'interactive|0') _tess_r='path' ;;
+        'pkg list|0') _tess_r='path' ;;
+        'pkg search|0') _tess_r='text' ;;
+        'pkg show|0') _tess_r='text' ;;
+        'pkg install|0') _tess_r='path' ;;
+        'pkg install|'*) _tess_r='text' ;;
+        'pkg update|0') _tess_r='path' ;;
+        'pkg update|'*) _tess_r='text' ;;
+        'pkg remove|0') _tess_r='path' ;;
+        'pkg remove|'*) _tess_r='text' ;;
+        'csharp|0') _tess_r='path' ;;
+        'csharp|1') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }

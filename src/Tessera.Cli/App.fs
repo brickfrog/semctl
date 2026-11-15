@@ -245,6 +245,8 @@ let rec runWithInput
                     | Some(Mcp args) -> McpCommand.run ctx args input
                     | Some(Vertipaq args) -> VertipaqCommand.run ctx args
                     | Some(Schemacheck args) -> SchemaCheckCommand.run ctx args
+                    | Some(Pkg args) -> PkgCommand.run ctx args
+                    | Some(Csharp args) -> CsharpCommand.run ctx args
                     | Some(Interactive args) ->
                         let host: InteractiveCommand.Host = {
                             // Each line runs as a command of its own, with this run's context.

@@ -88,6 +88,17 @@ module ExitCode =
         | NoActiveConnection _ -> input
         | InvalidConfig _ -> input
         | UnsavedChanges _ -> findings
+        | NoPackageSource _ -> usage
+        | PackageSourceUnreadable _
+        | PackageNotFound _
+        | PackageVersionNotFound _
+        | InvalidPackage _
+        | PackageConflict _
+        | PackageNotInstalled _
+        | InvalidPackageMetadata _ -> input
+        | PackageFetchFailed _ -> remote
+        | CSharpCompileFailed _
+        | CSharpScriptFailed _ -> input
 
 let version () =
     let asm = Assembly.GetExecutingAssembly()

@@ -73,6 +73,8 @@ let tests =
             let data = t.Combine "data"
             let script = t.Combine "script.dax"
             File.WriteAllText(script, "MEASURE Sales[Scripted] = 1\n")
+            let csharp = t.Combine "s.csx"
+            File.WriteAllText(csharp, "Model.Tables[\"Sales\"].Measures[\"Total\"].Description = \"x\";\n")
 
             write
                 (t.Combine(".tess-tests", "s.test.yaml"))
@@ -92,6 +94,8 @@ let tests =
                     "    skip: not yet"
                     ""
                 ])
+
+            let pkgSource = Path.Combine(__SOURCE_DIRECTORY__, "pkg", "daxlib")
 
             let local = [
                 [ "info"; model ]
@@ -139,6 +143,12 @@ let tests =
                 [ "script"; "apply"; model; script ]
                 [ "get"; model; "column:Sales/Amount"; "-p"; "sortByColumn" ]
                 [ "get"; model; "column:Sales/Amount"; "-p"; "description" ]
+                [ "pkg"; "list"; model ]
+                [ "pkg"; "search"; "--from"; pkgSource ]
+                [ "pkg"; "show"; "TimeSeries.MovingAverage"; "--from"; pkgSource ]
+                [ "pkg"; "install"; model; "TimeSeries.MovingAverage"; "--from"; pkgSource ]
+                [ "pkg"; "update"; model; "--from"; pkgSource ]
+                [ "csharp"; model; csharp ]
             ]
 
             let failures = [

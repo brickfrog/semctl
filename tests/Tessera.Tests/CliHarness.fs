@@ -21,6 +21,8 @@ let private configVariables =
         "XDG_STATE_HOME"
         "LOCALAPPDATA"
     ]
+    // A developer's TESS_PKG_SOURCE (which may name daxlib.org) never reaches a test.
+    + set [ "TESS_PKG_SOURCE" ]
     // A developer's real server credentials never reach a test either.
     + set Tessera.Xmla.Credentials.Var.all
     + set Tessera.Xmla.SqlCredentials.Var.all

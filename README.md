@@ -1850,8 +1850,9 @@ Only commands given a server contact anything, and only these, all through the c
   the region's host and `global.asazure.windows.net`.
 
 tess adds no telemetry and no other calls. The test suite checks, on the compiled assemblies, that
-`Tessera.Core` uses no network type outside the explicit BPA rule download, that the CLI uses none itself, and that
-in `Tessera.Xmla` only the live connector (and `schemacheck`'s live SQL describer, `LiveSql`) does.
+`Tessera.Core` uses no network type outside the explicit BPA rule download and `pkg`'s daxlib.org fetch, that the
+CLI uses none itself, and that in `Tessera.Xmla` only the live connector (and `schemacheck`'s live SQL describer,
+`LiveSql`) does.
 
 #### Remote models in other commands
 
@@ -3563,6 +3564,136 @@ set. The findings go to stderr.
 
 `--update` doesn't take `--fail-on`, `--ci`, `--trx` or `--sarif`. `tess set <model> <table> --update-schema --source
 <src>` does the same for one table (or for every table, with `model` as the object), with `set`'s switches.
+
+### DAX packages (`pkg`)
+
+[daxlib.org](https://daxlib.org) publishes libraries of DAX user-defined functions ("packages"). `tess pkg`
+installs them into a model the way Tabular Editor 3's
+[DAX Package Manager](https://docs.tabulareditor.com/en/features/dax-package-manager.html) (3.24+) does, so a
+model either tool touched shows the same installed packages in the other.
+
+```sh
+tess pkg list ./Sales.pbip                                   # installed packages (reads only the model)
+tess pkg search svg --from ~/src/daxlib                      # a daxlib checkout, offline
+tess pkg show DaxLib.SVG --from ./packages                   # versions, functions, dependencies
+tess pkg install ./Sales.pbip DaxLib.SVG --from ./packages   # dry run: the diff
+tess pkg install ./Sales.pbip DaxLib.SVG@1.0.0 --from ./packages --save
+tess pkg update ./Sales.pbip --from ./packages               # every package to its latest version: the diff
+tess pkg remove ./Sales.pbip DaxLib.SVG --save               # reads only the model
+tess pkg search svg --from daxlib                            # online: daxlib.org's API (see below)
+```
+
+Packages hold functions, which need compatibility level 1702 or higher; a lower model is refused, not upgraded.
+`install`, `update` and `remove` are editing commands (dry run unless `--save`, `--save-to`, the save gate,
+`--stat`, `--name-only`, `--json` as for [the other editing commands](#editing-commands)). Several packages can be
+named at once; they apply in order as one change.
+
+**Sources.** A package is a folder holding `manifest.daxlib` and `lib/functions.tmdl`, or the same as a `.daxpkg`
+(zip) file. `--from` takes one package (folder or `.daxpkg`), a `.zip` of many (every folder in it holding a
+`manifest.daxlib`: GitHub's "Download ZIP" of [github.com/daxlib/daxlib](https://github.com/daxlib/daxlib)), or a
+folder searched for any of these (up to six levels deep, hidden folders skipped): a checkout of daxlib, or a
+folder of downloaded `.daxpkg` files. Package files over 16 MB and zips over 256 MB are refused. Without `--from`, the `TESS_PKG_SOURCE` environment variable names the
+source (a path, or `daxlib`). With neither, the command fails: tess never picks a source, and never goes online, on
+its own. `list` and `remove` need no source at all.
+
+**Online (daxlib.org).** Only `--from daxlib` or `--from https://api.daxlib.org` (or the same in `TESS_PKG_SOURCE`)
+goes online, and `--offline` refuses it even then. `daxlib` while a file or folder of that name is in the current
+directory (a clone is called that) is refused as ambiguous: pass `./daxlib` for the folder, or the URL. tess then sends HTTPS GET requests to `https://api.daxlib.org` and nowhere else (another host, plain
+http, a non-default port or a redirect is refused), with no cookies, no credentials, no body, and the User-Agent
+`tessera`. Nothing about the model is sent except, by `update`, the IDs of the packages being updated: with no
+IDs named, every installed package recorded under daxlib.org's provider (one recorded under another provider is
+skipped with a warning, its ID never sent). The requests are the ones daxlib's own client makes:
+
+| What | URL |
+|---|---|
+| `search <text>` | `https://api.daxlib.org/v1/query-packages?q=<text>&skip=<n>&take=100&prerelease=<true\|false>` (pages of 100, at most 20) |
+| a package's versions | `https://api.daxlib.org/v1/package/<id>/versions.json` |
+| a package version | `https://api.daxlib.org/v1/package/<id>/<version>/<id>.<version>.daxpkg` |
+
+IDs and versions are lower-cased in the URLs. `show`, `install` and `update` fetch the versions, then the package;
+`update` does so for each package it updates. Requests time out after 30 seconds; a response over 16 MB is
+refused. The tests never go online: they use local folders and a fake of the API.
+
+**What is recorded** (TE3's format, checked against a model TE3 wrote,
+[spaceparts-analytics](https://github.com/TabularEditor/spaceparts-analytics)):
+- on the model, the extended property `TabularEditor_ModelDaxPkgTable` (JSON): one entry per installed package
+  under a numeric key, `{"Provider": "https://api.daxlib.org", "PackageId": ..., "Version": ...}`, indented as TE3
+  writes it, and `TabularEditor_ModelDaxPkgSeq`, the next key (it goes up by one per install);
+- on each of the package's functions, `TabularEditor_ObjDaxPkgHandle` (its package's key) and
+  `TabularEditor_ObjDaxPkgContentHash`, the upper-case hex SHA-256 of the function's expression as installed (for
+  spaceparts' unchanged functions, installing the same package versions with tess gives the same hashes, keys,
+  table and sequence, byte for byte).
+
+The provider recorded is `https://api.daxlib.org` for packages from a local source too (they are daxlib's
+packages), so TE3 offers their updates. Everything else in the package's TMDL (descriptions, annotations such as
+`DAXLIB_PackageId`) is copied as it is; tracking properties a package carries itself are dropped.
+
+**Conflicts**, refused unless a flag says what to do (TE3 asks the same questions in a dialog):
+- a package function whose name the model already has: `--overwrite` replaces the model's (keeping its lineage
+  tag), `--skip-existing` keeps it;
+- on `update` and `remove`, package functions changed since they were installed (their expression no longer
+  matches the hash; line endings don't count, as in TE3 3.24.1): `--discard-changes` overwrites or removes them,
+  `--keep-changes` leaves them (on `remove`, no longer linked to the package);
+- functions that other DAX still calls, on `remove` or when an update drops them: refused as by
+  [`remove`](#removing-objects-remove), unless `--force`;
+- a package that depends on packages the model doesn't have: `--ignore-dependencies` installs it anyway
+  (dependencies are not installed for you);
+- installing a package that is installed already: use `update`, which also takes `<id>@<version>` to move to an
+  older version. An update keeps the package's key.
+
+`list --json` gives `packages[]` (`id`, `version`, `provider`, `key`, `functions[]` with `name`, `ref` and `state`:
+`unchanged`, `changed` or `unknown` when there is no hash) and `orphans[]` (functions with a key the table
+doesn't have). Error codes: `no-package-source` (exit 2), `package-not-found`, `package-version-not-found`,
+`invalid-package`, `package-source-unreadable`, `package-conflict`, `package-not-installed`,
+`invalid-package-metadata` (exit 3), `package-fetch-failed` (exit 5).
+
+### C# scripts (`csharp`)
+
+`tess csharp` runs a C# script against the model's TOM objects, then shows what it changed, as the
+[editing commands](#editing-commands) do: a dry run unless `--save` or `--save-to`, with the save gate,
+`--stat`, `--name-only` and `--json`. The command's name is provisional (`script` is taken by DAX scripts).
+
+```sh
+tess csharp ./Sales.pbip format-measures.csx           # dry run: the diff
+tess csharp ./Sales.pbip format-measures.csx --save
+```
+
+```csharp
+// format-measures.csx
+foreach (var m in Model.Tables.SelectMany(t => t.Measures).Where(m => m.Name.EndsWith("%")))
+{
+    m.FormatString = "0.0%";
+    Info($"formatted {m.Name}");
+}
+```
+
+- **The script** is a C# file of top-level statements. `using` directives, local functions and classes work as in
+  any C# file.
+- **References:** the whole .NET 10 shared framework, TOM and Tessera.Core. `#r` and NuGet packages are not
+  supported.
+- **Names TOM shares with the framework** are ambiguous, because TOM's namespace is imported: write
+  `System.Text.Json.JsonSerializer`, not `JsonSerializer`.
+- **In scope:**
+  - `System`, `System.Linq`, `System.Collections.Generic` and `Microsoft.AnalysisServices.Tabular`;
+  - `Model`, the model's TOM `Model`;
+  - `Info(text)`, `Warning(text)` and `Output(value)`, which write to stderr;
+  - `Error(text)`, which fails the script.
+- **The `TESS` symbol** is defined, so `#if TESS` tells a script it runs under tess.
+- **TE scripts:** scripts written against Tabular Editor's own object model, such as `Model.AllMeasures`,
+  `Selected` or `FormatDax`, don't compile here. Only scripts that stay within raw TOM run unchanged.
+- **Output:** everything the script writes, its `Console` output included, goes to stderr, so `--json` on stdout
+  stays clean.
+- **Errors:**
+  - a compile error is reported at the script's own file, line and column (`script-compile-failed`, exit 3);
+  - an exception or `Error()` is `script-failed` (exit 3);
+  - a failed script saves nothing.
+
+**Security.** The script must be a local file: tess never fetches one (a URL is refused) and never runs one on its
+own. It runs inside tess with your rights and can do anything you can, network included. tess's offline guarantee
+covers tess, not the code you give it. Treat a script like any program you run. It is compiled in memory with
+Roslyn's C# compiler and needs no files of its own on disk, so it works in the single-file binary. The
+measurements and the design are in [docs/scripting-design.md](docs/scripting-design.md). It has been run on
+Linux only so far.
 
 ### Findings JSON and CI annotations
 

@@ -62,6 +62,8 @@
     <Compile Include="Commands/VertipaqCommand.fs" />
     <Compile Include="LineEditor.fs" />
     <Compile Include="Commands/InteractiveCommand.fs" />
+    <Compile Include="Commands/PkgCommand.fs" />
+    <Compile Include="Commands/CsharpCommand.fs" />
     <!-- New commands: add Commands/<Name>Command.fs above, a case in Args.fs, a line in App.fs. -->
     <Compile Include="Args.fs" />
     <Compile Include="App.fs" />
@@ -111,6 +113,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Tessera.Core/Tessera.Core.fsproj" />
+    <ProjectReference Include="../Tessera.Scripting/Tessera.Scripting.fsproj" />
     <ProjectReference Include="../Tessera.Xmla/Tessera.Xmla.fsproj" />
   </ItemGroup>
 

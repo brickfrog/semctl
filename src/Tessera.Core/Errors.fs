@@ -121,6 +121,29 @@ type TessError =
     | InvalidConfig of path: string * reason: string
     /// `tess interactive` ended unattended with staged edits that were never saved.
     | UnsavedChanges of count: int
+    /// `pkg`: no package source was named (no --from, no TESS_PKG_SOURCE), or --offline refused one.
+    | NoPackageSource of reason: string
+    /// `pkg`: a package source that can't be read (a folder or file that isn't one), or its index.
+    | PackageSourceUnreadable of source: string * reason: string
+    /// `pkg`: the online source couldn't be reached or answered with an error.
+    | PackageFetchFailed of url: string * reason: string
+    /// `pkg`: no package with this ID in the source (with close matches).
+    | PackageNotFound of packageId: string * source: string * suggestions: string list
+    /// `pkg`: the source has the package but not this version (with the versions it has).
+    | PackageVersionNotFound of packageId: string * version: string * available: string list
+    /// `pkg`: a package whose manifest or functions can't be read.
+    | InvalidPackage of origin: string * reason: string
+    /// `pkg`: an install, update or remove that would overwrite or lose something (name conflicts,
+    /// functions changed since they were installed, missing dependencies), refused without a flag.
+    | PackageConflict of packageId: string * reason: string * details: string list
+    /// `pkg`: the model has no installed package with this ID (with the ones it has).
+    | PackageNotInstalled of packageId: string * installed: string list
+    /// `pkg`: the model's package metadata (TabularEditor_ModelDaxPkgTable) can't be read.
+    | InvalidPackageMetadata of reason: string
+    /// `csharp`: the script doesn't compile (diagnostics as "file(line,col): error CSxxxx: ...").
+    | CSharpCompileFailed of path: string * diagnostics: string list
+    /// `csharp`: the script threw, or called Error().
+    | CSharpScriptFailed of path: string * reason: string
 
 module TessError =
 
@@ -195,6 +218,17 @@ module TessError =
         | NoActiveConnection _ -> "no-active-connection"
         | InvalidConfig _ -> "invalid-config"
         | UnsavedChanges _ -> "unsaved-changes"
+        | NoPackageSource _ -> "no-package-source"
+        | PackageSourceUnreadable _ -> "package-source-unreadable"
+        | PackageFetchFailed _ -> "package-fetch-failed"
+        | PackageNotFound _ -> "package-not-found"
+        | PackageVersionNotFound _ -> "package-version-not-found"
+        | InvalidPackage _ -> "invalid-package"
+        | PackageConflict _ -> "package-conflict"
+        | PackageNotInstalled _ -> "package-not-installed"
+        | InvalidPackageMetadata _ -> "invalid-package-metadata"
+        | CSharpCompileFailed _ -> "script-compile-failed"
+        | CSharpScriptFailed _ -> "script-failed"
 
     let rec message =
         function
@@ -374,6 +408,40 @@ module TessError =
 
             $"The session ended with {changes} that {verb} never saved. End the input with `save` "
             + "(or `exit --force` to discard them on purpose)."
+        | NoPackageSource reason -> reason
+        | PackageSourceUnreadable(source, reason) -> $"Can't read the package source {source}: {reason}"
+        | PackageFetchFailed(url, reason) -> $"Can't fetch {url}: {reason}"
+        | PackageNotFound(id, source, suggestions) ->
+            let hint =
+                match suggestions with
+                | [] -> ""
+                | s ->
+                    " (did you mean "
+                    + (s |> List.map (fun x -> $"'{x}'") |> String.concat ", ")
+                    + "?)"
+
+            $"No package '{id}' in {source}{hint}"
+        | PackageVersionNotFound(id, version, available) ->
+            match available with
+            | [] -> $"Package '{id}' has no version {version}"
+            | vs -> $"Package '{id}' has no version {version}; it has: " + String.concat ", " vs
+        | InvalidPackage(origin, reason) -> $"Invalid package {origin}: {reason}"
+        | PackageConflict(id, reason, details) ->
+            match details with
+            | [] -> $"{id}: {reason}"
+            | ds -> $"{id}: {reason}: " + String.concat ", " ds
+        | PackageNotInstalled(id, installed) ->
+            match installed with
+            | [] -> $"Package '{id}' is not installed in the model; it has no packages"
+            | ids ->
+                $"Package '{id}' is not installed in the model; it has: "
+                + String.concat ", " ids
+        | InvalidPackageMetadata reason -> $"The model's DAX package metadata can't be read: {reason}"
+        | CSharpCompileFailed(path, diagnostics) ->
+            let n = diagnostics.Length
+            let errors = if n = 1 then "1 error" else $"{n} errors"
+            $"{path} doesn't compile ({errors}):\n" + String.concat "\n" diagnostics
+        | CSharpScriptFailed(path, reason) -> $"{path} failed: {reason}"
 
     /// Close matches for what wasn't found ("did you mean"), for the JSON error's `suggestions`.
     let rec suggestions =
@@ -381,5 +449,6 @@ module TessError =
         | UnknownProperty(_, _, s) -> s
         | ObjectNotFoundSuggest(_, candidates) -> candidates
         | RuleNotFoundSuggest(_, _, s) -> s
+        | PackageNotFound(_, _, s) -> s
         | ScriptObjectFailed(_, _, _, inner) -> suggestions inner
         | _ -> []
