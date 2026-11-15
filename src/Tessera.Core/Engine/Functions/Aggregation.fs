@@ -204,14 +204,17 @@ module Aggregation =
 
         c, counts
 
+    /// The expression's value in each row of the table, in order (rows with nothing to aggregate
+    /// may share a value: GroupAgg.fs).
     let private iterate (ev: IEval) (ctx: Ctx) (call: Call) : DaxValue seq =
         let table = ev.Table(ctx, call.Args.[0])
-        let expr = call.Args.[1]
+        GroupAgg.iterate ev ctx table call.Args.[1] false
 
-        seq {
-            for row in 0 .. table.Count - 1 do
-                yield ev.Scalar(Context.pushRow ctx table row, expr)
-        }
+    /// `iterate` for an aggregation that skips BLANKs (`Aggregate.sum`): rows known to be BLANK may
+    /// be left out.
+    let private iterateSkippingBlanks (ev: IEval) (ctx: Ctx) (call: Call) : DaxValue seq =
+        let table = ev.Table(ctx, call.Args.[0])
+        GroupAgg.iterate ev ctx table call.Args.[1] true
 
     let private columnOnly (name: string) (args: Expr list) =
         match args with
@@ -460,7 +463,7 @@ module Aggregation =
         |> Fn.withCheck (columnOnly "DISTINCTCOUNTNOBLANK")
 
         Fn.scalar "SUMX" "Aggregation" (2, 2) (fun ev ctx args -> numericOf ev ctx args.[1]) (fun ev ctx call ->
-            Aggregate.sum ctx call.Span "SUMX" (iterate ev ctx call))
+            Aggregate.sum ctx call.Span "SUMX" (iterateSkippingBlanks ev ctx call))
 
         Fn.scalar "AVERAGEX" "Aggregation" (2, 2) (fun ev ctx args -> averageType ev ctx args.[1]) (fun ev ctx call ->
             Aggregate.average ctx call.Span "AVERAGEX" (iterate ev ctx call))

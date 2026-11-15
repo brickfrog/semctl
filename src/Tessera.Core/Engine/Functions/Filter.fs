@@ -1015,6 +1015,10 @@ module Filter =
         fc <- Filters.add fc (filters |> List.filter snd |> List.collect fst) true
         { moved with Filter = fc }
 
+    /// CALCULATE evaluated as written: its context, then its expression.
+    let private calculateRowByRow (ev: IEval) (ctx: Ctx) (call: Call) : DaxValue =
+        ev.Scalar(calculateContext ev ctx call, call.Args.[0])
+
     let private checkCalculate (args: Expr list) : string option =
         let filters = args |> List.skip (min 1 args.Length)
         let named (names: string list) (a: Expr) = (isCallTo names a).IsSome
@@ -1108,8 +1112,9 @@ module Filter =
         not filters.IsEmpty
 
     let functions: DaxFunction list = [
+        // In a row context, by group where that is exact (GroupAgg.fs).
         Fn.scalar "CALCULATE" "Filter" (1, -1) (Fn.typeOfArg 0) (fun ev ctx call ->
-            ev.Scalar(calculateContext ev ctx call, call.Args.[0]))
+            GroupAgg.calculate ev ctx call calculateRowByRow)
         |> Fn.withCheck checkCalculate
 
         Fn.table "CALCULATETABLE" "Filter" (1, -1) (fun ev ctx call ->

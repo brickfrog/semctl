@@ -479,6 +479,30 @@ module Filters =
         else
             withBase made (through (without drop) fc.Config 1 fc.Base)
 
+    /// The context of the filters of `fc` that adding `filters` (not under KEEPFILTERS) keeps: the
+    /// shared part of the result of `add` (every row of an iteration keeps the same ones), the
+    /// same object for the same columns replaced.
+    let keptBy (fc: FilterCtx) (filters: Filter list) : FilterCtx =
+        let tests = filters |> List.map covers
+        let drop (c: BColumn) = tests |> List.exists (fun t -> t c)
+        let model = fc.Config.Model
+
+        if model.Computing.Count > 0 then
+            // What `without` refuses depends on what is being computed.
+            through (without drop) fc.Config 0 fc
+        else
+            let key = coverKey filters
+
+            match fc.State.Bases.TryGetValue key with
+            | true, b -> b :?> FilterCtx
+            | _ ->
+                let b = through (without drop) fc.Config 0 fc
+
+                if fc.State.Bases.Count < 16 then
+                    fc.State.Bases.[key] <- b
+
+                b
+
     /// The context with filters added. Unless `keep` (KEEPFILTERS), each new filter first removes
     /// the context's filters on its columns; the new filters do not remove one another.
     let add (fc: FilterCtx) (filters: Filter list) (keep: bool) : FilterCtx =
@@ -489,34 +513,14 @@ module Filters =
             let fc = CalendarHooks.beforeAdd fc filters keep
             let added = List.collect (spell fc.Config) filters
 
-            // The filters kept, as a context: the shared part of the result (every row of an
-            // iteration keeps the same ones), the same object for the same columns replaced.
+            // The filters kept, as a context (see `keptBy`).
             let kept, scope =
                 if keep then
                     fc, fc.Scope
                 else
                     let tests = filters |> List.map covers
                     let drop (c: BColumn) = tests |> List.exists (fun t -> t c)
-                    let model = fc.Config.Model
-
-                    let kept =
-                        if model.Computing.Count > 0 then
-                            // What `without` refuses depends on what is being computed.
-                            through (without drop) fc.Config 0 fc
-                        else
-                            let key = coverKey filters
-
-                            match fc.State.Bases.TryGetValue key with
-                            | true, b -> b :?> FilterCtx
-                            | _ ->
-                                let b = through (without drop) fc.Config 0 fc
-
-                                if fc.State.Bases.Count < 16 then
-                                    fc.State.Bases.[key] <- b
-
-                                b
-
-                    kept, Unfiltered drop :: fc.Scope
+                    keptBy fc filters, Unfiltered drop :: fc.Scope
 
             let made = FilterCtx(kept.Filters @ added, fc.Config, scope)
             withBase made (if added.IsEmpty then kept.Base else kept)

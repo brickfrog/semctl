@@ -193,7 +193,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
 
     // ---- Measures and functions -------------------------------------------------------------------
 
-    let evalMeasure (ctx: Ctx) (span: Span) (m: BMeasure) : DaxValue =
+    let evalMeasureAsWritten (ctx: Ctx) (span: Span) (m: BMeasure) : DaxValue =
         if ctx.Measures |> List.exists (fun x -> obj.ReferenceEquals(x, m)) then
             if not ctx.Items.Applied.IsEmpty then
                 Fail.notSupported
@@ -293,6 +293,11 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
                 // A value computed under an item in force depends on more than the filter
                 // context: only the plain measure is kept with it.
                 if moved.Items.Applied.IsEmpty then cached () else body ()
+
+    /// A measure reference; in a row context, by group where the measure is one aggregation
+    /// (GroupAgg.fs).
+    let evalMeasure (ctx: Ctx) (span: Span) (m: BMeasure) : DaxValue =
+        GroupAgg.measure ev ctx span m (isQueryMeasure ctx m) evalMeasureAsWritten
 
     /// Convert a VAL argument to the type its parameter asks for ("Value types ... support implicit
     /// type casting": Microsoft Learn, "DAX user-defined functions").
@@ -552,49 +557,12 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
 
     let binary (ctx: Ctx) (op: BinaryOp) (l: DaxValue) (right: Expr) : DaxValue =
         let span = right.Span
-        let coll = ctx.Model.Collation
 
         match op with
         | BinaryOp.And
         | BinaryOp.Or -> Logic.connective ev ctx (op = BinaryOp.And) span l right
         | BinaryOp.In -> DaxValue.Boolean(contains ctx span [| l |] (ev.Table(ctx, right)))
-        | _ ->
-            let r = ev.Scalar(ctx, right)
-
-            match op with
-            | BinaryOp.Add
-            | BinaryOp.Subtract
-            | BinaryOp.Multiply
-            | BinaryOp.Divide
-            | BinaryOp.Power ->
-                Convert.checkOperand ctx span l
-                Convert.checkOperand ctx span r
-            | _ -> ()
-
-            match op with
-            // A date times a number follows the documentation's multiplication table where it
-            // settles the result; `DaxValue.multiply` refuses the rest (a date on the left, a whole
-            // number times a date with a time of day).
-            | BinaryOp.Add -> Fail.dax ctx span (DaxValue.add l r)
-            | BinaryOp.Subtract -> Fail.dax ctx span (DaxValue.subtract l r)
-            | BinaryOp.Multiply -> Fail.dax ctx span (DaxValue.multiply l r)
-            | BinaryOp.Divide -> Fail.dax ctx span (DaxValue.divide l r)
-            | BinaryOp.Power -> Fail.dax ctx span (DaxValue.power l r)
-            | BinaryOp.Concat ->
-                // "With two arguments it works as the CONCATENATE function" (dax.guide, & operator),
-                // and for CONCATENATE "If both arguments are BLANK, the result is BLANK".
-                if DaxValue.isBlank l && DaxValue.isBlank r then
-                    DaxValue.Blank
-                else
-                    DaxValue.String(Convert.toText ctx span l + Convert.toText ctx span r)
-            | BinaryOp.Equal -> DaxValue.Boolean(Fail.dax ctx span (DaxValue.equals coll l r))
-            | BinaryOp.StrictEqual -> DaxValue.Boolean(Fail.dax ctx span (DaxValue.strictEquals coll l r))
-            | BinaryOp.NotEqual -> DaxValue.Boolean(not (Fail.dax ctx span (DaxValue.equals coll l r)))
-            | BinaryOp.Less -> DaxValue.Boolean(Fail.dax ctx span (DaxValue.compare coll l r) < 0)
-            | BinaryOp.LessOrEqual -> DaxValue.Boolean(Fail.dax ctx span (DaxValue.compare coll l r) <= 0)
-            | BinaryOp.Greater -> DaxValue.Boolean(Fail.dax ctx span (DaxValue.compare coll l r) > 0)
-            | BinaryOp.GreaterOrEqual -> DaxValue.Boolean(Fail.dax ctx span (DaxValue.compare coll l r) >= 0)
-            | _ -> Fail.invalid ctx span "unexpected operator"
+        | _ -> Operators.binary ctx op span l (ev.Scalar(ctx, right))
 
     member private this.ScalarOfValue(ctx: Ctx, span: Span, v: Value) : DaxValue =
         match v with
@@ -675,13 +643,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
             | Words _ -> Fail.invalid ctx e.Span "keywords where a value is needed"
             | Tuple _ ->
                 Fail.invalid ctx e.Span "a (value, ...) row is only allowed in a table constructor or before IN"
-            | Unary(op, operand) ->
-                let v = ev.Scalar(ctx, operand)
-
-                match op with
-                | UnaryOp.Plus -> v
-                | UnaryOp.Minus -> Fail.dax ctx e.Span (DaxValue.negate v)
-                | UnaryOp.Not -> Fail.dax ctx e.Span (DaxValue.logicalNot v)
+            | Unary(op, operand) -> Operators.unary ctx op e.Span (ev.Scalar(ctx, operand))
             | Binary _ ->
                 // A chain of operators is a loop, not a recursion: 499 of them cost no stack.
                 let first, rest = leftSpine e

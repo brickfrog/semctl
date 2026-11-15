@@ -136,6 +136,69 @@ namespace Tessera.DaxEngine
 //     `VisCache.Intersective` false for the tables it applies to.
 //   - A filter context with the same filters as another may share its `FilterCtx.State` (the rows
 //     it shows), and only while nothing is being computed; one with different filters never.
+//
+// ---- Aggregating by group ------------------------------------------------------------------------
+//
+// An iteration over a dimension T with `CALCULATE ( SUM ( F[x] ) )` per row (spaceparts' `[Revenue]`
+// is `SUMX ( 'Budget Rate', CALCULATE ( SUM ( ... ) ) / 'Budget Rate'[Rate] )`) costs a transition,
+// a CALCULATE and a SUM per row, whatever they read. GroupAgg.fs works the values out once per
+// iteration instead: on the first row it takes the rows of F under B, the context `Filters.keptBy`
+// keeps when the transition's filter `Rows ( T, R )` is added (the same for every row), and puts
+// them in buckets by their row of T (`RowMap ( F, T )`); a row's value is the aggregation over the
+// fact rows of its row set R (`closeRows`: the row and its equals). Done this way: in exactly one
+// row context, of a table that is the rows of T (`IsPureBase`: T, FILTER ( T, ... ), ALL ( T )),
+//   - `CALCULATE ( <aggregation> )` with no filter argument or modifier;
+//   - a reference to a measure whose expression is an aggregation (perhaps in CALCULATEs with no
+//     filter argument, which change nothing without a row context);
+// where the aggregation is SUM, MIN, MAX, AVERAGE, COUNT or COUNTA of one column, or COUNTROWS of
+// a table reference (`columnAggregations`).
+//
+// Why it is the same value. The transition makes the context C_r of the filters of B and
+// `Rows ( T, R )`. Where the incremental conditions hold for F (`VisCache.Usable`, `Intersective`,
+// `Safe`), V(C_r, F) = V(B, F) n V([Rows ( T, R )], F) (see "Incremental filter contexts"). With
+// T's expanded table T alone, `compute` under that one filter gives T the rows R; every table
+// between F and T the preimage of the next one's rows over its relationship (one path: nothing is
+// ambiguous from F); and every other table F reaches nothing (it shares no table with T's expanded
+// table, or F would reach that table along two paths). So V([Rows ( T, R )], F) is the rows of F
+// whose row of T is in R: the buckets of R's rows. The value is then the registered aggregation
+// itself, evaluated in a context with C_r's filters whose rows of F are set to those (`Visible`):
+// an aggregation done by group reads nothing of its context but the visible stored rows of F
+// (`Filters.visibleStored`), the model and the scope its names resolve in. Values are kept per
+// row set, and the value over no rows once per iteration.
+//
+// Where it falls back to the row-by-row evaluation: a function called from a row context
+// (`CallerRows`), GROUPBY, anything being computed, calculation groups, calendars (their hook in
+// `Filters.add`), more than one row context, a table that is not the rows of T or is under other
+// relationships than the context, T a date table (the transition rule of `DateTable`), T with
+// relationships of its own (the image of R in a related table drops rows that have no blank row
+// to go to, which can drop rows of R), F not reaching T over regular relationships, F with a table
+// it reaches twice, the incremental conditions not holding, T's blank row, and any other
+// aggregation or argument. Anything that raises is thrown away and the row is evaluated row by row,
+// so what is raised is what that raises. Roles need nothing: a role's model is another model.
+//
+// Rows with nothing in their buckets. An iterator's expression that reads nothing but literals,
+// operators other than AND, OR and IN, columns of T and such CALCULATEs (`bodyOf`) is a function of
+// those values; in a row where every CALCULATE's bucket is empty it is evaluated from them (their
+// value over no rows, the row's columns) with the evaluator's own operators (Operators.fs), in the
+// evaluator's order. SUMX skips BLANKs, so where the expression is BLANK for every stored value of
+// its one column (worked out once), those rows are left out of SUMX altogether.
+//
+// What it asks of an engine author:
+//   - An aggregation added to `columnAggregations` must read nothing of its context but the
+//     visible stored rows of its one table (DISTINCTCOUNT reads whether the blank row is visible:
+//     it is not one).
+//   - Only an accumulation to which a BLANK is no step at all (`Aggregate.sum`) may be given rows
+//     with BLANKs left out (`GroupAgg.iterate ... true`).
+//   - The evaluator's operators are Operators.fs: a literal or operator the evaluator comes to
+//     evaluate otherwise must change there, or be taken out of `bodyOf`.
+//   - A change to what a context transition does on a row of a model table (`Context.rowFilters`,
+//     `Filters.add`, `DateTable.onTransition`, `CalendarHooks`) must be matched in GroupAgg.fs's
+//     conditions.
+//
+// Check mode (the same switches as for incremental contexts) evaluates every value by group row by
+// row and compares it and its fact rows, and every row from its buckets with its evaluation
+// (`IncrementalStats.GroupChecked`, `GroupMismatched`, which must stay 0); `GroupEnabled` turns it
+// all off.
 
 open System
 open System.Collections.Concurrent
@@ -457,6 +520,30 @@ type IncrementalStats() =
     /// By table name, the results `Applied` counts, while `Check` is set on this one.
     member val AppliedTo = ConcurrentDictionary<string, int64>(StringComparer.Ordinal) with get
 
+    /// Values of `CALCULATE ( <aggregation> )` in a row context looked up in per-row buckets of
+    /// the fact table's rows (see "Aggregating by group" in the author's guide).
+    [<DefaultValue>]
+    val mutable GroupApplied: int64
+
+    /// Bucketed values recomputed row by row and compared (`Check`), row sets included.
+    [<DefaultValue>]
+    val mutable GroupChecked: int64
+
+    /// Bucketed values or row sets that differed from the row-by-row evaluation: must stay 0.
+    [<DefaultValue>]
+    val mutable GroupMismatched: int64
+
+    /// Rows of an iteration evaluated from their (empty) buckets and their columns, without the
+    /// evaluator (see "Aggregating by group").
+    [<DefaultValue>]
+    val mutable GroupRows: int64
+
+    /// Bucketed attempts that raised, after which the row was evaluated row by row.
+    [<DefaultValue>]
+    val mutable GroupErrors: int64
+
+    /// Whether aggregating by group is used at all (both this and `Global`'s must be set).
+    member val GroupEnabled = true with get, set
     /// Whether incremental contexts are used at all (both this and `Global`'s must be set).
     member val Enabled = true with get, set
     /// Recompute every incremental result in full, without caches, and compare (slow; for tests).
@@ -1361,6 +1448,10 @@ type FilterState() =
             bases <- Dictionary<obj array, obj>(ReferenceArrayComparer.Instance)
 
         bases
+
+    /// Buckets of a fact table's rows for aggregating by group (GroupAgg.fs), by the code of the
+    /// aggregation; they depend on the filters and relationships alone.
+    member val GroupAgg: obj = null with get, set
 
     /// The rows of contexts with these filters first and others added, worked out incrementally,
     /// by the table, the relationship, and the filters added (a `VisKey`, Caching.fs).
