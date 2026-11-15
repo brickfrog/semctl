@@ -85,7 +85,16 @@ let private (|WatchedTestRun|_|) (args: ParseResults<TestCommand.Args>) =
 
 /// Commands whose arguments name no model of a session (`tess interactive` passes them as typed).
 let private modelessCommands =
-    set [ "init"; "completion"; "connect"; "profile"; "session"; "interactive"; "shell"; "mcp" ]
+    set [
+        "init"
+        "completion"
+        "connect"
+        "profile"
+        "session"
+        "interactive"
+        "shell"
+        "mcp"
+    ]
 
 /// For `tess interactive`: put the session's model into a command line where its command takes it,
 /// after the command and subcommand words (`bpa rules list` -> `bpa rules list <model>`). The line

@@ -87,7 +87,10 @@ let split (line: string) : Result<string list, string> =
                 sb.Append line.[k] |> ignore
                 k <- k + 1
 
-        if closed then Ok(sb.ToString(), k) else Error $"unterminated {q} at column {start + 1}"
+        if closed then
+            Ok(sb.ToString(), k)
+        else
+            Error $"unterminated {q} at column {start + 1}"
 
     while error.IsNone && i < n do
         let c = line.[i]
@@ -164,8 +167,8 @@ type LineSource =
     abstract Confirm: question: string -> bool
 
 /// Lines from a reader (piped input, a script, a test): never a terminal.
-let readerSource (reader: TextReader) =
-    { new LineSource with
+let readerSource (reader: TextReader) = {
+    new LineSource with
         member _.Read _ _ =
             match reader.ReadLine() with
             | null -> LineEditor.Read.EndOfInput
@@ -173,15 +176,15 @@ let readerSource (reader: TextReader) =
 
         member _.IsTerminal = false
         member _.Confirm _ = false
-    }
+}
 
 /// The console, with the line editor.
-let consoleSource =
-    { new LineSource with
+let consoleSource = {
+    new LineSource with
         member _.Read prompt history = LineEditor.readLine prompt history
         member _.IsTerminal = true
         member _.Confirm question = LineEditor.confirm question
-    }
+}
 
 // ---------------------------------------------------------------------------------------------
 // The session
@@ -257,7 +260,10 @@ let private prompt (s: State) =
 
 /// The staged changes against the model as loaded or saved.
 let private stagedDiff (m: StagedModel) =
-    let renames = m.Origins |> Map.toList |> List.map (fun (current, original) -> original, current)
+    let renames =
+        m.Origins
+        |> Map.toList
+        |> List.map (fun (current, original) -> original, current)
 
     Diff.compare
         {
@@ -269,8 +275,7 @@ let private stagedDiff (m: StagedModel) =
 
 let private filesJson (files: StagedFile list) =
     arr [
-        for f in files ->
-            obj [ "path", str f.Path; "display", str f.Display; "references", num f.References ]
+        for f in files -> obj [ "path", str f.Path; "display", str f.Display; "references", num f.References ]
     ]
 
 let private status (s: State) (json: bool) =
@@ -317,7 +322,10 @@ let private diff (s: State) (flags: string list) =
     let changes = stagedDiff s.Model
     let json = s.Ctx.Json || List.contains "--json" flags || List.contains "-j" flags
 
-    match flags |> List.filter (fun f -> not (List.contains f [ "--json"; "-j"; "--stat"; "--name-only" ])) with
+    match
+        flags
+        |> List.filter (fun f -> not (List.contains f [ "--json"; "-j"; "--stat"; "--name-only" ]))
+    with
     | bad :: _ ->
         s.Ctx.Err.WriteLine($"tess: diff: unexpected '{bad}' (diff takes --stat, --name-only or --json)")
         ExitCode.usage
@@ -358,6 +366,15 @@ let private save (s: State) (json: bool) (force: bool) =
         let unsaved = m.Unsaved
 
         match StagedModel.save m force with
+        | Error(ChangeIntroducesErrors n as e) when not json ->
+            // The errors themselves, since the edits that made them may be long gone from the screen.
+            s.Ctx.Err.WriteLine($"""tess: Not saved: the staged edits introduce {plural n "error"}:""")
+
+            for i in StagedModel.introducedSinceLoad m do
+                s.Ctx.Err.WriteLine($"  {ObjectRef.format i.Ref}  {i.Message}  [{i.Rule}]")
+
+            s.Ctx.Err.WriteLine("Fix them (or `undo` the edits), or `save --force` to save anyway.")
+            ExitCode.ofError e
         | Error e -> fail s json e
         | Ok saved ->
             let refs = saved.Files |> List.sumBy (fun f -> f.References)
@@ -395,8 +412,7 @@ let private save (s: State) (json: bool) (force: bool) =
 let private command (s: State) (args: string list) =
     let err = s.Ctx.Err
 
-    let dryRun =
-        args |> List.exists (fun a -> a = "--dry-run" || a = "--revert")
+    let dryRun = args |> List.exists (fun a -> a = "--dry-run" || a = "--revert")
 
     let args =
         args
@@ -407,7 +423,7 @@ let private command (s: State) (args: string list) =
     | first :: _ when refusedCommands.ContainsKey first ->
         err.WriteLine($"tess: {first} can't run inside tess interactive: {refusedCommands.[first]}")
         ExitCode.usage
-    | _ when List.contains "-" args ->
+    | _ when args |> List.exists (fun a -> a = "-" || a.EndsWith "=-") ->
         err.WriteLine(
             "tess: `-` (read from stdin) can't be used inside tess interactive, which reads its commands from "
             + "stdin; use a file, or run the command from the outer shell"
