@@ -37,7 +37,8 @@ option; the README has the details.
   change set includes `dryRun`, `introducedErrors`, `warnings`, `notes`, and `saved` once something was written.
 - **No network.** tess makes no network call unless the command names a server: an `xmla:<server>;<database>`
   model argument (any command), `connect`, the server `deploy` compares with and deploys to (even on a dry run),
-  or `bpa --allow-external-rules` with a rule URL. There's no telemetry and no update check. `format` formats
+  `bpa --allow-external-rules` with a rule URL, or `pkg` with `--from daxlib` (or `TESS_PKG_SOURCE=daxlib`), which
+  reaches only https://api.daxlib.org. There's no telemetry and no update check. `format` formats
   locally and never calls daxformatter.com. A `query`, `preview` or `test run` with `--data` stays on the
   machine.
 - **Credentials come from the environment** (`TESS_XMLA_TOKEN`, `TESS_XMLA_CLIENT_ID` / `_TENANT_ID` /
