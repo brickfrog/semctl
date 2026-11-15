@@ -800,6 +800,25 @@ let tests =
                     ExitCode.usage
                     "a measure has no schema"
 
+            testCase "the sample model (TESSERA_SAMPLE_MODEL): every table has M steps beyond navigation, so all skip"
+            <| fun () ->
+                match Environment.GetEnvironmentVariable "TESSERA_SAMPLE_MODEL" with
+                | null
+                | "" -> skiptest "TESSERA_SAMPLE_MODEL is not set"
+                | sample ->
+                    // A SQL connection is opened only for a table tess can describe; here there is none,
+                    // so this runs (and passes) with no server at all.
+                    let r =
+                        tess [ "--json"; "schemacheck"; sample; "--source"; "sql:localhost;Database" ]
+
+                    Expect.equal r.Code ExitCode.ok r.Err
+                    use doc = JsonDocument.Parse r.Out
+                    Expect.equal (doc.RootElement.GetProperty("tablesChecked").GetInt32()) 0 ""
+                    Expect.isGreaterThan (doc.RootElement.GetProperty("tablesSkipped").GetInt32()) 0 ""
+
+                    for f in doc.RootElement.GetProperty("findings").EnumerateArray() do
+                        Expect.equal (f.GetProperty("code").GetString()) Codes.skipped ""
+
             testCase "a sql: source with no SQL tables never connects"
             <| fun () ->
                 let t, path = setup ()

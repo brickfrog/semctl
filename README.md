@@ -89,6 +89,7 @@ tess query ./MyReport.pbip --data ./fixtures "EVALUATE SUMMARIZECOLUMNS('Date'[Y
 tess query ./MyReport.pbip --coverage            # which measures the local engine can evaluate, and what the rest need
 tess test init ./MyReport.pbip --data ./fixtures  # a test suite to fill in: one test per measure
 tess test run ./MyReport.pbip --ci github         # run .tess-tests/*.test.yaml offline, over the fixture data
+tess schemacheck ./MyReport.pbip --source "sql:myserver.database.windows.net;SalesDb"   # columns vs. the source's schema
 tess validate ./MyReport.pbip --watch            # again on every save, until Ctrl+C (also lint, bpa, test run)
 tess completion bash > ~/.local/share/bash-completion/completions/tess   # shell completion (zsh, fish, pwsh too)
 ```
@@ -3247,9 +3248,146 @@ and the exit codes are those of `run`; a test either side's local engine refuses
 - The suite format was matched to te's published reference, not to its binary: `matrix` (both shapes are accepted
   here) and `compare` (read and ignored) are the parts that reference doesn't spell out.
 
+### Checking columns against their source (`schemacheck`)
+
+`schemacheck` compares each table's data columns with the columns its source returns, as Tabular Editor 2's `-SC`
+and the Tabular Editor CLI's `schemacheck` do. It never changes the model unless you add `--update`.
+
+```sh
+tess schemacheck ./Sales.pbip --source ./schema.json             # a schema file (offline)
+tess schemacheck ./Sales.pbip --source ./fixtures                # a fixture directory (names only, offline)
+tess schemacheck ./Sales.pbip Sales Product --source "sql:myserver.database.windows.net;SalesDb"
+tess schemacheck ./Sales.pbip --source ./schema.json --update --save   # add new columns, update types
+tess set ./Sales.pbip Sales --update-schema --source ./schema.json --save   # the same, for one table
+```
+
+| Code | Severity | Reports |
+|---|---|---|
+| `SCHEMA_SOURCE_COLUMN_ADDED` | warning | a source column no data column maps to |
+| `SCHEMA_DATA_TYPE_CHANGED` | warning | a data column whose type isn't what its source column's type maps to |
+| `SCHEMA_MISSING_SOURCE_COLUMN` | error | a data column whose source column the source doesn't return |
+| `SCHEMA_SOURCE_QUERY_ERROR` | error | the source couldn't describe the table (the server rejected the query, a fixture file can't be read) |
+| `SCHEMA_DUPLICATE_SOURCE_COLUMN` | info | a source column name returned more than once (the first is used) |
+| `SCHEMA_TABLE_SKIPPED` | info | a table that wasn't checked, and why |
+
+- **Which tables:** the ones you name, or every table with data columns. Calculated tables and calculation groups
+  aren't checked (and aren't reported unless you name one). A table name that isn't in the model is an error (exit 3).
+- **Matching:** a data column maps to the source column its `sourceColumn` names, ignoring case, with or without
+  `[brackets]`. Calculated columns are left out. A data column whose type is unset (`automatic`, `unknown`) isn't
+  type-checked.
+- **Exit code:** 1 if a finding is at or above `--fail-on` (default `error`), so missing columns and query errors
+  fail the check and new or retyped columns don't. `--ci`, `--sarif` and `--json` work as for `validate`.
+  `--trx` writes one result per finding (errors `Failed`, warnings `Warning`, skipped tables `NotExecuted`) and a
+  passed result for each table that matches; the run is `Failed`, `Warning` or `Completed`.
+- **JSON:** the [findings envelope](#findings-json-and-ci-annotations) with `"command": "schemacheck"` and
+  `"source": "schemaCheck"` on each finding, plus `source`, `tablesChecked`, `tablesSkipped`, `tablesWithDrift`
+  and `tables: [{table, ref, status (checked|skipped|error), reason?, origin?, typesChecked?, drift?}]`.
+
+Tabular Editor 2's annotations are honoured, with TE2's names. Any value except `0`, `false` or `no` turns one on.
+
+| Annotation | On | Effect |
+|---|---|---|
+| `TabularEditor_SkipSchemaCheck` (also TE2's old spelling `TabularEditor_SkipSkemaCheck`) | table | not checked (`SCHEMA_TABLE_SKIPPED`) |
+| `TabularEditor_IgnoreSourceColumnAdded` | table | no `SCHEMA_SOURCE_COLUMN_ADDED` |
+| `TabularEditor_IgnoreDataTypeChange` | table or column | no `SCHEMA_DATA_TYPE_CHANGED` |
+| `TabularEditor_IgnoreMissingSourceColumn` | table or column | no `SCHEMA_MISSING_SOURCE_COLUMN` |
+| `TabularEditor_SchemaCheckNoWarnings` | model | every warning becomes an error (as in TE2) |
+
+One difference from TE2: with `IgnoreDataTypeChange` on a table, TE2 also reports every column of it as missing
+(it only marks a column as matched while it compares types). tess doesn't.
+
+#### Sources
+
+**A schema file** (`--source <file>.json`): what each table's source returns, by model table name (ignoring case).
+Comments and trailing commas are allowed.
+
+```json
+{ "tables": {
+    "Sales":   [ { "name": "OrderDate", "type": "dateTime" }, { "name": "Amount", "type": "decimal", "sourceType": "decimal(18,2)" } ],
+    "Product": [ "ProductKey", "Name" ] } }
+```
+
+A column is its source name, or an object with `name`, an optional `type` (`string`, `int64`, `double`,
+`decimal`, `dateTime`, `boolean`, `binary`: the model's data types) and an optional `sourceType` (shown in
+messages). A column without `type` isn't type-checked; a table none of whose columns has one counts as names only.
+A table the file doesn't list is skipped.
+
+**A fixture directory** (`--source <dir>`, the [`tess data`](#fixture-data-data) layout): each table's file names its
+columns, a CSV by its header and a JSON file by its rows' properties. Fixture files name columns by their *model*
+names, so columns are matched by name rather than by `sourceColumn`, and they carry no types, so only names are
+compared (the summary says so). Calculated columns in a file are ignored. A table with no file is skipped.
+
+**A SQL endpoint** (`--source "sql:<server>;<database>"`): SQL Server, Azure SQL, or a Fabric warehouse / lakehouse
+SQL endpoint. tess asks the server to describe each table's query with `sp_describe_first_result_set`: nothing is
+executed and no rows are read. (Tabular Editor 2 runs the query with `CommandBehavior.SchemaOnly` instead.) It reads a
+table's first partition, as TE2 does, and only these, exactly:
+
+- a **query partition** on a SQL Server provider data source (`SQLNCLI*`, `MSOLEDBSQL*`, `SQLOLEDB`, or SqlClient):
+  its query as it is;
+- an **M partition** that is exactly `Sql.Database(server, database)` and one navigation step
+  `Source{[Schema = "dbo", Item = "Sales"]}[Data]` (described as `SELECT * FROM [dbo].[Sales]`), or exactly
+  `Sql.Database(server, database, [Query = "..."])`. The server and database may be text or parameters (named
+  expressions that are text, with or without `meta [...]`).
+
+Anything else (another step such as `Table.SelectColumns`, other options, other connectors, Direct Lake) is
+`SCHEMA_TABLE_SKIPPED`: its columns can't be known without running Power Query, and tess doesn't guess. So is a
+table whose partition names a different database from the one in `--source` (a different server is fine: point
+`--source` at a dev copy). A query the server rejects is `SCHEMA_SOURCE_QUERY_ERROR`, with the server's message.
+
+Data types: for a **query partition**, SQL types map as TE2 maps them (`int`, `bigint`, `smallint`, `tinyint` to
+`int64`; `float`, `real` to `double`; `decimal`, `numeric`, `money`, `smallmoney` to `decimal`; the date and time
+types to `dateTime`; `bit` to `boolean`; character types to `string`; `binary`, `varbinary` to `binary`), without
+TE2's guesses for other names. For an **M partition**, Power Query's own mapping isn't documented, so only
+`int`/`bigint` (`int64`), `float`/`real` (`double`), `bit`, character types, and `date`/`datetime`/`datetime2`/
+`smalldatetime` are compared. Other types (`decimal`, `numeric`, `money`, `smallint`, `tinyint`, `time`,
+`datetimeoffset`, `uniqueidentifier`, ...) are not compared, and `--update` won't add a column of such a type.
+
+Signing in, from environment variables only (never the command line):
+
+| To sign in with | Set |
+|---|---|
+| an Entra access token for `https://database.windows.net/` | `TESS_SQL_TOKEN`, or `TESS_SQL_TOKEN_FILE=<path>` (`-` for standard input) |
+| a service principal | the same variables as [connected mode](#signing-in): `TESS_XMLA_CLIENT_ID`, `TESS_XMLA_TENANT_ID`, `TESS_XMLA_CLIENT_SECRET` (or `_FILE`), else `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET` |
+| a SQL login | `TESS_SQL_USER`, and `TESS_SQL_PASSWORD` or `TESS_SQL_PASSWORD_FILE` |
+| the current Windows / Kerberos account | nothing |
+
+`TESS_SQL_AUTH` picks one: `auto` (the default), `token`, `spn`, `sql` or `integrated`. With `auto`, a Microsoft
+cloud host (`*.database.windows.net` and the national clouds' equivalents, `*.sql.azuresynapse.net`,
+`*.datawarehouse.fabric.microsoft.com`, `*.database.fabric.microsoft.com`) uses the token, then the service
+principal, then a SQL login; any other server uses a SQL login if one is set, else integrated security. **A token or
+service principal is never sent to a server that isn't one of those hosts.** Nothing interactive is ever started.
+
+The connection is always encrypted (`Encrypt=Mandatory`) and the server's certificate must be trusted. For a local
+test server with a self-signed certificate, `TESS_SQL_TRUST_SERVER_CERTIFICATE=1` accepts it (still encrypted); it
+is off unless you set it. A server that can't be reached, or refuses the sign-in, fails the whole command (exit 5).
+
+**What is sent, and to whom:** only to the server in `--source`, and only once a table needs describing (a model
+with no SQL-readable table connects to nothing): the sign-in, then for each table its query, as the text of a call to
+`sp_describe_first_result_set`. With a service principal, MSAL also asks Microsoft's sign-in service
+(`login.microsoftonline.com`, or the national cloud's) for a token, sending the client ID and secret. Nothing else:
+no model metadata, no data, no telemetry. A schema file or fixture directory opens only local files.
+
+#### Updating the model (`--update`, `set --update-schema`)
+
+`--update` turns the check into an edit, with the [editing commands'](#editing-commands) conventions: a dry run that
+shows the changes unless `--save` or `--save-to`, `--stat`, `--name-only`, `--force`, and `--json` for the change
+set. The findings go to stderr.
+
+- A **new source column** becomes a data column named and sourced as the source names it, with its mapped type
+  (summarized by sum if numeric, a lineage tag if the table has one). A column with no exactly mapped type, or
+  whose name the table already uses, isn't added; a warning says why.
+- A **changed type** is changed on the column itself; everything else about it (name, format string, description,
+  folders, relationships, translations) stays.
+- A **removed source column** is only reported, unless `--drop-removed-columns`. Then it is removed as `tess remove`
+  would; a column other DAX still uses is kept, with a warning naming what uses it.
+- Whatever an annotation makes the check ignore is left alone; skipped tables and query errors change nothing.
+
+`--update` doesn't take `--fail-on`, `--ci`, `--trx` or `--sarif`. `tess set <model> <table> --update-schema --source
+<src>` does the same for one table (or for every table, with `model` as the object), with `set`'s switches.
+
 ### Findings JSON and CI annotations
 
-`validate`, `bpa`, `lint` and `test` (and later `schemacheck`) report findings in one shape, the one the Tabular
+`validate`, `bpa`, `lint`, `test` and `schemacheck` report findings in one shape, the one the Tabular
 Editor CLI uses, so tooling written for one reads the other:
 
 ```json
@@ -3282,7 +3420,7 @@ the code as its title.
 
 ### SARIF (`--sarif`)
 
-`validate`, `bpa`, `lint` and `data check` take `--sarif <file>`: they also write their findings as a
+`validate`, `bpa`, `lint`, `data check` and `schemacheck` take `--sarif <file>`: they also write their findings as a
 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log, the format code scanning
 UIs (GitHub's among them) read. Like `--trx`, it replaces the file, and it is written on a clean run too (with no
 results). It doesn't change the command's own output or exit code.

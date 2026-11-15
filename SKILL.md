@@ -37,11 +37,11 @@ option; the README has the details.
   change set includes `dryRun`, `introducedErrors`, `warnings`, `notes`, and `saved` once something was written.
 - **No network.** tess makes no network call unless the command names a server: an `xmla:<server>;<database>`
   model argument (any command), `connect`, the server `deploy` compares with and deploys to (even on a dry run),
-  or `bpa --allow-external-rules` with a rule URL. There's no telemetry and no update check. `format` formats
+  `bpa --allow-external-rules` with a rule URL, or `schemacheck --source sql:<server>;<database>`. There's no telemetry and no update check. `format` formats
   locally and never calls daxformatter.com. A `query`, `preview` or `test run` with `--data` stays on the
   machine.
 - **Credentials come from the environment** (`TESS_XMLA_TOKEN`, `TESS_XMLA_CLIENT_ID` / `_TENANT_ID` /
-  `_CLIENT_SECRET`, ...), never from the command line: a secret in an argument is refused. tess never prints a
+  `_CLIENT_SECRET`, ...; for `schemacheck`'s SQL source `TESS_SQL_TOKEN`, `TESS_SQL_USER` / `TESS_SQL_PASSWORD`), never from the command line: a secret in an argument is refused. tess never prints a
   secret.
 - **Object references** paste between commands: `measure:Sales/Margin`, `column:Sales/Amount`, `table:Date`,
   `calendar:Date/Fiscal`, or DAX forms (`'Sales'[Amount]`, `[Margin]`). Findings carry an `objectPath` in the
@@ -64,6 +64,17 @@ tess add ./Sales.pbip measure:Sales/Margin -e "[Revenue] - [Cost]" --json       
 tess add ./Sales.pbip measure:Sales/Margin -e "[Revenue] - [Cost]" --save
 tess rename ./Sales.pbip "[Revenue]" "Net Revenue" --save                           # fixes every reference
 tess init ./New.SemanticModel --json                 # a new model; re-running it on the same model exits 0
+```
+
+`schemacheck` compares the model's columns with their source's schema (exit 1: a missing column or a query error;
+new and retyped columns are warnings). Offline it reads a schema file or a fixture folder; `sql:` asks the server
+to describe each table's query (only exact `Sql.Database` + navigation M, or SQL query partitions; the rest is
+`SCHEMA_TABLE_SKIPPED`). `--update` applies new columns and changed types (dry run unless `--save`):
+
+```sh
+tess schemacheck ./Sales.pbip --source ./schema.json --json        # {"tables": {"Sales": [{"name", "type"}]}}
+tess schemacheck ./Sales.pbip Sales --source "sql:srv.database.windows.net;Db" --json
+tess schemacheck ./Sales.pbip --source ./schema.json --update      # then --save; --drop-removed-columns to remove
 ```
 
 The local DAX engine answers queries offline over fixture data (a folder of CSV/JSON files, one per table):

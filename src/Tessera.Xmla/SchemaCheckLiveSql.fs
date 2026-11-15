@@ -69,6 +69,9 @@ type private Describer(address: SqlAddress, env: Credentials.Environment) =
     let fail (e: TessError) = raise (SchemaSourceFailed e)
 
     let openConnection () =
+        // The managed network layer on every OS: the native one for Windows (SNI.dll) isn't shipped.
+        AppContext.SetSwitch("Switch.Microsoft.Data.SqlClient.UseManagedNetworkingOnWindows", true)
+
         let credential =
             match SqlCredentials.resolve env address with
             | Ok c -> c

@@ -33,7 +33,7 @@ Both sets of Microsoft terms say the software "may collect information about you
 and send that to Microsoft". tessera turns on no such feature. It makes no network connection unless you ask
 for one: the commands that work on model files and fixture data (`query --data`, `bpa`, `validate`, and the
 others) open no network socket at all, and connected mode (`xmla:` sources, `connect`, `deploy`, `refresh`)
-talks only to the server you name.
+talks only to the server you name, as does `schemacheck --source sql:...`.
 
 ## Components under the MIT license
 
@@ -41,6 +41,7 @@ talks only to the server you name.
 |---|---|
 | Microsoft.Identity.Client (MSAL.NET), Microsoft.Identity.Client.Broker, Microsoft.Identity.Client.NativeInterop, Microsoft.IdentityModel.Abstractions | © Microsoft Corporation |
 | System.Configuration.ConfigurationManager, System.Security.Cryptography.ProtectedData | © Microsoft Corporation (.NET Foundation) |
+| Microsoft.Data.SqlClient, Microsoft.Data.SqlClient.Extensions.Abstractions, Microsoft.Data.SqlClient.Internal.Logging, Microsoft.SqlServer.Server (`schemacheck`'s SQL source), and what they use: Microsoft.IdentityModel.JsonWebTokens, Microsoft.IdentityModel.Logging, Microsoft.IdentityModel.Protocols, Microsoft.IdentityModel.Protocols.OpenIdConnect, Microsoft.IdentityModel.Tokens, System.IdentityModel.Tokens.Jwt, Microsoft.Bcl.Cryptography, Microsoft.Extensions.Caching.Abstractions, Microsoft.Extensions.Caching.Memory, Microsoft.Extensions.DependencyInjection.Abstractions, Microsoft.Extensions.Logging.Abstractions, Microsoft.Extensions.Options, Microsoft.Extensions.Primitives, System.Diagnostics.EventLog, System.Security.Cryptography.Pkcs, System.Threading.RateLimiting. SqlClient's native Windows network library (Microsoft.Data.SqlClient.SNI, under Microsoft's own terms) is not included: tess uses SqlClient's managed networking | © Microsoft Corporation (.NET Foundation) |
 | .NET runtime, in the self-contained binaries (its own notices: <https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT>) | © .NET Foundation and Contributors |
 | FSharp.Core | © Microsoft Corporation (.NET Foundation) |
 | Argu | © 2019 Argu contributors (<https://github.com/fsprojects/Argu>) |
