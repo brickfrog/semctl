@@ -340,6 +340,36 @@ and the enum members that level allows. An object's list is that table plus its 
 annotations it has). A value outside an enum's members is refused with the members and the closest one:
 `expected one of: default, none, sum, ... (did you mean 'sum'?)`.
 
+#### Filtering objects (`get --where`)
+
+`tess get <model> <container> --where <path>=<pattern>` lists the objects inside a container whose property
+matches a wildcard: `*` is any run of characters (line breaks included), `?` one character, and the rest is
+literal. Matching is case-insensitive and covers the whole value. `<path>!=<pattern>` keeps the objects that
+don't match. `--where` is repeatable, and every condition must hold.
+
+```sh
+tess get ./Sales.pbip model --where kind=measure --where 'expression=*CALCULATE*'
+tess get ./Sales.pbip Sales --where isHidden=true
+tess get ./Sales.pbip model --where kind=measure --where description= -p expression   # undocumented measures
+tess get ./Sales.pbip model --where annotations.Owner!=finance --where kind=table
+```
+
+- **Container:** the objects whose TOM parent chain reaches it. For the model that is every object; for a table
+  its columns, measures, hierarchies, levels, partitions, calculation items and calendars; for a hierarchy its
+  levels. The container itself is not listed.
+- **Paths** are the ones `get --properties` and `get -p` use, matched case-insensitively. `kind` is the object's
+  kind (`measure`, `column`, ...).
+- **Values** are read as `get --properties` shows them, so TOM's defaults have values: `isHidden=false` finds the
+  visible objects even though TOM's JSON leaves `isHidden` out. Values that are not in the catalog, such as
+  translations, come from the paths `get -p` prints. A property that holds nothing (an unset description, an
+  annotation the object doesn't have) reads as empty, so `description=` finds objects without one.
+- **Objects without the property** (a relationship has no `isHidden`) match neither `=` nor `!=`.
+- **Output** is the same as `list`'s, text or `--json`. With `-p <path>`, tess prints those properties of each
+  match instead (`ref  path: value`, the first line of long values; `--json`: `[{ref, kind, properties}]`).
+- Finding nothing is not an error: no output, exit code 0. A path that no object inside the container has is
+  `unknown-property` (exit code 2) with close matches. `--where` can't be combined with `--properties` or
+  `--children`.
+
 `find --in` takes path wildcards. A wildcard matches if it matches the whole path or just the last segment, so
 `--in expression` covers both `expression` and `source.expression`. `find` searches every property except
 lineage tags, and prints `ref  property[:line]  text`, one hit per matching line.

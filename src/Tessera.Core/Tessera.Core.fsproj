@@ -34,6 +34,7 @@
     <Compile Include="Mutation.fs" />
     <Compile Include="PropertyCatalog.fs" />
     <Compile Include="SetProperty.fs" />
+    <Compile Include="Where.fs" />
     <Compile Include="AddObject.fs" />
     <Compile Include="RemoveObject.fs" />
     <Compile Include="MoveObject.fs" />

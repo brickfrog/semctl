@@ -22,7 +22,7 @@ _tess_options() {
         'convert') _tess_r='--format -f --serialization --force --eol --indent-spaces --include-sensitive --json -j --help -h' ;;
         'info') _tess_r='--json -j --help -h' ;;
         'list') _tess_r='--kind -k --table -t --name -n --json -j --help -h' ;;
-        'get') _tess_r='--property -p --children --properties --all --json -j --help -h' ;;
+        'get') _tess_r='--property -p --children --properties --all --where --json -j --help -h' ;;
         'find') _tess_r='--regex -E --case-sensitive -s --kind -k --table -t --in --json -j --help -h' ;;
         'diff') _tess_r='--ignore --stat --name-only --json -j --help -h' ;;
         'deps') _tess_r='--depth -d --depends-on --referenced-by --unused --include-visible --kind -k --table -t --fail-on-unused --json -j --help -h' ;;
@@ -90,6 +90,7 @@ _tess_value() {
         'list|-n') _tess_r='text' ;;
         'get|--property') _tess_r='text' ;;
         'get|-p') _tess_r='text' ;;
+        'get|--where') _tess_r='text' ;;
         'find|--kind') _tess_r='choice model table column measure hierarchy level partition calcitem calendar relationship role perspective culture expression function datasource' ;;
         'find|-k') _tess_r='choice model table column measure hierarchy level partition calcitem calendar relationship role perspective culture expression function datasource' ;;
         'find|--table') _tess_r='dyn' ;;
