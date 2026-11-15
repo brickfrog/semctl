@@ -126,11 +126,25 @@ let profileTests =
                 [ "profile"; "set"; "bad name"; "--model"; "m" ]
             ]
 
+            // A path with such a word in it is no secret.
+            let fine =
+                tessWithEnv env [
+                    "profile"
+                    "set"
+                    "y"
+                    "--model"
+                    "~/secret-santa/Sales.pbip"
+                    "--setting"
+                    "tokenCache=~/.secrets/cache"
+                ]
+
+            Expect.equal fine.Code 0 fine.Err
+
             for args in refused do
                 let r = tessWithEnv env args
                 Expect.notEqual r.Code 0 (String.concat " " args)
 
-            Expect.isFalse (File.Exists home.Config && File.ReadAllText(home.Config).Contains "hunter2") "nothing kept"
+            Expect.isFalse (File.ReadAllText(home.Config).Contains "hunter2") "nothing kept"
 
             let both =
                 tessWithEnv env [ "profile"; "set"; "x"; "--model"; "m"; "--server"; "localhost" ]

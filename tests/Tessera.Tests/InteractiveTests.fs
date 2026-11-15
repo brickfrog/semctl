@@ -367,6 +367,56 @@ let sessionTests =
             ok r
             Expect.stringContains r.Err "level:Date/Calendar/Yr <- Sales.Report" ""
 
+        testCase "the rest of the commands, inside a session"
+        <| fun () ->
+            use t = project ()
+            let script = t.Combine "add.dax"
+            write script "DEFINE MEASURE Sales[Scripted] = 42"
+
+            let r =
+                session [ t.Path; "--no-batch" ] [
+                    "move \"[Total (hidden)]\" Date"
+                    $"script apply {script}"
+                    "script export [Scripted]"
+                    "validate"
+                    "bpa --no-builtin"
+                    "lint"
+                    "format --expr \"sum(Sales[Amount])\""
+                    "format"
+                    "status --json"
+                    "exit --force"
+                ]
+
+            ok r
+            Expect.stringContains r.Out "MEASURE 'Sales'[Scripted] = 42" "script export sees the staged script"
+            Expect.stringContains r.Out "SUM ( Sales[Amount] )" "format --expr formats the DAX it's given"
+            Expect.isFalse (r.Err.Contains "doesn't take a file or model") "no model is put before --expr"
+
+            let changes = (List.last (jsonDocs r.Out)).GetProperty "changes"
+            let refs = [ for c in changes.EnumerateArray() -> c.GetProperty("objectPath").GetString() ]
+            Expect.contains refs "measure:Date/Total (hidden)" "move staged"
+            Expect.contains refs "measure:Sales/Scripted" "script apply staged"
+            Expect.equal (measures t.Path) [ "Total"; "Total (hidden)" ] "nothing written"
+
+        testCase "--json: the session's own errors are JSON too"
+        <| fun () ->
+            use t = project ()
+
+            let r =
+                session [ t.Path; "--json"; "--no-batch" ] [
+                    "add measure:Sales/A -e 1"
+                    "mcp"
+                    "get \"oops"
+                    "diff --nope"
+                ]
+
+            Expect.equal r.Code 1 r.Out
+            let docs = jsonDocs r.Out
+            let codes = [ for d in docs.Tail -> d.GetProperty("error").GetProperty("code").GetString() ]
+            Expect.equal codes [ "usage"; "usage"; "usage"; "unsaved-changes" ] r.Out
+            let last = List.last docs
+            Expect.equal (last.GetProperty("error").GetProperty("changes").[0].GetString()) "measure:Sales/A" ""
+
         testCase "a model that doesn't load fails before the session starts"
         <| fun () ->
             let r = session [ "/nonexistent/model" ] [ "list" ]

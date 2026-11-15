@@ -36,7 +36,7 @@ option; the README has the details.
   `--force`. Look at the dry run first, then save. `--stat` and `--name-only` shorten the diff. With `--json`, the
   change set includes `dryRun`, `introducedErrors`, `warnings`, `notes`, and `saved` once something was written.
 - **No network.** tess makes no network call unless the command names a server: an `xmla:<server>;<database>`
-  model argument (any command), `connect`, the server `deploy` compares with and deploys to (even on a dry run),
+  model argument (any command), `active:` or `profile:<name>` when that connection is a server, `connect`, the server `deploy` compares with and deploys to (even on a dry run),
   or `bpa --allow-external-rules` with a rule URL. There's no telemetry and no update check. `format` formats
   locally and never calls daxformatter.com. A `query`, `preview` or `test run` with `--data` stays on the
   machine.

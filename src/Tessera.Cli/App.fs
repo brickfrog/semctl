@@ -129,10 +129,15 @@ let private insertModel (words: string list) (model: string) : string list =
         rest
         |> List.exists (fun a -> a = model || (not (a.StartsWith "-") && full a = full model))
 
+    // `format` of loose DAX (a .dax file, --expr) takes no model.
     let daxFile =
         List.tryHead taken = Some "format"
         && rest
-           |> List.exists (fun a -> a.EndsWith(".dax", System.StringComparison.OrdinalIgnoreCase))
+           |> List.exists (fun a ->
+               a.EndsWith(".dax", System.StringComparison.OrdinalIgnoreCase)
+               || a = "--expr"
+               || a = "-e"
+               || a.StartsWith "--expr=")
 
     match taken with
     | [] -> words

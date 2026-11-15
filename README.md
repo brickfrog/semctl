@@ -1773,7 +1773,8 @@ tess refresh "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" Orders --
 A model on a server is written `xmla:<server>;<database>`, wherever a command takes a model path. Quote it: `;`
 ends a command in every shell, and workspace names often have spaces. The prefix is required, so a path can never
 be mistaken for a server (`localhost:51234` and `host\instance` look exactly like paths) and no command opens a
-connection unless its argument says so. `connect` and `deploy` take a server as its own argument, where the
+connection unless its argument says so: `xmla:...`, or `active:` / `profile:<name>` when the active connection or
+the profile is a server. `connect` and `deploy` take a server as its own argument, where the
 prefix is optional.
 
 | Server | Form | Works on |
@@ -3453,7 +3454,7 @@ a doubled quote is a literal one: `"EVALUATE ROW(""x"", 1)"`), and `[...]` stays
 its quotes: it is a DAX table name). An unterminated group is an error. Backslashes are literal.
 
 **At a terminal** the line is edited in place (Left/Right, Home/End or Ctrl+A/Ctrl+E, Backspace/Delete, Ctrl+U,
-Ctrl+K, Up/Down through the history); Ctrl+C abandons the line; Ctrl+D on an empty line ends the session (Ctrl+Z
+Ctrl+K, Up/Down through the history; a line longer than the terminal scrolls sideways); Ctrl+C abandons the line; Ctrl+D on an empty line ends the session (Ctrl+Z
 then Enter on Windows). The history is kept in memory; `--history <file>` keeps it in a file too (read at the start,
 appended to). There is no tab completion inside the session. A running command can't be interrupted: Ctrl+C is
 ignored until it finishes. `--no-banner` drops the welcome lines.
@@ -3468,7 +3469,8 @@ them; end the script with `save`, or `exit --force` to discard them.
 printf 'rename [Total] Revenue\nvalidate --fail-on error\nsave\n' | tess interactive ./Sales.pbip --echo
 ```
 
-`--json` (on `tess interactive`) adds `--json` to every command, and the session commands answer in JSON too.
+`--json` (on `tess interactive`) adds `--json` to every command, and the session's own commands and errors answer
+in JSON too (the unsaved-edits failure is `{"error": {"code": "unsaved-changes", ..., "changes": [...]}}`).
 
 Refused inside a session: `interactive`/`shell` and `mcp` (they would take over the input), `--watch`, and `-` as
 a value (read from stdin: the session reads its commands from stdin; `-p expression=-` counts too). A server model
@@ -3534,7 +3536,8 @@ behaviour overrides: defaults for the non-secret `TESS_*` variables, for the com
 
 **Never a secret.** Tokens, client secrets and passwords stay in the environment (and the opt-in token cache) as
 without a profile: a server string with credentials in it is refused as on the command line, a setting tess doesn't
-know is refused, and so is any value that looks like `secret`, `password`, `token=` or `pwd=`. The state files hold
+know is refused, and so is any value with credentials written the way a connection string writes them
+(`Password=`, `Pwd=`, `...Secret=`, `...Token=`). The state files hold
 only the model argument.
 
 `active:` and `profile:<name>` are replaced before the command line is read, wherever they appear as a whole

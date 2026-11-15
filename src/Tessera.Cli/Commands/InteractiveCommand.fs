@@ -318,6 +318,15 @@ let private status (s: State) (json: bool) =
 
     0
 
+/// A usage error of the session itself: JSON `{"error": {"code": "usage", ...}}` in a --json session.
+let private usageError (s: State) (json: bool) (message: string) =
+    if json then
+        writeJson s.Ctx.Out (errorJson "usage" message)
+    else
+        s.Ctx.Err.WriteLine($"tess: {message}")
+
+    ExitCode.usage
+
 let private diff (s: State) (flags: string list) =
     let changes = stagedDiff s.Model
     let json = s.Ctx.Json || List.contains "--json" flags || List.contains "-j" flags
@@ -326,9 +335,7 @@ let private diff (s: State) (flags: string list) =
         flags
         |> List.filter (fun f -> not (List.contains f [ "--json"; "-j"; "--stat"; "--name-only" ]))
     with
-    | bad :: _ ->
-        s.Ctx.Err.WriteLine($"tess: diff: unexpected '{bad}' (diff takes --stat, --name-only or --json)")
-        ExitCode.usage
+    | bad :: _ -> usageError s json $"diff: unexpected '{bad}' (diff takes --stat, --name-only or --json)"
     | [] ->
         if json then
             writeJson s.Ctx.Out (Changes.changesJson "diff" (ChangeSet.ofDiff changes))
@@ -410,7 +417,9 @@ let private save (s: State) (json: bool) (force: bool) =
 
 /// Run one command line of the session (not a built-in).
 let private command (s: State) (args: string list) =
-    let err = s.Ctx.Err
+    let json = s.Ctx.Json || List.contains "--json" args || List.contains "-j" args
+
+    let refuse = usageError s json
 
     let dryRun = args |> List.exists (fun a -> a = "--dry-run" || a = "--revert")
 
@@ -421,21 +430,15 @@ let private command (s: State) (args: string list) =
     match args with
     | [] -> ExitCode.ok
     | first :: _ when refusedCommands.ContainsKey first ->
-        err.WriteLine($"tess: {first} can't run inside tess interactive: {refusedCommands.[first]}")
-        ExitCode.usage
+        refuse $"{first} can't run inside tess interactive: {refusedCommands.[first]}"
     | _ when args |> List.exists (fun a -> a = "-" || a.EndsWith "=-") ->
-        err.WriteLine(
-            "tess: `-` (read from stdin) can't be used inside tess interactive, which reads its commands from "
+        refuse (
+            "`-` (read from stdin) can't be used inside tess interactive, which reads its commands from "
             + "stdin; use a file, or run the command from the outer shell"
         )
-
-        ExitCode.usage
     | _ when List.contains "--watch" args ->
-        err.WriteLine("tess: --watch can't be used inside tess interactive; run it from the outer shell")
-        ExitCode.usage
-    | _ when dryRun && List.contains "--save" args ->
-        err.WriteLine("tess: --dry-run and --save can't be combined")
-        ExitCode.usage
+        refuse "--watch can't be used inside tess interactive; run it from the outer shell"
+    | _ when dryRun && List.contains "--save" args -> refuse "--dry-run and --save can't be combined"
     | _ ->
         let argv = s.Host.InsertModel args s.Input
 
@@ -472,18 +475,23 @@ let private leave (s: State) (force: bool) =
             Next.Continue ExitCode.ok
     else
         let e = UnsavedChanges m.Unsaved
-        s.Ctx.Err.WriteLine($"tess: {TessError.message e}")
+        let changes = ChangeSet.ofDiff (stagedDiff m)
 
-        for c in ChangeSet.ofDiff (stagedDiff m) do
-            s.Ctx.Err.WriteLine($"  {ObjectRef.format c.Ref}")
+        if s.Ctx.Json then
+            let o = tessErrorJson e
+            o.["error"].AsObject().["changes"] <- arr [ for c in changes -> str (ObjectRef.format c.Ref) ]
+            writeJson s.Ctx.Out o
+        else
+            s.Ctx.Err.WriteLine($"tess: {TessError.message e}")
+
+            for c in changes do
+                s.Ctx.Err.WriteLine($"  {ObjectRef.format c.Ref}")
 
         Next.Exit(ExitCode.ofError e)
 
 let private run1 (s: State) (line: string) : Next =
     match split line with
-    | Error message ->
-        s.Ctx.Err.WriteLine($"tess: {message}")
-        Next.Continue ExitCode.usage
+    | Error message -> Next.Continue(usageError s s.Ctx.Json message)
     | Ok [] -> Next.Continue ExitCode.ok
     | Ok(word :: rest) ->
         let json = s.Ctx.Json || List.contains "--json" rest || List.contains "-j" rest

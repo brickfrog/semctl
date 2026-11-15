@@ -25,19 +25,37 @@ let readLine (prompt: string) (history: string list) : Read =
     // Where Up/Down is in the history: past.Length is the line being typed.
     let mutable at = past.Length
     let mutable typed = ""
+    /// The first character shown: the line scrolls sideways so it always fits on one row (a
+    /// wrapped line can't be redrawn with a carriage return).
+    let mutable start = 0
     let mutable shown = 0
 
+    let width () =
+        let columns =
+            try
+                Console.WindowWidth
+            with _ ->
+                80
+
+        max 10 (columns - prompt.Length - 1)
+
     let redraw () =
-        // Back to the start of the line, rewrite it, blank what's left of a longer previous line.
-        let text = buffer.ToString()
-        Console.Write("\r" + prompt + text)
-        let extra = shown - text.Length
+        let w = width ()
+
+        if cursor < start then
+            start <- cursor
+        elif cursor > start + w then
+            start <- cursor - w
+
+        let visible = buffer.ToString(start, min w (buffer.Length - start))
+        Console.Write("\r" + prompt + visible)
+        let extra = shown - visible.Length
 
         if extra > 0 then
             Console.Write(String(' ', extra) + String('\b', extra))
 
-        shown <- text.Length
-        Console.Write(String('\b', text.Length - cursor))
+        shown <- visible.Length
+        Console.Write(String('\b', visible.Length - (cursor - start)))
 
     let replace (text: string) =
         buffer.Clear().Append(text) |> ignore
@@ -70,13 +88,13 @@ let readLine (prompt: string) (history: string list) : Read =
             | ConsoleKey.LeftArrow ->
                 if cursor > 0 then
                     cursor <- cursor - 1
-                    Console.Write '\b'
+                    redraw ()
 
                 loop ()
             | ConsoleKey.RightArrow ->
                 if cursor < buffer.Length then
-                    Console.Write(buffer.[cursor])
                     cursor <- cursor + 1
+                    redraw ()
 
                 loop ()
             | ConsoleKey.Home
@@ -135,13 +153,7 @@ let readLine (prompt: string) (history: string list) : Read =
             | _ when not (Char.IsControl key.KeyChar) && not ctrl ->
                 buffer.Insert(cursor, key.KeyChar) |> ignore
                 cursor <- cursor + 1
-
-                if cursor = buffer.Length then
-                    Console.Write key.KeyChar
-                    shown <- buffer.Length
-                else
-                    redraw ()
-
+                redraw ()
                 loop ()
             | _ -> loop ()
 

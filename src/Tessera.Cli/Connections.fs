@@ -215,11 +215,23 @@ let validName (name: string) =
 
 /// Check a profile holds no secret before it is written.
 let check (p: Profile) : Result<Profile, TessError> =
-    let secretWords = [ "secret"; "password"; "token="; "pwd=" ]
+    // Credentials as a connection string writes them (`Password=...`): a path that merely has such a
+    // word in it is fine.
+    let secretKeys = [
+        "password"
+        "pwd"
+        "secret"
+        "clientsecret"
+        "client_secret"
+        "token"
+        "accesstoken"
+    ]
 
     let hasSecret (v: string) =
-        secretWords
-        |> List.exists (fun w -> v.Contains(w, StringComparison.OrdinalIgnoreCase))
+        Text.RegularExpressions.Regex.Matches(v, @"([A-Za-z_ ]+)\s*=")
+        |> Seq.exists (fun m ->
+            let key = m.Groups.[1].Value.Trim().Replace(" ", "").ToLowerInvariant()
+            secretKeys |> List.exists (fun k -> key.EndsWith k))
 
     if not (validName p.Name) then
         Error(InvalidName(p.Name, "a profile name has only letters, digits, '.', '_' and '-'"))
