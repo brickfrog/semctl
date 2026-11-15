@@ -82,6 +82,15 @@ module ExitCode =
         | NoTestSuites _ -> input
         | RoleNotFound _
         | RoleCannotRead _ -> input
+        | NoPackageSource _ -> usage
+        | PackageSourceUnreadable _
+        | PackageNotFound _
+        | PackageVersionNotFound _
+        | InvalidPackage _
+        | PackageConflict _
+        | PackageNotInstalled _
+        | InvalidPackageMetadata _ -> input
+        | PackageFetchFailed _ -> remote
 
 let version () =
     let asm = Assembly.GetExecutingAssembly()

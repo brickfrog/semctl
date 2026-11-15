@@ -48,6 +48,9 @@
     <Compile Include="Lint.fs" />
     <Compile Include="BpaRuleEdit.fs" />
     <Compile Include="BpaFetch.fs" />
+    <Compile Include="Pkg.fs" />
+    <Compile Include="PkgSource.fs" />
+    <Compile Include="PkgFetch.fs" />
     <Compile Include="Report.fs" />
     <Compile Include="Format.fs" />
     <Compile Include="QueryResult.fs" />

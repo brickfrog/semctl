@@ -167,6 +167,7 @@ let runWithInput
                 | Some(Completion args) -> CompletionCommand.run parser.Value ctx args
                 | Some(Complete args) -> CompletionCommand.complete parser.Value ctx args
                 | Some(Mcp args) -> McpCommand.run ctx args input
+                | Some(Pkg args) -> PkgCommand.run ctx args
                 | _ -> UsageError(parser.Value.PrintUsage())
 
             match outcome with
