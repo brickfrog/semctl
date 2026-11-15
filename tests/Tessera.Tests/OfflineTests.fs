@@ -179,6 +179,7 @@ let private network (ns: string) (name: string) =
     ns.StartsWith "System.Net"
     || ns.StartsWith "Microsoft.AnalysisServices.AdomdClient"
     || ns.StartsWith "Microsoft.Identity"
+    || ns.StartsWith "Microsoft.Data.SqlClient"
     || (ns.StartsWith "Microsoft.AnalysisServices"
         && (name = "Server" || name = "AccessToken"))
 
@@ -213,6 +214,7 @@ let tests =
                     "Tessera.Xmla"
                     "Microsoft.AnalysisServices.AdomdClient"
                     "Microsoft.Identity.Client"
+                    "Microsoft.Data.SqlClient"
                 ] do
                 Expect.isFalse (List.contains forbidden references) forbidden
 
@@ -235,7 +237,12 @@ let tests =
             let direct = usages cli network
             Expect.isEmpty direct (describe direct)
 
-            for forbidden in [ "Microsoft.AnalysisServices.AdomdClient"; "Microsoft.Identity.Client" ] do
+            for forbidden in
+                [
+                    "Microsoft.AnalysisServices.AdomdClient"
+                    "Microsoft.Identity.Client"
+                    "Microsoft.Data.SqlClient"
+                ] do
                 Expect.isFalse (List.contains forbidden (referencedAssemblies cli)) forbidden
 
             let live =
@@ -277,6 +284,7 @@ let tests =
                     [ "query"; model; "--data"; p.Path; "EVALUATE { 1 }" ]
                     [ "preview"; model; "Sales"; "--data"; p.Path ]
                     [ "add"; model; "calendar:Date/C"; "--category"; "Date=Date" ]
+                    [ "schemacheck"; model; "--source"; p.Path ]
                     [ "--version" ]
                 ] do
                 tess args |> ignore

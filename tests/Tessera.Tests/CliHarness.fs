@@ -15,6 +15,7 @@ let private configVariables =
     set [ "TESS_BPA_RULES"; "XDG_CONFIG_HOME"; "HOME"; "APPDATA" ]
     // A developer's real server credentials never reach a test either.
     + set Tessera.Xmla.Credentials.Var.all
+    + set Tessera.Xmla.SqlCredentials.Var.all
 
 /// Run `tess <args>` in-process, with server connections going to `connector`, with these
 /// environment variables (and none of the real configuration variables).

@@ -37,6 +37,7 @@ type CliArgs =
     | [<CliPrefix(CliPrefix.None)>] Completion of ParseResults<CompletionCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Mcp of ParseResults<McpCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Vertipaq of ParseResults<VertipaqCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Schemacheck of ParseResults<SchemaCheckCommand.Args>
     | [<Hidden; CliPrefix(CliPrefix.None); CustomCommandLine("__complete")>] Complete of
         ParseResults<CompletionCommand.CompleteArgs>
 
@@ -75,4 +76,5 @@ type CliArgs =
             | Completion _ -> CompletionCommand.summary
             | Mcp _ -> McpCommand.summary
             | Vertipaq _ -> VertipaqCommand.summary
+            | Schemacheck _ -> SchemaCheckCommand.summary
             | Complete _ -> "candidates for the completion scripts."

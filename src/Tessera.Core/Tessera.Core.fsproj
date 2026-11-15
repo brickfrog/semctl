@@ -92,6 +92,9 @@
     <Compile Include="Vertipaq.fs" />
     <Compile Include="VertipaqFixture.fs" />
     <Compile Include="VertipaqVpax.fs" />
+    <Compile Include="SchemaCheck.fs" />
+    <Compile Include="SchemaCheckSources.fs" />
+    <Compile Include="SchemaCheckSql.fs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -108,6 +108,8 @@ type TessError =
     | RoleNotFound of role: string * existing: string list
     /// None of these roles (name, permission) may query data.
     | RoleCannotRead of roles: (string * string) list
+    /// `schemacheck --source`: a schema file, fixture directory or source address that can't be used.
+    | InvalidSchemaSource of source: string * reason: string
 
 module TessError =
 
@@ -176,6 +178,7 @@ module TessError =
         | NoTestSuites _ -> "no-test-suites"
         | RoleNotFound _ -> "role-not-found"
         | RoleCannotRead _ -> "role-cannot-read"
+        | InvalidSchemaSource _ -> "invalid-schema-source"
 
     let rec message =
         function
@@ -330,6 +333,7 @@ module TessError =
                 |> String.concat ", "
 
             $"Members of {list} can't query data: a role needs the Read, ReadRefresh or Administrator permission"
+        | InvalidSchemaSource(source, reason) -> $"Can't use {source} as a schema source: {reason}"
 
     /// Close matches for what wasn't found ("did you mean"), for the JSON error's `suggestions`.
     let rec suggestions =
