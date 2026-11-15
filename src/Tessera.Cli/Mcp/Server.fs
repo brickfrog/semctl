@@ -72,42 +72,32 @@ type Options = {
 // ---------------------------------------------------------------------------------------------
 // The session
 
-type private ErrorKey = string * ObjectRef * string
-
+/// The served model (staged edits, the save gate and staged report files: Staging.StagedModel,
+/// shared with `tess interactive`) and the server's own state.
 type Session = {
     Ctx: Ctx
-    Source: ModelSource
     Options: Options
-    mutable Db: Database
+    Model: Staging.StagedModel
     /// The local engine over the fixture, prepared for the current model (dropped on each write).
     mutable Prepared: Result<Tessera.Engine.Prepared, TessError> option
-    /// For each object renamed this session: its current ref -> its ref when the model was loaded.
-    mutable Origins: Map<ObjectRef, ObjectRef>
-    /// The gated errors the model had when it was loaded (or last saved), keyed by their refs then.
-    mutable Baseline: Set<string * ObjectRef * string>
-    /// Objects changed by batches since the model was loaded or saved.
-    mutable Unsaved: int
-}
+} with
 
-let private keyOf (origins: Map<ObjectRef, ObjectRef>) (i: Validate.Issue) =
-    i.Rule, Map.tryFind i.Ref origins |> Option.defaultValue i.Ref, i.Message
+    member s.Db = s.Model.Db
+    member s.Source = s.Model.Source
+    /// Objects changed by batches since the model was loaded or saved.
+    member s.Unsaved = s.Model.Unsaved
 
 module Session =
     let create (ctx: Ctx) (source: ModelSource) (db: Database) (options: Options) = {
         Ctx = ctx
-        Source = source
         Options = options
-        Db = db
+        Model = Staging.StagedModel.create source db
         Prepared = None
-        Origins = Map.empty
-        Baseline = Mutation.gatedErrors db |> List.map (keyOf Map.empty) |> Set.ofList
-        Unsaved = 0
     }
 
     /// The gated errors present now that weren't when the model was loaded (or last saved).
     let introducedSinceLoad (s: Session) =
-        Mutation.gatedErrors s.Db
-        |> List.filter (fun i -> not (s.Baseline.Contains(keyOf s.Origins i)))
+        Staging.StagedModel.introducedSinceLoad s.Model
 
 // ---------------------------------------------------------------------------------------------
 // Tools
@@ -626,7 +616,44 @@ let private runQuery (s: Session) (args: JsonObject) =
 // ---- write -------------------------------------------------------------------------------------
 
 /// One operation of a batch, as `apply_changes` takes it.
-let private operation (s: Session) (db: Database) (op: JsonObject) : Result<Mutation.Effect, Failure> =
+/// Report files a batch rewrites: planned against the session's staged files and the batch's own
+/// earlier edits, so renames in one batch compose; staged with the batch, or dropped with it.
+type private BatchFiles(model: Staging.StagedModel) =
+    let mutable files: Map<string, Staging.StagedFile> = Map.empty
+
+    member _.Read(path: string) : byte array =
+        match Map.tryFind (System.IO.Path.GetFullPath path) files with
+        | Some f ->
+            let body = Text.Encoding.UTF8.GetBytes f.Current
+
+            if f.Bom then
+                Array.append [| 0xEFuy; 0xBBuy; 0xBFuy |] body
+            else
+                body
+        | None -> Staging.StagedModel.read model path
+
+    member _.Add(edits: Report.FileEdit list) =
+        files <- Staging.StagedModel.mergeFiles files edits
+
+    /// The batch's edits, from the text as staged before the batch to the text after it.
+    member _.Edits: Report.FileEdit list = [
+        for KeyValue(_, f) in files ->
+            {
+                Path = f.Path
+                Display = f.Display
+                Before = f.Original
+                After = f.Current
+                Bom = f.Bom
+                References = f.References
+            }
+    ]
+
+let private operation
+    (s: Session)
+    (batch: BatchFiles)
+    (db: Database)
+    (op: JsonObject)
+    : Result<Mutation.Effect, Failure> =
     let entry selector =
         Selector.resolve (objects db) selector |> tess
 
@@ -702,20 +729,41 @@ let private operation (s: Session) (db: Database) (op: JsonObject) : Result<Muta
                     else
                         Rename.apply p
 
-                        let reports =
-                            s.Source.SemanticModelFolder
-                            |> Option.map Report.reportsOf
-                            |> Option.defaultValue []
+                        // Report files that name the field are rewritten as `tess rename` does,
+                        // staged with the batch and written by save_model.
+                        let reports = Staging.reportsOf s.Source
+
+                        let files, warnings =
+                            match reports, Report.Change.ofMove p.Target.Ref p.NewRef with
+                            | [], _
+                            | _, None -> [], []
+                            | _, Some change -> Report.planWith batch.Read reports change
+
+                        batch.Add files
+
+                        let updated =
+                            match files with
+                            | [] -> []
+                            | _ ->
+                                let n = files |> List.sumBy (fun f -> f.References)
+                                let refs = if n = 1 then "1 reference" else $"{n} references"
+
+                                let fileCount =
+                                    if files.Length = 1 then
+                                        "1 file"
+                                    else
+                                        $"{files.Length} files"
+
+                                [
+                                    $"Updated {refs} in {fileCount} of the report (staged; written by save_model)"
+                                ]
 
                         {
-                            Warnings =
-                                p.Warnings
-                                @ [
-                                    if not reports.IsEmpty then
-                                        "report files that name this field are not updated by tess mcp: run `tess rename` to update them too"
-                                ]
+                            Warnings = p.Warnings @ warnings
                             Renamed = [ p.Target.Ref, p.NewRef ]
-                            Notes = [ $"Renamed {ObjectRef.format p.Target.Ref} -> {ObjectRef.format p.NewRef}" ]
+                            Notes =
+                                $"Renamed {ObjectRef.format p.Target.Ref} -> {ObjectRef.format p.NewRef}"
+                                :: updated
                         })))
     | Ok "add" ->
         Args.string op "kind"
@@ -807,14 +855,20 @@ let private operation (s: Session) (db: Database) (op: JsonObject) : Result<Muta
         |> Result.bind (fun selectors ->
             Args.bool op "cascade" false
             |> Result.bind (fun cascade ->
-                match selectors with
-                | [] -> Error(BadArguments "remove: missing 'objects'")
-                | selectors ->
-                    RemoveObject.remove db {
-                        RemoveObject.RemoveSpec.ofSelectors selectors with
-                            Cascade = cascade
-                    }
-                    |> tess))
+                Args.bool op "force" false
+                |> Result.bind (fun force ->
+                    match selectors with
+                    | [] -> Error(BadArguments "remove: missing 'objects'")
+                    | selectors ->
+                        // Refused while a report next to the model uses what would go, unless forced.
+                        let check = ReportUsage.checkWith batch.Read (Staging.reportsOf s.Source)
+
+                        RemoveObject.removeWith check db {
+                            RemoveObject.RemoveSpec.ofSelectors selectors with
+                                Cascade = cascade
+                                Force = force
+                        }
+                        |> tess)))
     | Ok "move" ->
         Args.string op "measure"
         |> Result.bind (fun measure ->
@@ -845,6 +899,7 @@ let private applyChanges (s: Session) (args: JsonObject) =
             // One batch, all or nothing: applied to a copy, which replaces the model only if every
             // operation succeeds.
             let work = ModelIO.clone s.Db
+            let batch = BatchFiles(s.Model)
             let mutable failure = None
 
             let edit (db: Database) =
@@ -854,7 +909,7 @@ let private applyChanges (s: Session) (args: JsonObject) =
                     (fun (acc: Result<Mutation.Effect, TessError>) (i, op) ->
                         acc
                         |> Result.bind (fun (soFar: Mutation.Effect) ->
-                            match operation s db (op :?> JsonObject) with
+                            match operation s batch db (op :?> JsonObject) with
                             | Ok e ->
                                 Ok {
                                     Warnings = soFar.Warnings @ e.Warnings
@@ -873,17 +928,9 @@ let private applyChanges (s: Session) (args: JsonObject) =
             match Mutation.applyResolving work edit with
             | Error e -> Error(defaultArg failure (Tess e))
             | Ok(applied, resolved) ->
-                s.Db <- work
+                let files = batch.Edits
+                Staging.StagedModel.stage s.Model work applied.Changes files
                 s.Prepared <- None
-
-                for c in applied.Changes do
-                    match c.MovedFrom with
-                    | Some old ->
-                        let origin = Map.tryFind old s.Origins |> Option.defaultValue old
-                        s.Origins <- (Map.remove old s.Origins).Add(c.Ref, origin)
-                    | None -> ()
-
-                s.Unsaved <- s.Unsaved + applied.Changes.Length
                 let sinceLoad = Session.introducedSinceLoad s
                 let o = Changes.changesJson "apply_changes" applied.Changes :?> JsonObject
                 o.["introducedErrors"] <- issuesJson applied.IntroducedErrors
@@ -892,6 +939,13 @@ let private applyChanges (s: Session) (args: JsonObject) =
                 o.["warnings"] <- arr (applied.Effect.Warnings |> List.map str)
                 o.["notes"] <- arr (applied.Effect.Notes |> List.map str)
                 o.["unsavedChanges"] <- num s.Unsaved
+
+                if not files.IsEmpty then
+                    o.["reportFiles"] <-
+                        arr [
+                            for f in files ->
+                                obj [ "path", str f.Path; "display", str f.Display; "references", num f.References ]
+                        ]
 
                 o.["saved"] <-
                     str (
@@ -907,8 +961,6 @@ let private applyChanges (s: Session) (args: JsonObject) =
 let private save (s: Session) (args: JsonObject) =
     Args.bool args "force" false
     |> Result.bind (fun force ->
-        let introduced = Session.introducedSinceLoad s
-
         if s.Source.Format = ModelFormat.Xmla then
             Error(
                 Tess(
@@ -918,24 +970,24 @@ let private save (s: Session) (args: JsonObject) =
                     )
                 )
             )
-        elif s.Unsaved = 0 then
+        elif not (Staging.StagedModel.isDirty s.Model) then
             Ok(obj [ "saved", bool false; "note", str "no unsaved changes" ])
-        elif not introduced.IsEmpty && not force then
-            Error(Tess(ChangeIntroducesErrors introduced.Length))
         else
-            ModelIO.saveBack s.Source s.Db
+            Staging.StagedModel.save s.Model force
             |> tess
             |> Result.map (fun saved ->
-                s.Unsaved <- 0
-                s.Origins <- Map.empty
-                s.Baseline <- Mutation.gatedErrors s.Db |> List.map (keyOf Map.empty) |> Set.ofList
-
                 obj [
                     "saved", bool true
-                    "format", str (ModelIO.OutputFormat.token saved.Format)
-                    "path", str saved.Path
-                    "eol", str (ModelIO.Eol.token saved.Eol)
-                    "errorsIntroducedSinceLoad", issuesJson introduced
+                    "format", str (ModelIO.OutputFormat.token saved.Model.Format)
+                    "path", str saved.Model.Path
+                    "eol", str (ModelIO.Eol.token saved.Model.Eol)
+                    "errorsIntroducedSinceLoad", issuesJson saved.Introduced
+                    if not saved.Files.IsEmpty then
+                        "reportFiles",
+                        arr [
+                            for f in saved.Files ->
+                                obj [ "path", str f.Path; "display", str f.Display; "references", num f.References ]
+                        ]
                 ]))
 
 // ---- the tool table ----------------------------------------------------------------------------
@@ -1126,10 +1178,12 @@ let tools: Tool list = [
             "Apply a batch of operations to the model, all or nothing: if one fails, nothing changes. Each "
             + "operation has an 'op': "
             + "set {object, properties: {path: value or null}, unset: [paths]} (paths from list_properties); "
-            + "rename {object, newName} (fixes the DAX that refers to it); "
+            + "rename {object, newName} (fixes the DAX that refers to it, and the field references of PBIR "
+            + "reports next to the model, written by save_model); "
             + "add {kind: measure|calculatedColumn|dataColumn|calculatedTable|relationship, table, name, expression, "
             + "dataType, sourceColumn, from, to, active, description, displayFolder, formatString, hidden}; "
-            + "remove {objects, cascade}; move {measure, table, displayFolder}; "
+            + "remove {objects, cascade, force} (refused while other DAX or a report's visuals use them, "
+            + "unless force); move {measure, table, displayFolder}; "
             + "script {dax: a DAX script of DEFINE MEASURE/COLUMN/TABLE blocks, created or updated}. "
             + "Returns the changes, and the errors the batch introduced and resolved. Changes stay in memory."
         Grant = Grant.MetadataWrite
@@ -1143,8 +1197,8 @@ let tools: Tool list = [
         Name = "save_model"
         Title = "Save the model"
         Description =
-            "Write the changes made this session back to the model's files. Refused if they introduced "
-            + "errors, unless 'force' is true."
+            "Write the changes made this session back to the model's files, then the report files they "
+            + "rewrite. Refused if they introduced errors, unless 'force' is true."
         Grant = Grant.MetadataWrite
         Schema = """{"type":"object","properties":{"force":{"type":"boolean"}},"additionalProperties":false}"""
         ReadOnly = false

@@ -4,12 +4,14 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp vertipaq schemacheck' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect profile session query preview deploy data refresh test completion mcp vertipaq schemacheck interactive' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
         'perspective') _tess_r='add remove list' ;;
         'script') _tess_r='export apply' ;;
+        'profile') _tess_r='set list show remove' ;;
+        'session') _tess_r='show list clear prune' ;;
         'data') _tess_r='init check info embed' ;;
         'test') _tess_r='run init snapshot compare list' ;;
         *) _tess_r='' ;;
@@ -54,7 +56,17 @@ _tess_options() {
         'script apply') _tess_r='--save --save-to --force --stat --name-only --json -j --help -h' ;;
         'lint') _tess_r='--rule --min-severity --fail-on --ci --fix --save --save-to --force --stat --name-only --sarif --watch --json -j --help -h' ;;
         'format') _tess_r='--expr -e --kind -k --table -t --long --width --no-space-after-function --semicolons --check --save --save-to --force --stat --name-only --json -j --help -h' ;;
-        'connect') _tess_r='--json -j --help -h' ;;
+        'connect') _tess_r='--profile --clear --no-remember --json -j --help -h' ;;
+        'profile') _tess_r='--json -j --help -h' ;;
+        'profile set') _tess_r='--model --server --database --description --setting --unset-setting --json -j --help -h' ;;
+        'profile list') _tess_r='--json -j --help -h' ;;
+        'profile show') _tess_r='--json -j --help -h' ;;
+        'profile remove') _tess_r='--json -j --help -h' ;;
+        'session') _tess_r='--json -j --help -h' ;;
+        'session show') _tess_r='--json -j --help -h' ;;
+        'session list') _tess_r='--json -j --help -h' ;;
+        'session clear') _tess_r='--json -j --help -h' ;;
+        'session prune') _tess_r='--json -j --help -h' ;;
         'query') _tess_r='--file -f --csv --max-rows --data --coverage --now --user-name --user-principal-name --user-object-id --user-culture --custom-data --role --formatted --json -j --help -h' ;;
         'preview') _tess_r='--rows -n --columns -c --data --csv --json -j --help -h' ;;
         'deploy') _tess_r='--execute --overwrite --force --deploy-connections --deploy-partitions --skip-refresh-policy --deploy-shared-expressions --deploy-roles --deploy-role-members --deploy-full --tmsl --ignore --stat --name-only --json -j --help -h' ;;
@@ -74,6 +86,7 @@ _tess_options() {
         'mcp') _tess_r='--allow --data --server --save --audit-log --json -j --help -h' ;;
         'vertipaq') _tess_r='--data --import --tables --columns --relationships --partitions --hierarchies --all --top --export --obfuscate --dictionary --annotate --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'schemacheck') _tess_r='--source --fail-on --ci --trx --sarif --update --drop-removed-columns --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'interactive') _tess_r='--echo --batch --no-batch --no-banner --history --json -j --help -h' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -218,6 +231,13 @@ _tess_value() {
         'format|-t') _tess_r='dyn' ;;
         'format|--width') _tess_r='text' ;;
         'format|--save-to') _tess_r='path' ;;
+        'connect|--profile') _tess_r='text' ;;
+        'profile set|--model') _tess_r='path' ;;
+        'profile set|--server') _tess_r='text' ;;
+        'profile set|--database') _tess_r='text' ;;
+        'profile set|--description') _tess_r='text' ;;
+        'profile set|--setting') _tess_r='text' ;;
+        'profile set|--unset-setting') _tess_r='text' ;;
         'query|--file') _tess_r='path' ;;
         'query|-f') _tess_r='path' ;;
         'query|--max-rows') _tess_r='text' ;;
@@ -291,6 +311,7 @@ _tess_value() {
         'schemacheck|--trx') _tess_r='path' ;;
         'schemacheck|--sarif') _tess_r='path' ;;
         'schemacheck|--save-to') _tess_r='path' ;;
+        'interactive|--history') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -357,6 +378,9 @@ _tess_positional() {
         'format|0') _tess_r='path' ;;
         'format|'*) _tess_r='dyn' ;;
         'connect|0') _tess_r='text' ;;
+        'profile set|0') _tess_r='text' ;;
+        'profile show|0') _tess_r='text' ;;
+        'profile remove|0') _tess_r='text' ;;
         'query|0') _tess_r='path' ;;
         'query|'*) _tess_r='text' ;;
         'preview|0') _tess_r='path' ;;
@@ -390,6 +414,7 @@ _tess_positional() {
         'vertipaq|'*) _tess_r='text' ;;
         'schemacheck|0') _tess_r='path' ;;
         'schemacheck|'*) _tess_r='text' ;;
+        'interactive|0') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }

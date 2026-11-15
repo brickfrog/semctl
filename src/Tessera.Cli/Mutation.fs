@@ -184,13 +184,37 @@ and runWith
         | Ok applied ->
             let files = files.Value
 
-            let blocked =
-                opts.Target <> DryRun && not applied.IntroducedErrors.IsEmpty && not opts.Force
+            // Inside `tess interactive`, an edit of the session's model is staged (--save also saves
+            // the session); --save-to still writes elsewhere.
+            let staging =
+                match Staging.stagingFor source, opts.Target with
+                | Some a, (DryRun | InPlace) when a.Mode = Staging.EditMode.Stage -> Some a
+                | _ -> None
+
+            match staging with
+            | Some a when not applied.Changes.IsEmpty -> Staging.StagedModel.stage a.Model db applied.Changes files
+            | _ -> ()
+
+            let blockedCount =
+                match staging with
+                | Some a when opts.Target = InPlace && not opts.Force ->
+                    (Staging.StagedModel.introducedSinceLoad a.Model).Length
+                | Some _ -> 0
+                | None when opts.Target <> DryRun && not opts.Force -> applied.IntroducedErrors.Length
+                | None -> 0
+
+            let blocked = blockedCount > 0
 
             let saved =
-                if applied.Changes.IsEmpty || blocked then
-                    Ok None
-                else
+                match staging with
+                | _ when blocked -> Ok None
+                | Some a ->
+                    if opts.Target = InPlace && Staging.StagedModel.isDirty a.Model then
+                        Staging.StagedModel.save a.Model true |> Result.map (fun s -> Some s.Model)
+                    else
+                        Ok None
+                | None when applied.Changes.IsEmpty -> Ok None
+                | None ->
                     match opts.Target with
                     | DryRun -> Ok None
                     | InPlace ->
@@ -199,7 +223,10 @@ and runWith
                     | SaveTo path -> ModelIO.saveTo source opts.Force db path |> Result.map Some
 
             let filesWritten =
-                opts.Target = InPlace && not blocked && not applied.Changes.IsEmpty
+                match staging, saved with
+                | Some _, Ok saved -> saved.IsSome
+                | Some _, Error _ -> false
+                | None, _ -> opts.Target = InPlace && not blocked && not applied.Changes.IsEmpty
 
             let applied =
                 match opts.Target, files with
@@ -217,11 +244,18 @@ and runWith
             match saved with
             | Error e -> Failed e
             | Ok saved ->
-                let blockedError = ChangeIntroducesErrors applied.IntroducedErrors.Length
+                let blockedError = ChangeIntroducesErrors blockedCount
 
                 if ctx.Json then
                     let json = resultJson command opts applied saved :?> JsonObject
                     json.["files"] <- filesJson files filesWritten
+
+                    match staging with
+                    | Some a ->
+                        json.["dryRun"] <- bool false
+                        json.["staged"] <- bool (not applied.Changes.IsEmpty)
+                        json.["unsavedChanges"] <- num a.Model.Unsaved
+                    | None -> ()
 
                     // One JSON document: a refused save is reported inside the result.
                     if blocked then
@@ -279,6 +313,13 @@ and runWith
 
                     if not applied.Changes.IsEmpty then
                         match opts.Target, saved with
+                        | DryRun, _ when staging.IsSome ->
+                            let n = staging.Value.Model.Unsaved
+                            let changes = if n = 1 then "1 unsaved change" else $"{n} unsaved changes"
+
+                            ctx.Err.WriteLine(
+                                $"Staged ({changes} in this session): `save` writes them, `undo` takes this back."
+                            )
                         | DryRun, _ -> ctx.Err.WriteLine("Dry run - nothing saved. Add --save to persist.")
                         | _, Some s ->
                             let format = ModelIO.OutputFormat.token s.Format
@@ -321,7 +362,7 @@ let followReports
             | [], _
             | _, [] -> effect, []
             | _, [ change ] ->
-                let files, warnings = Report.plan reports change
+                let files, warnings = Report.planWith (Staging.readerFor source) reports change
 
                 {
                     effect with

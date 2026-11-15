@@ -36,10 +36,11 @@ option; the README has the details.
   `--force`. Look at the dry run first, then save. `--stat` and `--name-only` shorten the diff. With `--json`, the
   change set includes `dryRun`, `introducedErrors`, `warnings`, `notes`, and `saved` once something was written.
 - **No network.** tess makes no network call unless the command names a server: an `xmla:<server>;<database>`
-  model argument (any command), `connect`, the server `deploy` compares with and deploys to (even on a dry run),
-  `bpa --allow-external-rules` with a rule URL, or `schemacheck --source sql:<server>;<database>`. There's no
-  telemetry and no update check. `format` formats locally and never calls daxformatter.com. A `query`,
-  `preview`, `test run` or `vertipaq` with `--data` stays on the machine, and so does `vertipaq --import`.
+  model argument (any command), `active:` or `profile:<name>` when that connection is a server, `connect`, the
+  server `deploy` compares with and deploys to (even on a dry run), `bpa --allow-external-rules` with a rule URL,
+  or `schemacheck --source sql:<server>;<database>`. There's no telemetry and no update check. `format` formats
+  locally and never calls daxformatter.com. A `query`, `preview`, `test run` or `vertipaq` with `--data` stays on
+  the machine, and so does `vertipaq --import`.
 - **Credentials come from the environment** (`TESS_XMLA_TOKEN`, `TESS_XMLA_CLIENT_ID` / `_TENANT_ID` /
   `_CLIENT_SECRET`, ...; for `schemacheck`'s SQL source `TESS_SQL_TOKEN`, `TESS_SQL_USER` / `TESS_SQL_PASSWORD`), never from the command line: a secret in an argument is refused. tess never prints a
   secret.
@@ -105,6 +106,26 @@ tess vertipaq ./Sales.pbip --data ./fixture --export out.vpax [--obfuscate]
 A statistic tess couldn't read is left out of the JSON (never 0). `"estimated": true` means the sizes are
 estimates from fixture data, not VertiPaq's: compare them with each other, not with a server. `--obfuscate` writes
 `<name>.dict` next to the file; it holds the real names, so don't send it with the `.vpax`.
+A session holds one model in memory and stages edits until `save` (the same staged model `tess mcp` serves).
+Pipe a script into it: it stops at the first failing command with that command's exit code, and input that ends
+with unsaved edits fails with exit 1 (`unsaved-changes`), so end with `save` or `exit --force`:
+
+```sh
+printf 'rename [Revenue] "Net Revenue"\nvalidate --fail-on error\nstatus --json\nsave\n' | tess interactive ./Sales.pbip
+```
+
+Inside it, commands take no model (`get [Margin] --json`); `--dry-run` shows an edit without staging it; `undo`,
+`revert`, `diff` and `status` work on what is staged; `-` (stdin) is refused. Words group with `"..."` (a doubled
+`""` is a literal quote); `[Total]` and `'Sales'[Total]` stay whole.
+
+`remove` (and `bpa --fix` Delete(), `mcp` remove) refuses to delete what a PBIR report next to the model uses:
+exit 3, error code `used-by-report`, the visuals in `usages`. Change the report, or pass `--force` knowingly.
+
+Profiles and the active connection are local state, never secrets: `tess connect <model or server>` makes it this
+terminal's active connection, named `active:` as a model argument; `tess profile set <name> --model <path>` (or
+`--server ... --database ...`) names one, used as `profile:<name>` or with `tess connect --profile <name>`. Set
+`TESS_SESSION=<name>` when your commands don't run from one terminal (an agent's shell may start a new one each
+time), and `TESS_STATE_DIR` / `TESS_CONFIG` to keep the state somewhere of your own.
 
 ## Good habits
 

@@ -343,7 +343,13 @@ let private formatAnnotation = "Format"
 /// `findings`. A finding is refused (and nothing done for it) when its fix expression isn't one tess
 /// applies, its object can't be addressed, or two rules set one property of one object to different
 /// values. An Error means the model was left part-changed: discard it.
-let apply (db: Database) (findings: Bpa.Finding list) : Result<FixResult, TessError> =
+/// `apply`, with `reportCheck` deciding whether a Delete() may remove what a report uses
+/// (RemoveObject.removeWith): a Delete() it objects to is refused with its usages.
+let applyWith
+    (reportCheck: ObjectRef list -> string list)
+    (db: Database)
+    (findings: Bpa.Finding list)
+    : Result<FixResult, TessError> =
     let entries = objects db
     let byObject = Dictionary<MetadataObject, ObjectEntry>(HashIdentity.Reference)
 
@@ -536,13 +542,21 @@ let apply (db: Database) (findings: Bpa.Finding list) : Result<FixResult, TessEr
                         outcomes.[f] <- None
                     else
                         match
-                            RemoveObject.remove db (RemoveObject.RemoveSpec.ofSelectors [ ObjectRef.format e.Ref ])
+                            RemoveObject.removeWith
+                                reportCheck
+                                db
+                                (RemoveObject.RemoveSpec.ofSelectors [ ObjectRef.format e.Ref ])
                         with
                         | Ok effect ->
                             // What else went with it (the diff shows the object itself).
                             notes.AddRange(effect.Notes |> List.filter (fun n -> n.StartsWith "Also removed"))
                             outcomes.[f] <- None
                         | Error(UnsupportedRemove(_, reason)) -> refuse f $"it can't be removed: {reason}"
+                        | Error(UsedByReport(_, usages)) ->
+                            let n = usages.Length
+                            let files = if n = 1 then "1 report file" else $"{n} report files"
+                            let list = String.concat "; " usages
+                            refuse f $"a report uses it ({files}; --force removes it anyway): {list}"
                         | Error(RemoveBlocked(_, dependents)) ->
                             let n = dependents.Length
                             let refs = if n = 1 then "1 reference" else $"{n} references"
@@ -569,3 +583,7 @@ let apply (db: Database) (findings: Bpa.Finding list) : Result<FixResult, TessEr
         ]
         Notes = List.ofSeq notes
     })
+
+/// Apply the fixes, with no check outside the model.
+let apply (db: Database) (findings: Bpa.Finding list) : Result<FixResult, TessError> =
+    applyWith (fun _ -> []) db findings

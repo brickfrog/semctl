@@ -78,7 +78,9 @@ tess lint  ./MyReport.pbip                       # DAX code actions: unused VARs
 tess lint  ./MyReport.pbip --fix --save          # ... and rewrite what can be fixed safely
 tess format --expr "calculate(sum(Sales[Amount]),all('Date'))"   # format DAX, SQLBI style, offline
 tess format ./MyReport.pbip --save               # ... every DAX expression in a model (--check for CI)
-tess connect "powerbi://api.powerbi.com/v1.0/myorg/Finance"       # check a server connection, list its models
+tess interactive ./MyReport.pbip                 # a shell: commands without the model, edits staged until `save`
+tess connect "powerbi://api.powerbi.com/v1.0/myorg/Finance"       # check a server connection, list its models; then `active:`
+tess profile set prod --server "powerbi://.../Finance" --database Sales   # named connections (no secrets)
 tess info  "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales"   # read-only commands on a deployed model
 tess query "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" "EVALUATE 'Date'" --json
 tess deploy ./MyReport.pbip "powerbi://api.powerbi.com/v1.0/myorg/Finance" Sales   # dry run; --execute to deploy
@@ -954,8 +956,26 @@ particular relationship refers to its columns, so it is caught by the dependents
 **`--if-exists`** skips objects that don't exist, with a note, and exits 0 (so a script can run the same removal
 twice). An ambiguous object is still an error.
 
+**Reports.** In a PBIP project, removing a table, column, measure, hierarchy or level that a PBIR report next to the
+model uses is refused (exit 3, error code `used-by-report`), and the visuals are listed, one line per report file:
+
+```
+tess: Can't remove column:Date/Year: a report uses it:
+  level:Date/Calendar/Year <- Sales.Report: page 'Overview', visual 3f2a9c (tableEx)  (1 reference)
+Change those visuals first, or use --force to remove it anyway and leave them broken.
+```
+
+A use is found exactly as [`rename`](#renaming-rename) finds the references it rewrites (the report's semantic
+query expressions, reports whose `definition.pbir` points at this model), and is checked for everything the
+removal takes, after `--cascade` and the structural fallout (a removed column takes its hierarchy levels, and a
+visual that shows a level counts). Removing a table is checked as the table, so a visual on any of its fields
+counts. Report-level measures (`reportExtensions.json`) and a PBIR-Legacy `report.json` can't be read structurally:
+there, a file that merely mentions the name counts as a use. JSON lists them in the error's `usages`. `--force`
+removes it anyway; `--save-to` (a copy, which the reports don't point at) isn't checked. `bpa --fix` (a `Delete()`
+fix) and `tess mcp` (`apply_changes` remove) check the same way.
+
 Not updated: M (Power Query) that mentions a removed table, expression or data source by name (listed as a warning),
-the linguistic schema, and report visuals.
+the linguistic schema, and the report visuals that `--force` leaves broken.
 
 ### Moving measures (`move`)
 
@@ -1181,7 +1201,7 @@ use, with the side effects TE's object model gives them, and refuses everything 
 | `IsHidden = true`, `IsAvailableInMDX = false`, `IsKey = true` | sets the property (`isHidden`, `isAvailableInMdx`, `isKey`). `IsKey = true` also clears `IsKey` on the table's other columns |
 | `DataType = DataType.Decimal`, `SummarizeBy = AggregateFunction.None` | sets the enum property; the type must be the property's (`DataType`, `AggregateFunction`) |
 | `FormatString = "#,0"`, `Description = "..."`, `DisplayFolder = "..."` | sets the string (C#'s escapes apply: `"\u003B"` is `;`; `null` clears). A changed format string removes the object's `Format` annotation, as TE does |
-| `Delete()` | removes the object as `tess remove` does, with the relationships, levels, sort-by links, perspectives, security and translations that point at it. Unlike TE, it is refused while other DAX still refers to the object, instead of leaving that DAX broken. Like TE, it doesn't know what reports use |
+| `Delete()` | removes the object as `tess remove` does, with the relationships, levels, sort-by links, perspectives, security and translations that point at it. Unlike TE, it is refused while other DAX still refers to the object, instead of leaving that DAX broken, and (unless `--force`) while a PBIR report next to the model uses it ([reports](#removing-objects-remove)) |
 | `TranslatedDisplayFolders.Reset()` | sets every culture's display folder translation to the object's own display folder |
 
 Refused, with a warning naming the rule, the objects and why: anything else (`Name = ...`: use `tess rename`; values
@@ -1762,7 +1782,8 @@ tess refresh "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" Orders --
 A model on a server is written `xmla:<server>;<database>`, wherever a command takes a model path. Quote it: `;`
 ends a command in every shell, and workspace names often have spaces. The prefix is required, so a path can never
 be mistaken for a server (`localhost:51234` and `host\instance` look exactly like paths) and no command opens a
-connection unless its argument says so. `connect` and `deploy` take a server as its own argument, where the
+connection unless its argument says so: `xmla:...`, or `active:` / `profile:<name>` when the active connection or
+the profile is a server. `connect` and `deploy` take a server as its own argument, where the
 prefix is optional.
 
 | Server | Form | Works on |
@@ -1847,7 +1868,9 @@ The editing commands show their dry run against a remote model and can `--save-t
 
 `tess connect <server>` connects, and prints the product and version, how it signed in (never the credential), and
 the databases with their compatibility levels. With `--json`, each database also has a `source` you can paste as a
-model argument. Nothing is remembered: there are no sessions or profiles, and every command connects by itself.
+model argument. It then becomes this terminal's **active connection** (`active:`; see
+[profiles and the active connection](#profiles-and-the-active-connection-profile-session-connect)), unless
+`--no-remember`. Every command still connects by itself: nothing but the address is kept.
 
 #### `query`
 
@@ -2052,15 +2075,14 @@ Where this differs from `te refresh`, and why:
 
 #### Not in tess yet
 
-Sessions and profiles (`te connect` keeps an active connection; tess doesn't), interactive
+A workspace mirror (`te connect -w`: saves written locally, then to the server), interactive
 browser sign-in, and certificate and managed-identity sign-in.
 
 What each needs, for whoever picks it up:
 - **Refresh overrides:** `Refresh.Request` (Core) would carry the TMSL `overrides` array; the builder writes it
   after `objects`. `IXmlaSession.ExecuteTraced` is the trace seam, if something else needs server events.
-- **Sessions and profiles:** somewhere to keep an address and auth mode (never a secret) per shell, and a decision
-  on where; then `Source.load` reads it when no model is given.
 - **Interactive sign-in:** needs the MSAL broker the single-file builds leave out (see `Tessera.Cli.fsproj`).
+
 ### Previewing a table (`preview`)
 
 `tess preview <model> <table>` shows the first rows of a table, like Tabular Editor 3's table preview:
@@ -3681,6 +3703,141 @@ upgrading tess.
 Object names with spaces and symbols are quoted or escaped for the shell. Completing an object loads the model,
 so it takes about as long as `tess list` on it (under a second for a typical model).
 
+### Interactive sessions (`interactive`)
+
+`tess interactive <model>` (or `tess shell <model>`) opens a shell over one model, held in memory. Every tess
+command runs inside it without the model argument, which the session puts back where the command takes it (after
+its subcommand words: `bpa rules list`, `translations cultures`):
+
+```
+$ tess interactive ./Sales.pbip
+tess Sales> get [Total] -p expression
+SUM(Sales[Amount])
+tess Sales> rename [Total] Revenue
+tess Sales*> set [Revenue] -p formatString=#,0.00
+tess Sales*> query --data ./fixture "EVALUATE ROW(""r"", [Revenue])"
+tess Sales*> status
+tess Sales*> save
+```
+
+**Edits stage.** An edit of the session's model (`set`, `rename`, `add`, `remove`, `move`, `script apply`,
+`format`, `lint --fix`, `bpa --fix`, `translations import`, `perspective add|remove`, `bpa rules ...`) changes the
+model in memory and writes nothing; the prompt shows `*` while edits are staged. Every later command sees them:
+`get`, `validate`, `deps`, `query --data` and `test run --data` evaluate the staged model, `convert <path>` and
+`--save-to <path>` write it elsewhere, `deploy` deploys it. Report files that a staged `rename` or `move` rewrites
+are staged too, so later renames and the [removal check](#removing-objects-remove) see them. Per command,
+`--dry-run` (or `--revert`) shows the edit without staging it, and `--save` stages it and saves the session.
+
+| Session command | What it does |
+|---|---|
+| `status` (`pwd`) | the model, the staged changes (one line per object), staged report files, new errors (`--json`) |
+| `diff` | the staged changes against the model as loaded or saved (`--stat`, `--name-only`, `--json`); `diff <other>` compares the staged model with another |
+| `save [--force]` | write every staged edit back in place, then the staged report files; refused while the staged edits introduced errors (listed), unless `--force` |
+| `revert` | discard every staged edit |
+| `undo` | take back the last staged edit (one command's); `save` and `revert` clear the undo stack |
+| `history`, `clear` (`cls`), `help` (`?`) | |
+| `exit` (`quit`, `q`) `[--force]` | leave; with staged edits, asks first (no by default); `--force` discards them |
+
+The model staged in memory is the one `tess mcp` serves: one implementation of staged edits, the save gate and
+staged report files (`src/Tessera.Cli/Staging.fs`).
+
+**Lines.** Words are split as `te interactive` splits them: `"..."` and `'...'` group words (the quotes are dropped,
+a doubled quote is a literal one: `"EVALUATE ROW(""x"", 1)"`), and `[...]` stays whole with its brackets, so
+`[Total Sales]` and `'Internet Sales'[Amount]` reach the command as one argument (a `'...'` right before `[` keeps
+its quotes: it is a DAX table name). An unterminated group is an error. Backslashes are literal.
+
+**At a terminal** the line is edited in place (Left/Right, Home/End or Ctrl+A/Ctrl+E, Backspace/Delete, Ctrl+U,
+Ctrl+K, Up/Down through the history; a line longer than the terminal scrolls sideways); Ctrl+C abandons the line; Ctrl+D on an empty line ends the session (Ctrl+Z
+then Enter on Windows). The history is kept in memory; `--history <file>` keeps it in a file too (read at the start,
+appended to). There is no tab completion inside the session. A running command can't be interrupted: Ctrl+C is
+ignored until it finishes. `--no-banner` drops the welcome lines.
+
+**Piped input** runs line by line (also `--batch`): blank lines and `#` comments are skipped, `--echo` writes each
+command (after the prompt) before its output, and the first command that fails ends the run with its exit code
+(`diff` finding differences is not a failure). `--no-batch` runs every line and exits 0. Staged edits are never
+dropped silently: input that ends (or `exit`s) with unsaved edits fails with exit 1 (`unsaved-changes`) and lists
+them; end the script with `save`, or `exit --force` to discard them.
+
+```sh
+printf 'rename [Total] Revenue\nvalidate --fail-on error\nsave\n' | tess interactive ./Sales.pbip --echo
+```
+
+`--json` (on `tess interactive`) adds `--json` to every command, and the session's own commands and errors answer
+in JSON too (the unsaved-edits failure is `{"error": {"code": "unsaved-changes", ..., "changes": [...]}}`).
+
+Refused inside a session: `interactive`/`shell` and `mcp` (they would take over the input), `--watch`, and `-` as
+a value (read from stdin: the session reads its commands from stdin; `-p expression=-` counts too). A server model
+(`xmla:...`) can be explored and edited, but `save` is refused: `convert` or `--save-to` writes the staged model as
+files, and `tess deploy` deploys them. Without a model, the session starts on the active connection when it is a
+local model; a server is contacted only when named (`tess interactive active:`).
+
+### Profiles and the active connection (`profile`, `session`, `connect`)
+
+Local state only: nothing here contacts a server or stores a secret.
+
+**The active connection.** `tess connect <model or server>` checks it (a server: connects and lists its databases;
+a local model: loads it) and makes it this terminal's active connection. Any command then takes `active:` as its
+model argument:
+
+```sh
+tess connect ./Sales.pbip                       # or: tess connect "powerbi://.../Finance;Sales"
+tess validate active:
+tess interactive                                # a local active connection; a server needs `tess interactive active:`
+tess connect                                    # show it
+tess connect --clear                            # forget it
+```
+
+"This terminal" is the terminal's session leader on Linux and macOS (`getsid`: the shell the terminal started,
+which pipelines and subshells share) and the parent process on Windows, together with its start time, so a later
+process that gets the same id doesn't inherit it. `TESS_SESSION=<name>` names a session to share between terminals
+(or to keep one when tess runs under a wrapper such as `dotnet tool run`, whose parent changes every run). State
+files live in `$TESS_STATE_DIR`, else `%LOCALAPPDATA%\tessera\sessions` (Windows),
+`$XDG_STATE_HOME/tessera/sessions`, or `~/.local/state/tessera/sessions`; each holds the model argument, the profile
+it came from, the time and the terminal's process id and start time. `tess session` shows this session's (`list`:
+every session's, marking terminals that are gone; `clear`; `prune` deletes those of terminals that are gone).
+
+**Profiles** are named connections in the user config file: `$TESS_CONFIG`, else `%APPDATA%\tessera\config.json`
+(Windows), `$XDG_CONFIG_HOME/tessera/config.json`, or `~/.config/tessera/config.json`.
+
+```sh
+tess profile set dev --model ./Sales.pbip --description "Local TMDL"
+tess profile set prod --server "powerbi://api.powerbi.com/v1.0/myorg/Finance" --database Sales --setting auth=device-code
+tess profile list
+tess profile show prod --json
+tess connect --profile prod                     # make it the active connection (nothing is contacted)
+tess query profile:prod "EVALUATE ..."          # one command, without changing the active connection
+tess profile remove dev
+```
+
+```json
+{ "formatVersion": 1,
+  "profiles": { "prod": { "server": "powerbi://api.powerbi.com/v1.0/myorg/Finance", "database": "Sales",
+                          "settings": { "auth": "device-code" } } } }
+```
+
+A profile names a local model (`--model`) or a server and database (`--server`, `--database`). Its settings are
+behaviour overrides: defaults for the non-secret `TESS_*` variables, for the commands that use the profile
+(`profile:<name>`, or `active:` when the active connection came from it). A variable set in the environment wins.
+
+| Setting | Variable |
+|---|---|
+| `auth` | `TESS_XMLA_AUTH` (`token`, `spn`, `device-code`, `basic`, `integrated`) |
+| `clientId`, `tenantId` | `TESS_XMLA_CLIENT_ID`, `TESS_XMLA_TENANT_ID` |
+| `user` | `TESS_XMLA_USER` |
+| `tokenCache` | `TESS_XMLA_TOKEN_CACHE` (the opt-in sign-in cache's file) |
+| `bpaRules` | `TESS_BPA_RULES` |
+
+**Never a secret.** Tokens, client secrets and passwords stay in the environment (and the opt-in token cache) as
+without a profile: a server string with credentials in it is refused as on the command line, a setting tess doesn't
+know is refused, and so is any value with credentials written the way a connection string writes them
+(`Password=`, `Pwd=`, `...Secret=`, `...Token=`). The state files hold
+only the model argument.
+
+`active:` and `profile:<name>` are replaced before the command line is read, wherever they appear as a whole
+argument (a model argument, or `diff`'s second model). tess reads the config and state files only for a command
+line that uses one of them, and for `connect`, `profile`, `session` and a bare `interactive`. (An `@name` form, as
+in `te`, is avoided: PowerShell reads `@name` as splatting.)
+
 ### AI agents (`mcp`)
 
 `tess mcp <model>` serves one model to an AI agent (Claude Code, VS Code, Cursor, Codex, ...) as a
@@ -3732,16 +3889,17 @@ left exactly as it was and the error names the operation (`operation`: its index
 | `op` | Arguments | Like |
 |---|---|---|
 | `set` | `object`, `properties` (`{"<path>": value or null}`), `unset` | `tess set` |
-| `rename` | `object`, `newName` | `tess rename` (fixes the DAX that refers to it) |
+| `rename` | `object`, `newName` | `tess rename` (fixes the DAX that refers to it, and the PBIR reports next to the model: staged, written by `save_model`) |
 | `add` | `kind` (`measure`, `calculatedColumn`, `dataColumn`, `calculatedTable`, `relationship`), `table`, `name`, `expression`, `dataType`, `sourceColumn`, `from`, `to`, `active`, `description`, `displayFolder`, `formatString`, `hidden` | `tess add` |
-| `remove` | `objects`, `cascade` | `tess remove` |
+| `remove` | `objects`, `cascade`, `force` | `tess remove` (refused while other DAX or a report's visuals use them, unless `force`) |
 | `move` | `measure`, `table`, `displayFolder` | `tess move` |
 | `script` | `dax`: `DEFINE MEASURE`/`COLUMN`/`TABLE` blocks, created or updated | `tess script apply` |
 
 The result is the editing commands' JSON: `changes[]`, `introducedErrors` (errors the batch introduced),
 `resolvedErrors` (errors it fixed), `errorsIntroducedSinceLoad`, notes, warnings and `unsavedChanges`. Changes stay
 in memory for the session. Only with `--save` is there a `save_model` tool, which writes the model back where it
-was loaded from (the same format and line endings, as `--save` does). It refuses while the session's changes have
+was loaded from (the same format and line endings, as `--save` does), then the report files its renames rewrote
+(`reportFiles` in the results; a report file changed on disk since is not overwritten). It refuses while the session's changes have
 introduced errors that weren't there when the model was loaded, unless called with `force: true`. A model loaded
 from a server is never saved (`tess deploy` deploys files). There is no tool for raw TMSL or XMLA.
 
@@ -3755,8 +3913,7 @@ messages (the start-up line, option errors even with `--json`, `--help`, sign-in
 stderr. tess serves until its input ends.
 
 **Not done:** resources, prompts, sampling, progress notifications and cancellation (requests are answered one
-at a time, in order); `rename` through `apply_changes` doesn't update PBIR report files (it warns: use `tess
-rename`); `add` covers five kinds (the rest through a `script` operation, or `tess add`); there is no undo
+at a time, in order); `add` covers five kinds (the rest through a `script` operation, or `tess add`); there is no undo
 within a session other than not saving. Errors keep their CLI wording, which may mention a `tess` command.
 
 ### JSON and exit codes

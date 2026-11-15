@@ -85,8 +85,15 @@ let private describe (r: Deps.Reference) =
 
     $"{ObjectRef.format r.From}  {r.Via}{at}  {r.Text}  -> {target}"
 
-/// Remove the objects `spec` selects (and everything inside them), as one edit.
-let remove (db: Database) (spec: RemoveSpec) : Result<Mutation.Effect, TessError> =
+/// Remove the objects `spec` selects (and everything inside them), as one edit. `reportCheck` gets
+/// the objects about to go (top-level ones: not what goes inside a removed table) and returns what
+/// uses them outside the model (a report's visuals, ReportUsage.checkWith); anything it returns
+/// refuses the removal, unless `spec.Force`.
+let removeWith
+    (reportCheck: ObjectRef list -> string list)
+    (db: Database)
+    (spec: RemoveSpec)
+    : Result<Mutation.Effect, TessError> =
     let model = db.Model
     // Both before any change: the dependency graph, and TOM's verdict on the model as it is.
     let tomBefore = tomErrors db
@@ -271,6 +278,7 @@ let remove (db: Database) (spec: RemoveSpec) : Result<Mutation.Effect, TessError
         ]
 
         let dependents = daxDependents refs
+        let mutable reportUses = []
         let selectedRefs = selected |> List.map fmt
 
         match refusal, structural with
@@ -286,6 +294,21 @@ let remove (db: Database) (spec: RemoveSpec) : Result<Mutation.Effect, TessError
             Error(UnsupportedRemove(String.concat ", " targets, $"{uses} (change that first)"))
         | None, [] when not dependents.IsEmpty && not spec.Force ->
             Error(RemoveBlocked(selectedRefs, dependents |> List.map describe))
+        | None, [] when
+            not spec.Force
+            && (let topRefs =
+                    removed
+                    |> Seq.filter (fun o -> not (isRemoved o.Parent))
+                    |> Seq.choose (fun o ->
+                        match byObject.TryGetValue o with
+                        | true, e -> Some e.Ref
+                        | _ -> None)
+                    |> List.ofSeq
+
+                reportUses <- reportCheck topRefs
+                not reportUses.IsEmpty)
+            ->
+            Error(UsedByReport(selectedRefs, reportUses))
         | None, [] ->
             let notes = ResizeArray<string>()
             let warnings = ResizeArray<string>()
@@ -526,3 +549,6 @@ let remove (db: Database) (spec: RemoveSpec) : Result<Mutation.Effect, TessError
                         $"other objects would still link to it, which tess can't clean up:{listed}"
                     )
                 )
+
+/// Remove, with no check outside the model.
+let remove (db: Database) (spec: RemoveSpec) : Result<Mutation.Effect, TessError> = removeWith (fun _ -> []) db spec

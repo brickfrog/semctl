@@ -69,7 +69,10 @@ type Args =
                 + "what can't be applied exactly is listed, not done."
             | Save -> "with --fix: " + Mutation.Usage.save
             | Save_To _ -> "with --fix: " + Mutation.Usage.saveTo
-            | Force -> "with --fix: " + Mutation.Usage.force
+            | Force ->
+                "with --fix: "
+                + Mutation.Usage.force
+                + " Also lets a Delete() fix remove what a report next to the model uses."
             | Stat -> "with --fix: " + Mutation.Usage.stat
             | Name_Only -> "with --fix: " + Mutation.Usage.nameOnly
             | Vpax _ ->
@@ -605,7 +608,14 @@ let private analyze (ctx: Ctx) (args: ParseResults<Args>) (modelPath: string) =
                     let fixable, unfixable =
                         findings |> List.partition (fun f -> f.Rule.FixExpression.IsSome)
 
-                    BpaFix.apply db fixable
+                    // A Delete() of what a report next to the model uses is refused, unless --force.
+                    let reportCheck =
+                        match mopts.Target with
+                        | _ when mopts.Force -> fun _ -> []
+                        | Mutation.SaveTo _ -> fun _ -> []
+                        | _ -> Staging.reportCheckFor source
+
+                    BpaFix.applyWith reportCheck db fixable
                     |> Result.map (fun result -> fixEffect unfixable.Length result, [])))
     | Ok failOn, Ok ci, Ok opts ->
 

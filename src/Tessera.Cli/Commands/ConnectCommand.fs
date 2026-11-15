@@ -1,7 +1,11 @@
-/// `tess connect`: check that a server can be reached with the configured credentials, and list
-/// its databases. It keeps nothing: every command that takes an `xmla:` model connects by itself.
+/// `tess connect`: make a model or server this terminal's active connection, after checking that it
+/// can be used (a server: reached with the configured credentials, its databases listed; a local
+/// model: loaded), so later commands can name it `active:`. Also: `--profile <name>` (no check, no
+/// connection), no argument (show it), `--clear`. The state is local (Connections) and never holds
+/// a secret.
 module Tessera.Cli.ConnectCommand
 
+open System
 open System.IO
 open Argu
 open Tessera
@@ -11,22 +15,31 @@ open Tessera.Cli.Common
 
 /// One-line description, shown in `tess --help`.
 let summary =
-    "check a connection to a server (powerbi://, asazure://, SSAS) and list its databases."
+    "make a model or server (powerbi://, asazure://, SSAS) this terminal's active connection (`active:`); "
+    + "check it, list its databases."
 
 type Args =
-    | [<MainCommand; ExactlyOnce>] Server of server: string
+    | [<MainCommand>] Server of server: string
+    | Profile of name: string
+    | Clear
+    | No_Remember
 
     interface IArgParserTemplate with
         member this.Usage =
             match this with
             | Server _ ->
-                "the server: powerbi://api.powerbi.com/v1.0/myorg/<workspace>, asazure://<region>.asazure.windows.net/<server>, "
+                "a local model (any path tess accepts), or a server: powerbi://api.powerbi.com/v1.0/myorg/<workspace>, "
+                + "asazure://<region>.asazure.windows.net/<server>, "
                 + "https://<host>/olap/msmdpump.dll, or (Windows only) an SSAS host, host:port or host\\instance; "
                 + "optionally followed by ;<database>. The `xmla:` prefix is optional here. Credentials come from the "
                 + "environment, never the command line: TESS_XMLA_TOKEN (or TESS_XMLA_TOKEN_FILE) for an access token; "
                 + "TESS_XMLA_CLIENT_ID, TESS_XMLA_TENANT_ID and TESS_XMLA_CLIENT_SECRET (or ..._SECRET_FILE) for a "
                 + "service principal; TESS_XMLA_AUTH=device-code to sign in as a user; TESS_XMLA_USER and "
-                + "TESS_XMLA_PASSWORD (or ..._PASSWORD_FILE) for a user name and password."
+                + "TESS_XMLA_PASSWORD (or ..._PASSWORD_FILE) for a user name and password. Without it: show the "
+                + "active connection."
+            | Profile _ -> "make this profile's model the active connection (`tess profile`); nothing is contacted."
+            | Clear -> "forget this terminal's active connection."
+            | No_Remember -> "only check the server; leave the active connection as it is."
 
 type private Report = {
     Address: XmlaAddress
@@ -80,39 +93,172 @@ let private reportText (out: TextWriter) (r: Report) =
         for d in databases do
             out.WriteLine($"{d.Name.PadRight width}  {d.CompatibilityLevel}")
 
-let run (ctx: Ctx) (args: ParseResults<Args>) =
-    let access = Source.access ctx
+let private now () =
+    DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", Globalization.CultureInfo.InvariantCulture)
 
-    let result =
-        XmlaAddress.parseServer (args.GetResult Args.Server)
-        |> Result.bind (fun address ->
-            Remote.withConnection access address (fun c ->
-                Remote.serverProperties c
-                |> Result.bind (fun server ->
-                    Remote.databases c
-                    |> Result.bind (fun databases ->
-                        // A database in the address must exist.
-                        let known =
-                            match address.Database with
-                            | Some _ -> Remote.resolveDatabase c |> Result.map ignore
-                            | None -> Ok()
+let private activeJson (a: Connections.ActiveConnection) =
+    obj [ "model", str a.Model; "profile", optStr a.Profile; "since", str a.Since ]
 
-                        known
-                        |> Result.bind (fun () ->
-                            Credentials.resolve access.Environment address
-                            |> Result.map (fun credential -> {
-                                Address = address
-                                Credential = XmlaCredential.describe credential
-                                Server = server
-                                Databases = databases
-                            }))))))
+/// Make it the active connection: the state, or a warning when it can't be kept (the check stands).
+let private remember (ctx: Ctx) (active: Connections.ActiveConnection) =
+    match Connections.activate ctx.GetEnv active with
+    | Ok state ->
+        if not ctx.Json then
+            ctx.Err.WriteLine(
+                $"Active connection for {Connections.SessionKey.describe state.Key}: {active.Model} (use it as `active:`)"
+            )
 
-    match result with
-    | Error e -> Failed e
-    | Ok report ->
+        Some state
+    | Error e ->
+        ctx.Err.WriteLine($"tess: warning: not kept as the active connection: {TessError.message e}")
+        None
+
+let private show (ctx: Ctx) =
+    match Connections.session ctx.GetEnv with
+    | Some { Active = Some a; Key = key } ->
         if ctx.Json then
-            writeJson ctx.Out (reportJson report)
+            writeJson ctx.Out (obj [ "session", str (Connections.SessionKey.describe key); "active", activeJson a ])
         else
-            reportText ctx.Out report
+            let from =
+                a.Profile |> Option.map (fun p -> $"  (profile {p})") |> Option.defaultValue ""
+
+            ctx.Out.WriteLine($"{a.Model}{from}")
 
         Done
+    | _ ->
+        match Connections.activeModel ctx.GetEnv with
+        | Error e -> Failed e
+        | Ok _ -> Done
+
+let private local (ctx: Ctx) (model: string) (remembering: bool) =
+    match ModelIO.loadPath model with
+    | Error e -> Failed e
+    | Ok(source, db) ->
+        let active: Connections.ActiveConnection = {
+            Model = Path.GetFullPath model
+            Profile = None
+            Since = now ()
+        }
+
+        let kept = if remembering then remember ctx active else None
+
+        if ctx.Json then
+            writeJson
+                ctx.Out
+                (obj [
+                    "model", str source.Path
+                    "format", str (ModelFormat.token source.Format)
+                    "name", str (if isNull db.Model then "" else db.Model.Name)
+                    "active", (if kept.IsSome then activeJson active else null)
+                ])
+        else
+            ctx.Out.WriteLine($"Model  {source.Path}  ({ModelFormat.token source.Format})")
+
+        Done
+
+let run (ctx: Ctx) (args: ParseResults<Args>) =
+    let remembering = not (args.Contains Args.No_Remember)
+
+    match args.TryGetResult Args.Server, args.TryGetResult Args.Profile, args.Contains Args.Clear with
+    | _, Some _, true
+    | Some _, _, true -> UsageError "--clear takes no model, server or profile"
+    | Some _, Some _, _ -> UsageError "give a model or server, or --profile, not both"
+    | None, None, true ->
+        match Connections.clear ctx.GetEnv with
+        | Error e -> Failed e
+        | Ok cleared ->
+            if ctx.Json then
+                writeJson ctx.Out (obj [ "cleared", bool cleared ])
+            else
+                ctx.Err.WriteLine(
+                    if cleared then
+                        "Cleared the active connection."
+                    else
+                        "No active connection."
+                )
+
+            Done
+    | None, Some name, false ->
+        match
+            Connections.tryProfile ctx.GetEnv name
+            |> Result.bind Connections.Profile.modelArgument
+        with
+        | Error e -> Failed e
+        | Ok model ->
+            let active: Connections.ActiveConnection = {
+                Model = model
+                Profile = Some name
+                Since = now ()
+            }
+
+            match Connections.activate ctx.GetEnv active with
+            | Error e -> Failed e
+            | Ok state ->
+                if ctx.Json then
+                    writeJson
+                        ctx.Out
+                        (obj [
+                            "session", str (Connections.SessionKey.describe state.Key)
+                            "active", activeJson active
+                        ])
+                else
+                    ctx.Err.WriteLine(
+                        $"Active connection for {Connections.SessionKey.describe state.Key}: profile {name}, {model} (use it as `active:`)"
+                    )
+
+                Done
+    | None, None, false -> show ctx
+    | Some model, None, false when
+        not (XmlaAddress.isRemote model)
+        && (File.Exists model || Directory.Exists model)
+        ->
+        local ctx model remembering
+    | Some server, None, false ->
+        let access = Source.access ctx
+
+        let result =
+            XmlaAddress.parseServer server
+            |> Result.bind (fun address ->
+                Remote.withConnection access address (fun c ->
+                    Remote.serverProperties c
+                    |> Result.bind (fun server ->
+                        Remote.databases c
+                        |> Result.bind (fun databases ->
+                            // A database in the address must exist.
+                            let known =
+                                match address.Database with
+                                | Some _ -> Remote.resolveDatabase c |> Result.map ignore
+                                | None -> Ok()
+
+                            known
+                            |> Result.bind (fun () ->
+                                Credentials.resolve access.Environment address
+                                |> Result.map (fun credential -> {
+                                    Address = address
+                                    Credential = XmlaCredential.describe credential
+                                    Server = server
+                                    Databases = databases
+                                }))))))
+
+        match result with
+        | Error e -> Failed e
+        | Ok report ->
+            let active: Connections.ActiveConnection = {
+                Model = XmlaAddress.display report.Address
+                Profile = None
+                Since = now ()
+            }
+
+            let kept = if remembering then remember ctx active else None
+
+            if ctx.Json then
+                let json = reportJson report :?> System.Text.Json.Nodes.JsonObject
+
+                if kept.IsSome then
+                    json.["active"] <- activeJson active
+
+                writeJson ctx.Out json
+            else
+                reportText ctx.Out report
+
+            Done

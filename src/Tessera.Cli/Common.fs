@@ -83,6 +83,11 @@ module ExitCode =
         | RoleNotFound _
         | RoleCannotRead _ -> input
         | InvalidSchemaSource _ -> input
+        | UsedByReport _ -> input
+        | ProfileNotFound _
+        | NoActiveConnection _ -> input
+        | InvalidConfig _ -> input
+        | UnsavedChanges _ -> findings
 
 let version () =
     let asm = Assembly.GetExecutingAssembly()

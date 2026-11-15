@@ -302,10 +302,36 @@ let load (source: ModelSource) : Result<Database, TessError> =
 /// Read a model from .bim (TMSL database) JSON text. Throws on JSON that isn't a model.
 let parseBim (json: string) : Database = deserializeBim json
 
+/// Models that stand in for a model argument: `tess interactive` answers the loads of its model
+/// with a copy of the model it holds in memory, staged edits included. Scoped to the code run
+/// inside `using` (and the tasks it starts); nothing else sees it.
+module Override =
+    let private current =
+        System.Threading.AsyncLocal<(string -> (ModelSource * Database) option) option>()
+
+    /// The stand-in for this model argument, if one is in effect.
+    let tryLoad (path: string) =
+        match current.Value with
+        | Some f -> f path
+        | None -> None
+
+    /// Run `action` with `f` answering loads (None: load as usual).
+    let using (f: string -> (ModelSource * Database) option) (action: unit -> 'a) : 'a =
+        let previous = current.Value
+        current.Value <- Some f
+
+        try
+            action ()
+        finally
+            current.Value <- previous
+
 /// Resolve and load in one step.
 let loadPath (path: string) : Result<ModelSource * Database, TessError> =
-    ModelSource.resolve path
-    |> Result.bind (fun src -> load src |> Result.map (fun db -> src, db))
+    match Override.tryLoad path with
+    | Some loaded -> Ok loaded
+    | None ->
+        ModelSource.resolve path
+        |> Result.bind (fun src -> load src |> Result.map (fun db -> src, db))
 
 let private jsonOptions (opts: SaveOptions) =
     SerializeOptions(

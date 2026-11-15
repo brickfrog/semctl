@@ -28,6 +28,8 @@ type CliArgs =
     | [<CliPrefix(CliPrefix.None)>] Lint of ParseResults<LintCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Format of ParseResults<FormatCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Connect of ParseResults<ConnectCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Profile of ParseResults<ProfileCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Session of ParseResults<SessionCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Query of ParseResults<QueryCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Preview of ParseResults<PreviewCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Deploy of ParseResults<DeployCommand.Args>
@@ -38,6 +40,7 @@ type CliArgs =
     | [<CliPrefix(CliPrefix.None)>] Mcp of ParseResults<McpCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Vertipaq of ParseResults<VertipaqCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Schemacheck of ParseResults<SchemaCheckCommand.Args>
+    | [<CliPrefix(CliPrefix.None); AltCommandLine("shell")>] Interactive of ParseResults<InteractiveCommand.Args>
     | [<Hidden; CliPrefix(CliPrefix.None); CustomCommandLine("__complete")>] Complete of
         ParseResults<CompletionCommand.CompleteArgs>
 
@@ -67,6 +70,8 @@ type CliArgs =
             | Lint _ -> LintCommand.summary
             | Format _ -> FormatCommand.summary
             | Connect _ -> ConnectCommand.summary
+            | Profile _ -> ProfileCommand.summary
+            | Session _ -> SessionCommand.summary
             | Query _ -> QueryCommand.summary
             | Preview _ -> PreviewCommand.summary
             | Deploy _ -> DeployCommand.summary
@@ -77,4 +82,5 @@ type CliArgs =
             | Mcp _ -> McpCommand.summary
             | Vertipaq _ -> VertipaqCommand.summary
             | Schemacheck _ -> SchemaCheckCommand.summary
+            | Interactive _ -> InteractiveCommand.summary
             | Complete _ -> "candidates for the completion scripts."
