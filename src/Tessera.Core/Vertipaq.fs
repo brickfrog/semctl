@@ -395,7 +395,8 @@ module Annotations =
     /// Write the statistics into the model as annotations. `tables` limits it to those tables'
     /// objects (and leaves the model's own annotations alone); empty means the whole model.
     let apply (tables: string list) (s: Stats) (db: Database) : Applied =
-        let s = Stats.restrict tables s
+        // Values come from the whole model's statistics (a table's share of the model, the other
+        // end of a relationship); the table filter only chooses which objects are written.
         let wanted = wanted s
 
         let get (r: ObjectRef) =
@@ -459,7 +460,7 @@ module Annotations =
         // Relationships: matched by their columns.
         let matchedRels = Collections.Generic.HashSet<Relationship>(HashIdentity.Reference)
 
-        for r in s.Relationships do
+        for r in s.Relationships |> List.filter (fun r -> keep r.FromTable || keep r.ToTable) do
             match findRelationship db r with
             | Some rel ->
                 matchedRels.Add rel |> ignore
@@ -484,11 +485,11 @@ module Annotations =
 
         // Statistics of objects the model doesn't have.
         for t in s.Tables do
-            if (findTable t.Table).IsNone then
+            if keep t.Table && (findTable t.Table).IsNone then
                 unmatched.Add(ObjectRef.format (ObjectRef.table t.Table))
 
         for c in s.Columns do
-            if c.Kind <> "rowNumber" then
+            if c.Kind <> "rowNumber" && keep c.Table then
                 match findTable c.Table with
                 | Some t when t.Columns |> Seq.exists (fun x -> eq x.Name c.Column) -> ()
                 | Some _ -> unmatched.Add(ObjectRef.format (ObjectRef.inTable ObjectKind.Column c.Table c.Column))

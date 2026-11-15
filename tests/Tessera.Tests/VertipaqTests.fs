@@ -372,7 +372,8 @@ let vpaxTests =
             let t, model, dir = setup ()
             use _ = t
             let db, s = statsOf model dir
-            let m, unknown = VertipaqVpax.toDaxModel "0.0.0-test" s db
+            let m, unknown, moved = VertipaqVpax.toDaxModel "0.0.0-test" s db
+            Expect.isEmpty moved "every partition is the model's"
             Expect.isEmpty unknown "everything was known"
             let path = t.Combine "out.vpax"
             Expect.isOk (VertipaqVpax.write path m (Some db)) "written"
@@ -386,6 +387,32 @@ let vpaxTests =
             // What DAX Studio builds its VertiPaq Analyzer grids from.
             let content = Dax.Vpax.Tools.VpaxTools.ImportVpax(path)
             let view = Dax.ViewModel.VpaModel(content.DaxModel)
+
+            // Every public property of every object DAX Studio's grids show reads without throwing.
+            let touch (what: string) (o: obj) =
+                for p in o.GetType().GetProperties() do
+                    if p.GetIndexParameters().Length = 0 then
+                        try
+                            p.GetValue o |> ignore
+                        with e ->
+                            failtestf "%s.%s throws: %s" what p.Name (e.GetBaseException().Message)
+
+            touch "VpaModel" view
+
+            for x in view.Tables do
+                touch "VpaTable" x
+
+                for p in x.Partitions do
+                    touch "VpaPartition" p
+
+                for h in x.UserHierarchies do
+                    touch "VpaUserHierarchy" h
+
+            for x in view.Columns do
+                touch "VpaColumn" x
+
+            for x in view.Relationships do
+                touch "VpaRelationship" x
 
             for vt in view.Tables do
                 Expect.equal (Some vt.TableSize) (Stats.tableSize s vt.TableName) $"size of {vt.TableName}"
@@ -457,6 +484,31 @@ let vpaxTests =
                 (again.DaxModel.Tables |> Seq.map _.TableName.Name |> List.ofSeq)
                 (back.Tables |> List.map _.Table)
                 "same obfuscated names"
+
+        testCase "a file made without reading statistics from data: its RI is unknown, and that is said"
+        <| fun () ->
+            let t, model, dir = setup ()
+            use _ = t
+            let db, s = statsOf model dir
+            let m, _, _ = VertipaqVpax.toDaxModel "0.0.0-test" s db
+            m.ExtractorProperties.StatisticsEnabled <- false
+            let path = t.Combine "nostats.vpax"
+            Expect.isOk (VertipaqVpax.write path m (Some db)) "written"
+            let json = partsText path |> List.find (fun (n, _) -> n = "DaxModel.json") |> snd
+            Expect.isFalse (json.Contains "StatisticsEnabled") "Dax.Vpax leaves the false out"
+            Expect.stringContains json "\"ExtractorProperties\"" "but writes the object"
+            let back = (readImported path).Stats
+            Expect.equal (relFrom back "Sales" "ProductKey").InvalidRows None "unknown"
+            Expect.exists back.Warnings (fun w -> w.Contains "without reading statistics") "said"
+
+            m.ExtractorProperties.StatisticsEnabled <- true
+            Expect.isOk (VertipaqVpax.write path m (Some db)) "written again"
+            Expect.equal (relFrom (readImported path).Stats "Sales" "ProductKey").InvalidRows (Some 1L) "known"
+
+            Expect.equal
+                (relFrom (readImported contoso).Stats "Sales" "ProductKey").InvalidRows
+                (Some 0L)
+                "a file from before ExtractorProperties existed is taken as read"
 
         testCase "not a .vpax, a missing file"
         <| fun () ->
@@ -715,6 +767,119 @@ let serverTests =
 
             Expect.equal (pk.GetProperty("cardinality").GetInt64()) 4L "DAX still counted"
 
+        testCase "--annotate on a server model: a dry run (or --save-to), reading the model twice; --save is refused"
+        <| fun () ->
+            let server, _, _ = starServer ()
+            use t = new TempDir()
+            let out = t.Combine "annotated.bim"
+
+            let r =
+                tessOn server tokenEnv [ "vertipaq"; $"xmla:{workspace};Shop"; "--annotate"; "--save-to"; out ]
+
+            Expect.equal r.Code ExitCode.ok r.Err
+            Expect.stringContains (File.ReadAllText out) "Vertipaq_RIViolationInvalidRows" "written to the file"
+            Expect.equal server.Requests.Length 2 "two connections: the model, then its statistics"
+            Expect.equal server.Closed 2 "both closed"
+            Expect.isEmpty server.Executed "nothing is run on the server"
+
+            let r =
+                tessOn server tokenEnv [ "vertipaq"; $"xmla:{workspace};Shop"; "--annotate"; "--save" ]
+
+            Expect.equal r.Code ExitCode.input r.Err
+            Expect.equal server.Requests.Length 2 "refused before connecting"
+
+        testCase "user hierarchies, a DirectQuery table, a field parameter's column"
+        <| fun () ->
+            let server = FakeServer()
+            let db, _ = build star
+            db.Name <- "Shop"
+            let date = db.Model.Tables.["Date"]
+            let h = new Hierarchy(Name = "Calendar")
+            h.Levels.Add(new Level(Name = "Year", Column = date.Columns.["Year"], Ordinal = 0))
+            date.Hierarchies.Add h
+            db.Model.Tables.["Customer"].Partitions.[0].Mode <- ModeType.DirectQuery
+            let product = db.Model.Tables.["Product"]
+            let name = product.Columns.["Name"]
+            name.RelatedColumnDetails <- new RelatedColumnDetails()
+            name.RelatedColumnDetails.GroupByColumns.Add(new GroupByColumn(GroupingColumn = product.Columns.["Color"]))
+            server.Add db
+
+            server.OnQuery <-
+                fun q ->
+                    if q = VertipaqServer.userHierarchyNamesQuery then
+                        result [ [ d 7M; s "Calendar" ] ]
+                    elif q = VertipaqServer.userHierarchiesQuery then
+                        result [
+                            [ s "Date"; d 100M; s "U$Date (3)$Calendar (7)" ]
+                            [ s "Date"; i 20L; s "U$Date (3)$Calendar (7)" ]
+                        ]
+                    else
+                        []
+
+            let r =
+                tessOn server tokenEnv [ "vertipaq"; $"xmla:{workspace};Shop"; "--hierarchies"; "--json" ]
+
+            Expect.equal r.Code ExitCode.ok r.Err
+            let j = json r
+            let calendar = j.GetProperty("hierarchies").[0]
+            Expect.equal (calendar.GetProperty("hierarchy").GetString()) "Calendar" "by its TMSCHEMA name"
+            Expect.equal (calendar.GetProperty("size").GetInt64()) 120L "the structures summed"
+            let sent = server.Queries |> List.map (fun (_, q, _) -> q)
+
+            Expect.isFalse
+                (sent
+                 |> List.exists (fun q -> q.Contains "COUNTROWS ( 'Customer' )" || q.Contains "'Customer'[Name]"))
+                "no DAX on the DirectQuery table"
+
+            Expect.exists
+                (j.GetProperty("warnings").EnumerateArray() |> Seq.map _.GetString())
+                (fun w -> w.Contains "DirectQuery" && w.Contains "'Customer'")
+                "said"
+
+            Expect.exists
+                sent
+                (fun q -> q.Contains "COUNTROWS ( ALLNOBLANKROW ( 'Product'[Name] ) )")
+                "the Group By form"
+
+            Expect.exists sent (fun q -> q.Contains "DISTINCTCOUNT ( 'Product'[Color] )") "the plain form"
+
+        testCase "--export from a server and back: what tess showed, RowNumber included, one segment per partition"
+        <| fun () ->
+            let server, _, _ = starServer ()
+            use t = new TempDir()
+            let out = t.Combine "server.vpax"
+
+            let r =
+                tessOn server tokenEnv [ "vertipaq"; $"xmla:{workspace};Shop"; "--export"; out; "--all"; "--json" ]
+
+            Expect.equal r.Code ExitCode.ok r.Err
+            let shown = json r
+            let back = (readImported out).Stats
+            Expect.isFalse back.Estimated "measured"
+
+            let shownSize (table: string) (column: string) =
+                shown.GetProperty("columns").EnumerateArray()
+                |> Seq.find (fun x ->
+                    x.GetProperty("table").GetString() = table
+                    && x.GetProperty("column").GetString() = column)
+                |> fun x -> x.GetProperty("size").GetInt64()
+
+            for table, column in
+                [
+                    "Sales", "ProductKey"
+                    "Sales", "RowNumber-2662979B"
+                    "Product", "ProductKey"
+                ] do
+                Expect.equal
+                    (Column.totalSize (col back table column))
+                    (Some(shownSize table column))
+                    $"{table}[{column}]"
+
+            Expect.equal (col back "Sales" "RowNumber-2662979B").Kind "rowNumber" "the RowNumber column is in the file"
+            let sales = back.Partitions |> List.find (fun p -> p.Table = "Sales")
+            Expect.equal sales.Segments (Some 1L) "the file has one segment per column and partition (documented)"
+            Expect.equal sales.Rows (Some 7L) "with the partition's rows"
+
         testCase "--data with a server model is refused before connecting"
         <| fun () ->
             let server, _, _ = starServer ()
@@ -797,6 +962,31 @@ let commandTests =
             let r = tess [ "vertipaq"; model; "Prodcut"; "--data"; dir; "--json" ]
             Expect.equal r.Code ExitCode.input r.Err
             Expect.stringContains r.Out "table:Product" "did you mean"
+
+        testCase
+            "a table filter changes what is listed, not the totals; a filtered --annotate after a full one has nothing to do"
+        <| fun () ->
+            let t, model, dir = setup ()
+            use _ = t
+
+            let fraction (args: string list) =
+                let r = tess ([ "vertipaq"; model ] @ args @ [ "--data"; dir; "--json" ])
+                Expect.equal r.Code ExitCode.ok r.Err
+                let j = json r
+
+                let product =
+                    j.GetProperty("tables").EnumerateArray()
+                    |> Seq.find (fun x -> x.GetProperty("table").GetString() = "Product")
+
+                j.GetProperty("size").GetInt64(), product.GetProperty("fractionOfModel").GetDouble()
+
+            Expect.equal (fraction [ "Product" ]) (fraction []) "the same model size and share"
+
+            let r = tess [ "vertipaq"; model; "--data"; dir; "--annotate"; "--save" ]
+            Expect.equal r.Code ExitCode.ok r.Err
+            let r = tess [ "vertipaq"; model; "Product"; "--data"; dir; "--annotate"; "--json" ]
+            Expect.equal r.Code ExitCode.ok r.Err
+            Expect.equal ((json r).GetProperty("changes").GetArrayLength()) 0 "no changes"
 
         testCase "usage errors"
         <| fun () ->

@@ -3275,7 +3275,8 @@ tess bpa ./Sales.pbip --vpax stats.vpax                             # ... or for
 **Views.** The default is the table view; `--columns`, `--relationships`, `--partitions` and `--hierarchies`
 choose others (several at once is fine), `--all` shows them all. Each view lists the largest objects first
 (unknown sizes last) and `--top N` keeps the first N. Table names after the model show only those tables (a
-relationship stays if either end is one of them); a name that isn't a table is an error with suggestions. `te
+relationship stays if either end is one of them), but sizes, totals and shares are still the whole model's; a name
+that isn't a table is an error with suggestions. `te
 vertipaq` shows columns by default; tess follows VertiPaq Analyzer, which opens on tables. `te`'s `--detail`,
 `--fields` and `--stats` aren't there: `--json` has every field.
 
@@ -3319,7 +3320,8 @@ column view shows the model's `EncodingHint` when it isn't `Default`.
 #### From a server
 
 For an `xmla:` model, tess reads the model, then runs the read-only storage DMVs and DAX queries VertiPaq Analyzer
-runs (SQLBI's Dax.Model.Extractor), over the same connection, against that database only, and closes it. These are
+runs (SQLBI's Dax.Model.Extractor), over the same connection, against that database only, and closes it.
+(`--annotate` connects twice: once to read the model it edits, once for the statistics.) These are
 all the queries it sends (the DAX ones in batches of 50 tables or columns, and 10 relationships):
 
 | Query | For |
@@ -3328,7 +3330,7 @@ all the queries it sends (the DAX ones in batches of 50 tables or columns, and 1
 | `SELECT DIMENSION_NAME, COLUMN_ID, ATTRIBUTE_NAME, DICTIONARY_SIZE, COLUMN_ENCODING FROM $SYSTEM.DISCOVER_STORAGE_TABLE_COLUMNS WHERE COLUMN_TYPE = 'BASIC_DATA'` | dictionaries, encodings, column ids |
 | `SELECT DIMENSION_NAME, TABLE_ID, ROWS_COUNT - 3 FROM $SYSTEM.DISCOVER_STORAGE_TABLES WHERE LEFT ( TABLE_ID, 2 ) = 'H$'` | cardinality, where DAX doesn't give it |
 | `SELECT DIMENSION_NAME, PARTITION_NAME, COLUMN_ID, SEGMENT_NUMBER, RECORDS_COUNT, USED_SIZE FROM $SYSTEM.DISCOVER_STORAGE_TABLE_COLUMN_SEGMENTS WHERE RIGHT ( LEFT ( TABLE_ID, 2 ), 1 ) <> '$'` | column data, by partition and segment |
-| `... DISCOVER_STORAGE_TABLE_COLUMN_SEGMENTS WHERE LEFT ( TABLE_ID, 2 ) = 'H$'` / `'U$'` / `'R$'` | attribute hierarchies, user hierarchies, relationships |
+| `... DISCOVER_STORAGE_TABLE_COLUMN_SEGMENTS WHERE LEFT ( TABLE_ID, 2 ) = 'H$' AND SEGMENT_NUMBER = 0`, and `= 'U$'`, `= 'R$'` | attribute hierarchies, user hierarchies, relationships |
 | `SELECT [ID], [Name] FROM $SYSTEM.TMSCHEMA_HIERARCHIES` and `SELECT [ID], [FromTableID], [FromColumnID], [ToTableID], [ToColumnID] FROM $SYSTEM.TMSCHEMA_RELATIONSHIPS` | matching storage ids to names |
 | `EVALUATE UNION ( ROW ( "Table", "0000Sales", "Cardinality", COUNTROWS ( 'Sales' ) ), ... )` | exact rows |
 | `EVALUATE UNION ( ROW ( "Table", ..., "Column", ..., "Cardinality", DISTINCTCOUNT ( 'Sales'[Key] ) ), ... )` | exact cardinality |
@@ -3344,10 +3346,11 @@ connected mode, this has been tested against a fake server only.**
 #### `.vpax` files (`--import`, `--export`, `--obfuscate`)
 
 A `.vpax` is a zip of `DaxModel.json` (the statistics and the model's metadata), `DaxVpaView.json`, `Model.bim`
-and `CompatabilityMode.txt` (sic). tess reads and writes them with SQLBI's own libraries (Dax.Vpax, MIT), so DAX
-Studio, Bravo and Tabular Editor 3 open what tess writes and tess reads what they write. The tests check an
-exported file with Dax.ViewModel, the view model DAX Studio's VertiPaq Analyzer pane is built on; DAX Studio itself
-has not been run on one.
+and `CompatabilityMode.txt` (sic). tess reads and writes them with SQLBI's own library (Dax.Vpax, MIT), the one
+VertiPaq Analyzer's tools use, so a file tess writes is in their format. The tests read a file Bravo made, and
+open every file tess writes with Dax.ViewModel, the view model DAX Studio's VertiPaq Analyzer pane is built on,
+reading every property it shows. **DAX Studio, Bravo and Tabular Editor 3 themselves have not been run on a file
+tess wrote.**
 
 - `--import <file>` reads one. It needs no model: `tess vertipaq --import stats.vpax`. With a model first
   (`tess vertipaq ./Sales.pbip --import stats.vpax`), the model is what `--annotate` writes to. A file made
@@ -3356,9 +3359,14 @@ has not been run on one.
   statistics unchanged. An existing file is replaced only with `--force` (exit 4). The file says which tool made
   it; a file tess made from fixture data is marked as an estimate, and reads back as one. The format has no
   "unknown": tess writes 0 (what VertiPaq Analyzer writes for a statistic it didn't read) and says which ones on
-  stderr. A column's data with no known partition goes in the table's first partition.
-- `--obfuscate` (with `--export`) obfuscates the names and expressions with SQLBI's Dax.Vpax.Obfuscator, as Bravo
-  does, and writes only `DaxModel.json` (no `Model.bim`, which would carry the real names). Names that are
+  stderr. Each column gets one segment per partition, holding that partition's whole share of it, so a file
+  tess writes shows one segment per partition however many the server had. A column's data with no known
+  partition (or in a partition the model doesn't have, which stderr names) goes in the table's first partition.
+  A server's `RowNumber-<guid>` columns are included, as VertiPaq Analyzer includes them in table sizes.
+- `--obfuscate` (with `--export`) obfuscates the names and expressions with SQLBI's Dax.Vpax.Obfuscator (their
+  library for obfuscating VertiPaq Analyzer files), and writes only `DaxModel.json`, as that library does (no
+  `Model.bim`, which would carry the real names). SQLBI's tools name such a file `.ovpax`; tess uses the name you
+  give. Names that are
   reserved in DAX (a table called `Date` or `Currency`) can't be changed and stay readable; stderr lists them. The
   dictionary that maps the obfuscated names back is written next to the file as `<name>.dict` (replaced only with
   `--force`): it holds the real names, so keep it, and don't send it with the file. `--dictionary <old.dict>`

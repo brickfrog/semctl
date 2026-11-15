@@ -1,6 +1,6 @@
 /// VertiPaq Analyzer files (.vpax), through SQLBI's own libraries (Dax.Vpax, MIT): reading one made
 /// by DAX Studio, Tabular Editor 3, Bravo or tess, writing one they can open, and obfuscating it
-/// (Dax.Vpax.Obfuscator, MIT) as Bravo does.
+/// with SQLBI's obfuscator (Dax.Vpax.Obfuscator, MIT).
 ///
 /// A .vpax is a zip (an OPC package) of DaxModel.json (Dax.Metadata's model: the statistics and
 /// the model's metadata), DaxVpaView.json (the same as flat tables, for older readers), Model.bim
@@ -29,7 +29,8 @@ let private name (n: Dax.Metadata.DaxName) = if isNull n then "" else n.Name
 // ---- Reading -----------------------------------------------------------------------------------
 
 /// Whether DaxModel.json says the statistics were not read from data (DAX Studio's "read
-/// statistics from data" off). Files from before ExtractorProperties existed don't say.
+/// statistics from data" off). Files from before ExtractorProperties existed don't say (and are
+/// taken as read).
 let private statisticsSkipped (bytes: byte array) =
     try
         use zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read)
@@ -40,11 +41,13 @@ let private statisticsSkipped (bytes: byte array) =
             use stream = entry.Open()
             use doc = JsonDocument.Parse(stream)
 
+            // Dax.Vpax leaves out default values, so a false StatisticsEnabled isn't written: a file
+            // with ExtractorProperties but no `"StatisticsEnabled": true` was made without them.
             match doc.RootElement.TryGetProperty "ExtractorProperties" with
             | true, props when props.ValueKind = JsonValueKind.Object ->
                 match props.TryGetProperty "StatisticsEnabled" with
-                | true, v when v.ValueKind = JsonValueKind.False -> true
-                | _ -> false
+                | true, v when v.ValueKind = JsonValueKind.True -> false
+                | _ -> true
             | _ -> false
     with _ ->
         false
@@ -230,12 +233,14 @@ let read (path: string) : Result<Imported, TessError> =
 
 /// The model's metadata (following Dax.Model.Extractor's TomExtractor) with the statistics in it.
 /// Unknown statistics are written as 0, which is how the format says "not read"; the second
-/// result names them. A column whose partitions aren't known has its data in one segment of the
-/// table's first partition.
-let toDaxModel (version: string) (s: Stats) (db: Database) : DaxModel * string list =
+/// result names them. A column whose partitions aren't known, or are partitions the model doesn't
+/// have (the third result), has its data in the table's first partition. Each column has one
+/// segment per partition, however many the server has.
+let toDaxModel (version: string) (s: Stats) (db: Database) : DaxModel * string list * string list =
     let lib = if s.Estimated then estimatedLib else measuredLib
     let m = DaxModel(lib, version, "tess", version)
     let unknown = Collections.Generic.List<string>()
+    let moved = Collections.Generic.List<string>()
     let tom = db.Model
     m.ModelName <- Dax.Metadata.DaxName(VertipaqFixture.modelName db)
     m.CompatibilityLevel <- db.CompatibilityLevel
@@ -259,14 +264,60 @@ let toDaxModel (version: string) (s: Stats) (db: Database) : DaxModel * string l
             unknown.Add what
             0L
 
-    let note (text: string) =
-        if String.IsNullOrEmpty text then
-            null
-        else
-            Dax.Metadata.DaxNote(text)
+    // Always a note, as TomExtractor writes them: VertiPaq Analyzer's views read them without
+    // checking for null (VpaPartition.Description throws on one).
+    let note (text: string) = Dax.Metadata.DaxNote(text)
 
     let expr (text: string) =
         Dax.Metadata.DaxExpression.GetExpression text
+
+    /// A column's statistics into its Dax.Metadata column: one segment per partition, holding the
+    /// partition's whole share of the column.
+    let fill
+        (dc: Dax.Metadata.Column)
+        (partitions: Dax.Metadata.Partition list)
+        (tableRows: int64 option)
+        (sc: ColumnStats)
+        =
+        let what = $"{Dax.quoteTable sc.Table}[{sc.Column}]"
+
+        // VertiPaq Analyzer doesn't count RowNumber columns either: 0 is what it writes.
+        dc.ColumnCardinality <-
+            if sc.Kind = "rowNumber" then
+                defaultArg sc.Cardinality 0L
+            else
+                known $"cardinality of {what}" sc.Cardinality
+
+        dc.DictionarySize <- known $"dictionary of {what}" sc.DictionarySize
+        dc.Encoding <- Option.toObj sc.Encoding
+        let hierarchy = Dax.Metadata.ColumnHierarchy(dc)
+        hierarchy.StructureName <- Dax.Metadata.DaxName($"H${sc.Table}-{sc.Column}")
+        hierarchy.UsedSize <- known $"hierarchy of {what}" sc.HierarchySize
+        dc.ColumnHierarchies.Add hierarchy
+
+        let parts =
+            match sc.Partitions, sc.DataSize, partitions with
+            | [], Some size, first :: _ -> [ first, defaultArg tableRows 0L, 1L, size ]
+            | [], None, _ ->
+                unknown.Add $"data of {what}"
+                []
+            | parts, _, first :: _ ->
+                parts
+                |> List.map (fun part ->
+                    match partitions |> List.tryFind (fun dp -> eq dp.PartitionName.Name part.Partition) with
+                    | Some dp -> dp, part.Rows, part.Segments, part.DataSize
+                    | None ->
+                        moved.Add $"{what} in partition '{part.Partition}'"
+                        first, part.Rows, part.Segments, part.DataSize)
+            | _, _, [] -> []
+
+        for dp, rows, segments, size in parts do
+            let seg = Dax.Metadata.ColumnSegment(dc, dp)
+            seg.SegmentNumber <- 0L
+            seg.SegmentRows <- rows
+            seg.UsedSize <- size
+            seg.VertipaqState <- if segments > 0L then "COMPLETED" else null
+            dc.ColumnSegments.Add seg
 
     for t in tom.Tables do
         let st = s.Tables |> List.tryFind (fun x -> eq x.Table t.Name)
@@ -343,45 +394,25 @@ let toDaxModel (version: string) (s: Stats) (db: Database) : DaxModel * string l
                     if not (isNull g.GroupingColumn) then
                         dc.GroupByColumns.Add(Dax.Metadata.DaxName(g.GroupingColumn.Name))
 
-            match sc with
-            | Some sc ->
-                let what = $"{Dax.quoteTable t.Name}[{c.Name}]"
-                dc.ColumnCardinality <- known $"cardinality of {what}" sc.Cardinality
-                dc.DictionarySize <- known $"dictionary of {what}" sc.DictionarySize
-                dc.Encoding <- Option.toObj sc.Encoding
-
-                let hierarchy = Dax.Metadata.ColumnHierarchy(dc)
-                hierarchy.StructureName <- Dax.Metadata.DaxName($"H${t.Name}-{c.Name}")
-                hierarchy.UsedSize <- known $"hierarchy of {what}" sc.HierarchySize
-                dc.ColumnHierarchies.Add hierarchy
-
-                let parts =
-                    match sc.Partitions, sc.DataSize, partitions with
-                    | [], Some size, first :: _ -> [
-                        first, (st |> Option.bind _.Rows |> Option.defaultValue 0L), 1L, size
-                      ]
-                    | [], None, _ ->
-                        unknown.Add $"data of {what}"
-                        []
-                    | parts, _, _ ->
-                        parts
-                        |> List.choose (fun part ->
-                            partitions
-                            |> List.tryFind (fun dp -> eq dp.PartitionName.Name part.Partition)
-                            |> Option.map (fun dp -> dp, part.Rows, part.Segments, part.DataSize))
-
-                for dp, rows, segments, size in parts do
-                    // One segment per partition, holding the partition's whole share of the column.
-                    let seg = Dax.Metadata.ColumnSegment(dc, dp)
-                    seg.SegmentNumber <- 0L
-                    seg.SegmentRows <- rows
-                    seg.UsedSize <- size
-                    seg.CompressionType <- null
-                    seg.VertipaqState <- if segments > 0L then "COMPLETED" else null
-                    dc.ColumnSegments.Add seg
-            | None -> ()
-
+            sc |> Option.iter (fill dc partitions (st |> Option.bind _.Rows))
             dt.Columns.Add dc
+
+        // The server's RowNumber column, which a model read as files doesn't have.
+        for sc in s.Columns do
+            if
+                sc.Kind = "rowNumber"
+                && eq sc.Table t.Name
+                && not (t.Columns |> Seq.exists (fun c -> eq c.Name sc.Column))
+            then
+                let dc = Dax.Metadata.Column(dt)
+                dc.ColumnName <- Dax.Metadata.DaxName(sc.Column)
+                dc.DataType <- "Int64"
+                dc.ColumnType <- "RowNumber"
+                dc.IsRowNumber <- true
+                dc.IsHidden <- true
+                dc.State <- "Ready"
+                fill dc partitions (st |> Option.bind _.Rows) sc
+                dt.Columns.Add dc
 
         for ms in t.Measures do
             let dm = Dax.Metadata.Measure()
@@ -498,7 +529,7 @@ let toDaxModel (version: string) (s: Stats) (db: Database) : DaxModel * string l
 
         m.Roles.Add dr
 
-    m, List.ofSeq unknown
+    m, List.ofSeq unknown, List.ofSeq moved
 
 /// Obfuscate a model in place (names, expressions, descriptions), extending `dictionary` if one
 /// is given (incremental obfuscation, so names stay the same across files). Returns the dictionary

@@ -58,9 +58,10 @@ type Args =
             | Hierarchies -> "show the user hierarchies."
             | All -> "show every view."
             | Top _ -> "show only the N largest objects of each view."
-            | Export _ -> "write the statistics to this .vpax file (DAX Studio, Bravo and Tabular Editor 3 open it)."
+            | Export _ ->
+                "write the statistics to this .vpax file (VertiPaq Analyzer's format, written with SQLBI's library)."
             | Obfuscate ->
-                "with --export: obfuscate names and expressions (as Bravo does); the dictionary that reverses it is "
+                "with --export: obfuscate names and expressions (SQLBI's obfuscator); the dictionary that reverses it is "
                 + "written next to the file as <name>.dict."
             | Dictionary _ ->
                 "with --obfuscate: extend this existing dictionary, so names obfuscate the same way as before."
@@ -192,29 +193,33 @@ let private cardinalityOf (s: Stats) (t: string) (c: string) =
         && String.Equals(x.Column, c, StringComparison.OrdinalIgnoreCase))
     |> Option.bind _.Cardinality
 
-let private render (ctx: Ctx) (v: Views) (top: int option) (exported: JsonNode option) (s: Stats) =
+/// `shown`: the tables asked for (all, if empty). Totals and fractions are always of the whole
+/// model; the filter only chooses what is listed.
+let private render (ctx: Ctx) (v: Views) (top: int option) (exported: JsonNode option) (shown: string list) (s: Stats) =
     let model = Stats.modelSize s
     let tableSize t = Stats.tableSize s t
+    let listed = Stats.restrict shown s
 
     let visibleColumns =
-        s.Columns
+        listed.Columns
         |> List.filter (fun c -> c.Kind <> "rowNumber" || (Column.totalSize c) <> Some 0L)
 
-    let tables = s.Tables |> bySize top (fun t -> tableSize t.Table) _.Table
+    let tables = listed.Tables |> bySize top (fun t -> tableSize t.Table) _.Table
 
     let columns =
         visibleColumns
         |> bySize top Column.totalSize (fun c -> c.Table + "/" + c.Column)
 
     let relationships =
-        s.Relationships
+        listed.Relationships
         |> bySize top Relationship.size (fun r -> r.FromTable + "/" + r.FromColumn)
 
     let partitions =
-        s.Partitions |> bySize top _.DataSize (fun p -> p.Table + "/" + p.Partition)
+        listed.Partitions
+        |> bySize top _.DataSize (fun p -> p.Table + "/" + p.Partition)
 
     let hierarchies =
-        s.Hierarchies |> bySize top _.Size (fun h -> h.Table + "/" + h.Hierarchy)
+        listed.Hierarchies |> bySize top _.Size (fun h -> h.Table + "/" + h.Hierarchy)
 
     if ctx.Json then
         writeJson
@@ -511,15 +516,23 @@ let private export
         // The model for the file: the imported file's own (lossless), or one built from the model.
         let built =
             match args.TryGetResult Import, db with
-            | Some vpax, _ -> VertipaqVpax.read vpax |> Result.map (fun i -> i.DaxModel, i.Database, [])
+            | Some vpax, _ -> VertipaqVpax.read vpax |> Result.map (fun i -> i.DaxModel, i.Database, [], [])
             | None, Some db ->
-                let m, unknown = VertipaqVpax.toDaxModel (version ()) s db
-                Ok(m, Some db, unknown)
+                let m, unknown, moved = VertipaqVpax.toDaxModel (version ()) s db
+                Ok(m, Some db, unknown, moved)
             | None, None -> Error(RemoteSourceUnsupported(path, "there is no model to export"))
 
         built
-        |> Result.bind (fun (m, database, unknown) ->
+        |> Result.bind (fun (m, database, unknown, moved) ->
+            let listed (xs: string list) =
+                let shown = xs |> List.truncate 5 |> String.concat ", "
+                let more = if xs.Length > 5 then $" and {xs.Length - 5} more" else ""
+                shown + more
+
             let warnings = [
+                if not moved.IsEmpty then
+                    $"data in partitions the model doesn't have is in the table's first partition: {listed moved}"
+
                 if not unknown.IsEmpty then
                     let shown = unknown |> List.truncate 5 |> String.concat ", "
 
@@ -692,8 +705,6 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
                 match exported with
                 | Error e -> Failed e
                 | Ok exported ->
-                    let stats = Stats.restrict tables stats
-
                     let stats =
                         match exported with
                         | Some(_, warnings) -> {
@@ -702,7 +713,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
                           }
                         | None -> stats
 
-                    let result = render ctx (views args) top (exported |> Option.map fst) stats
+                    let result = render ctx (views args) top (exported |> Option.map fst) tables stats
 
                     match exported with
                     | Some(node, _) when not ctx.Json ->
