@@ -42,6 +42,10 @@ module private Usage =
     let keep =
         "leave package functions changed since they were installed as they are (remove: unlinked from the package)."
 
+let private forceRemoving =
+    "remove package functions that other DAX still calls, leaving those calls broken; save even if the change "
+    + "introduces new errors; with --save-to, overwrite a non-empty destination."
+
 type ListArgs =
     | [<MainCommand; ExactlyOnce>] Model of model: string
 
@@ -140,7 +144,7 @@ type UpdateArgs =
             | Skip_Existing -> Usage.skipExisting
             | Save -> Mutation.Usage.save
             | Save_To _ -> Mutation.Usage.saveTo
-            | Force -> Mutation.Usage.force
+            | Force -> forceRemoving
             | Stat -> Mutation.Usage.stat
             | Name_Only -> Mutation.Usage.nameOnly
 
@@ -162,9 +166,7 @@ type RemoveArgs =
             | Keep_Changes -> Usage.keep
             | Save -> Mutation.Usage.save
             | Save_To _ -> Mutation.Usage.saveTo
-            | Force ->
-                "save even if the change introduces new errors (DAX that calls a removed function); with "
-                + "--save-to, overwrite a non-empty destination."
+            | Force -> forceRemoving
             | Stat -> Mutation.Usage.stat
             | Name_Only -> Mutation.Usage.nameOnly
 
@@ -585,7 +587,7 @@ let private update (ctx: Ctx) (args: ParseResults<UpdateArgs>) =
                                             Tessera.Mutation.Effect.none with
                                                 Notes = [ $"{i.PackageId} {i.Version} is the latest version" ]
                                         }
-                                    | Ok(Some pkg) -> Pkg.update db pkg modified conflict
+                                    | Ok(Some pkg) -> Pkg.update db pkg modified conflict opts.Force
 
                                 match step with
                                 | Error e -> Error e
@@ -627,7 +629,8 @@ let private remove (ctx: Ctx) (args: ParseResults<RemoveArgs>) =
     | _, _, Error message -> UsageError message
     | model :: ids, Ok opts, Ok modified ->
         let edits =
-            ids |> List.map (fun id db -> Pkg.remove db (fst (parseSpec id)) modified)
+            ids
+            |> List.map (fun id db -> Pkg.remove db (fst (parseSpec id)) modified opts.Force)
 
         Mutation.run ctx "pkg remove" opts model (sequence edits)
 

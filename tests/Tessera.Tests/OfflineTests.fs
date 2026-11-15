@@ -216,10 +216,11 @@ let tests =
                 ] do
                 Expect.isFalse (List.contains forbidden references) forbidden
 
-        testCase "in Tessera.Core only the BPA rule download (an explicit --rules URL) touches a network type"
+        testCase "in Tessera.Core only the BPA rule download and daxlib.org's package fetch touch a network type"
         <| fun () ->
             let elsewhere =
-                usages core network |> List.filter (fun u -> not (u.In.Contains "BpaFetch"))
+                usages core network
+                |> List.filter (fun u -> not (u.In.Contains "BpaFetch" || u.In.Contains "PkgFetch"))
 
             Expect.isEmpty elsewhere (describe elsewhere)
 
@@ -256,6 +257,7 @@ let tests =
             use p = project ()
             let model = Path.Combine(p.Path, "Sales.SemanticModel")
             let other = Path.Combine(p.Path, "copy.bim")
+            let pkgSource = Path.Combine(__SOURCE_DIRECTORY__, "pkg", "daxlib")
 
             // `tess` fails the test if the command so much as asks for a connection.
             for args in
@@ -277,6 +279,17 @@ let tests =
                     [ "query"; model; "--data"; p.Path; "EVALUATE { 1 }" ]
                     [ "preview"; model; "Sales"; "--data"; p.Path ]
                     [ "add"; model; "calendar:Date/C"; "--category"; "Date=Date" ]
+                    [ "pkg"; "list"; model ]
+                    [
+                        "pkg"
+                        "install"
+                        model
+                        "TimeSeries.MovingAverage"
+                        "--from"
+                        pkgSource
+                        "--save"
+                    ]
+                    [ "pkg"; "remove"; model; "TimeSeries.MovingAverage"; "--save" ]
                     [ "--version" ]
                 ] do
                 tess args |> ignore

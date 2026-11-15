@@ -4,7 +4,7 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp pkg' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
@@ -12,6 +12,7 @@ _tess_children() {
         'script') _tess_r='export apply' ;;
         'data') _tess_r='init check info embed' ;;
         'test') _tess_r='run init snapshot compare list' ;;
+        'pkg') _tess_r='list search show install update remove' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -72,6 +73,13 @@ _tess_options() {
         'test list') _tess_r='--filter --tag --json -j --help -h' ;;
         'completion') _tess_r='--json -j --help -h' ;;
         'mcp') _tess_r='--allow --data --server --save --audit-log --json -j --help -h' ;;
+        'pkg') _tess_r='--json -j --help -h' ;;
+        'pkg list') _tess_r='--json -j --help -h' ;;
+        'pkg search') _tess_r='--from --offline --prerelease --json -j --help -h' ;;
+        'pkg show') _tess_r='--from --offline --prerelease --json -j --help -h' ;;
+        'pkg install') _tess_r='--from --offline --prerelease --overwrite --skip-existing --ignore-dependencies --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'pkg update') _tess_r='--from --offline --prerelease --discard-changes --keep-changes --overwrite --skip-existing --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'pkg remove') _tess_r='--discard-changes --keep-changes --save --save-to --force --stat --name-only --json -j --help -h' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -275,6 +283,13 @@ _tess_value() {
         'mcp|--data') _tess_r='dir' ;;
         'mcp|--server') _tess_r='text' ;;
         'mcp|--audit-log') _tess_r='path' ;;
+        'pkg search|--from') _tess_r='path' ;;
+        'pkg show|--from') _tess_r='path' ;;
+        'pkg install|--from') _tess_r='path' ;;
+        'pkg install|--save-to') _tess_r='path' ;;
+        'pkg update|--from') _tess_r='path' ;;
+        'pkg update|--save-to') _tess_r='path' ;;
+        'pkg remove|--save-to') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -370,6 +385,15 @@ _tess_positional() {
         'test list|'*) _tess_r='path' ;;
         'completion|0') _tess_r='text' ;;
         'mcp|0') _tess_r='path' ;;
+        'pkg list|0') _tess_r='path' ;;
+        'pkg search|0') _tess_r='text' ;;
+        'pkg show|0') _tess_r='text' ;;
+        'pkg install|0') _tess_r='path' ;;
+        'pkg install|'*) _tess_r='text' ;;
+        'pkg update|0') _tess_r='path' ;;
+        'pkg update|'*) _tess_r='text' ;;
+        'pkg remove|0') _tess_r='path' ;;
+        'pkg remove|'*) _tess_r='text' ;;
         *) _tess_r='' ;;
     esac
 }

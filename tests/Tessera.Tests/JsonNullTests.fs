@@ -93,6 +93,8 @@ let tests =
                     ""
                 ])
 
+            let pkgSource = Path.Combine(__SOURCE_DIRECTORY__, "pkg", "daxlib")
+
             let local = [
                 [ "info"; model ]
                 [ "info"; semanticModel ]
@@ -139,6 +141,11 @@ let tests =
                 [ "script"; "apply"; model; script ]
                 [ "get"; model; "column:Sales/Amount"; "-p"; "sortByColumn" ]
                 [ "get"; model; "column:Sales/Amount"; "-p"; "description" ]
+                [ "pkg"; "list"; model ]
+                [ "pkg"; "search"; "--from"; pkgSource ]
+                [ "pkg"; "show"; "TimeSeries.MovingAverage"; "--from"; pkgSource ]
+                [ "pkg"; "install"; model; "TimeSeries.MovingAverage"; "--from"; pkgSource ]
+                [ "pkg"; "update"; model; "--from"; pkgSource ]
             ]
 
             let failures = [

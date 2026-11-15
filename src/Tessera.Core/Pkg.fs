@@ -826,6 +826,22 @@ let install (db: Database) (pkg: Package) (opts: InstallOptions) : Result<Mutati
 let modifiedFunctions (db: Database) (key: int) =
     functionsWithKey db key |> List.filter isModified |> List.map _.Name
 
+/// Remove these functions as `tess remove` does: refused while other DAX calls them, unless `force`
+/// (then those references are left broken). Returns the removal's warnings.
+let private dropFunctions (db: Database) (fs: Function list) (force: bool) : Result<string list, TessError> =
+    match fs with
+    | [] -> Ok []
+    | _ ->
+        let selectors =
+            fs
+            |> List.map (fun f -> ObjectRef.format (ObjectRef.modelLevel ObjectKind.Function f.Name))
+
+        RemoveObject.remove db {
+            RemoveObject.RemoveSpec.ofSelectors selectors with
+                Force = force
+        }
+        |> Result.map _.Warnings
+
 /// Replace an installed package with another version of it (`pkg`). Functions the new version
 /// drops are removed, new ones added; functions changed since they were installed are refused
 /// unless OnModified says otherwise.
@@ -834,6 +850,7 @@ let update
     (pkg: Package)
     (onModified: OnModified)
     (onConflict: OnConflict)
+    (force: bool)
     : Result<Mutation.Effect, TessError> =
     requireLevel db
     |> Result.bind (fun () -> state db)
@@ -881,24 +898,13 @@ let update
                 )
             | _ ->
                 readTable db
-                |> Result.map (fun table ->
+                |> Result.bind (fun table ->
                     let keep (f: Function) =
                         onModified = KeepModified && List.contains f.Name modified
 
                     let mutable updated = 0
                     let mutable added = 0
-                    let mutable removed = 0
                     let kept = ResizeArray<string>()
-
-                    // Dropped by the new version.
-                    for f in old do
-                        if not (incoming.Contains f.Name) then
-                            if keep f then
-                                unlink f
-                                kept.Add f.Name
-                            else
-                                db.Model.Functions.Remove f |> ignore
-                                removed <- removed + 1
 
                     for source in pkg.Functions do
                         match db.Model.Functions.Find source.Name with
@@ -920,35 +926,49 @@ let update
                             added <- added + 1
                         | _ -> ()
 
-                    match table.[string key] with
-                    | :? JsonObject as entry -> entry.["Version"] <- JsonValue.Create m.Version
-                    | _ -> ()
+                    // Dropped by the new version: removed after the rest is updated, so only DAX
+                    // outside the package (or your changes) can still call them.
+                    let dropped = old |> List.filter (fun f -> not (incoming.Contains f.Name))
 
-                    writeTable db table
+                    for f in dropped do
+                        if keep f then
+                            unlink f
+                            kept.Add f.Name
 
-                    let details = [
-                        plural updated "function updated" "functions updated"
-                        if added > 0 then
-                            plural added "added" "added"
-                        if removed > 0 then
-                            plural removed "removed" "removed"
-                    ]
+                    let removing = dropped |> List.filter (fun f -> not (keep f))
 
-                    {
-                        Mutation.Effect.none with
-                            Notes = [ $"Updated {m.Id} {installed.Version} -> {m.Version} ({joined details})" ]
-                            Warnings = [
-                                if kept.Count > 0 then
-                                    "kept your changes to "
-                                    + String.concat ", " kept
-                                    + $": they may not work with {m.Id} {m.Version}"
-                            ]
-                    }))
+                    dropFunctions db removing force
+                    |> Result.map (fun removalWarnings ->
+                        match table.[string key] with
+                        | :? JsonObject as entry -> entry.["Version"] <- JsonValue.Create m.Version
+                        | _ -> ()
+
+                        writeTable db table
+
+                        let details = [
+                            plural updated "function updated" "functions updated"
+                            if added > 0 then
+                                plural added "added" "added"
+                            if not removing.IsEmpty then
+                                plural removing.Length "removed" "removed"
+                        ]
+
+                        {
+                            Mutation.Effect.none with
+                                Notes = [ $"Updated {m.Id} {installed.Version} -> {m.Version} ({joined details})" ]
+                                Warnings = [
+                                    if kept.Count > 0 then
+                                        "kept your changes to "
+                                        + String.concat ", " kept
+                                        + $": they may not work with {m.Id} {m.Version}"
+                                    yield! removalWarnings
+                                ]
+                        })))
 
 /// Remove an installed package and its functions. Functions changed since they were installed are
 /// refused unless OnModified says otherwise (KeepModified leaves them in the model, no longer
 /// linked to the package).
-let remove (db: Database) (id: string) (onModified: OnModified) : Result<Mutation.Effect, TessError> =
+let remove (db: Database) (id: string) (onModified: OnModified) (force: bool) : Result<Mutation.Effect, TessError> =
     state db
     |> Result.bind (fun st ->
         match findInstalled st id with
@@ -968,30 +988,31 @@ let remove (db: Database) (id: string) (onModified: OnModified) : Result<Mutatio
                 )
             | _ ->
                 readTable db
-                |> Result.map (fun table ->
-                    let mutable removed = 0
-                    let kept = ResizeArray<string>()
+                |> Result.bind (fun table ->
+                    let keep (f: Function) =
+                        onModified = KeepModified && List.contains f.Name modified
 
-                    for f in fs do
-                        if onModified = KeepModified && List.contains f.Name modified then
+                    let kept = fs |> List.filter keep
+                    let removing = fs |> List.filter (fun f -> not (keep f))
+
+                    dropFunctions db removing force
+                    |> Result.map (fun removalWarnings ->
+                        for f in kept do
                             unlink f
-                            kept.Add f.Name
-                        else
-                            db.Model.Functions.Remove f |> ignore
-                            removed <- removed + 1
 
-                    table.Remove(string installed.Key) |> ignore
-                    writeTable db table
+                        table.Remove(string installed.Key) |> ignore
+                        writeTable db table
 
-                    {
-                        Mutation.Effect.none with
-                            Notes = [
-                                $"Removed {installed.PackageId} {installed.Version} ({functionCount removed})"
-                            ]
-                            Warnings = [
-                                if kept.Count > 0 then
-                                    "kept "
-                                    + String.concat ", " kept
-                                    + " (changed since installed), no longer part of a package"
-                            ]
-                    }))
+                        {
+                            Mutation.Effect.none with
+                                Notes = [
+                                    $"Removed {installed.PackageId} {installed.Version} ({functionCount removing.Length})"
+                                ]
+                                Warnings = [
+                                    if not kept.IsEmpty then
+                                        "kept "
+                                        + (kept |> List.map _.Name |> String.concat ", ")
+                                        + " (changed since installed), no longer part of a package"
+                                    yield! removalWarnings
+                                ]
+                        })))

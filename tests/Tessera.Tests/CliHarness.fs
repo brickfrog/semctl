@@ -13,6 +13,8 @@ type Run = { Code: int; Out: string; Err: string }
 /// developer's TESS_BPA_RULES or ~/.config/tessera/bpa.json can't change results.
 let private configVariables =
     set [ "TESS_BPA_RULES"; "XDG_CONFIG_HOME"; "HOME"; "APPDATA" ]
+    // A developer's TESS_PKG_SOURCE (which may name daxlib.org) never reaches a test.
+    + set [ "TESS_PKG_SOURCE" ]
     // A developer's real server credentials never reach a test either.
     + set Tessera.Xmla.Credentials.Var.all
 
