@@ -33,6 +33,12 @@ type Args =
     | Allow_External_Rules
     | Path of pattern: string
     | Watch
+    | Fix
+    | Save
+    | Save_To of path: string
+    | Force
+    | Stat
+    | Name_Only
     | [<CliPrefix(CliPrefix.None); CustomCommandLine("rules")>] Rules_Cmd of ParseResults<BpaRulesCommand.Args>
 
     interface IArgParserTemplate with
@@ -57,6 +63,14 @@ type Args =
                 + "or a prefix (`column:`); repeatable or comma-separated."
             | Rules_Cmd _ -> "list, show, add or remove rules, and ignore rules on objects: `tess bpa rules --help`."
             | Watch -> Tessera.Cli.Watch.usage
+            | Fix ->
+                "apply the rules' fix expressions to their findings (a dry run unless --save or --save-to); "
+                + "what can't be applied exactly is listed, not done."
+            | Save -> "with --fix: " + Mutation.Usage.save
+            | Save_To _ -> "with --fix: " + Mutation.Usage.saveTo
+            | Force -> "with --fix: " + Mutation.Usage.force
+            | Stat -> "with --fix: " + Mutation.Usage.stat
+            | Name_Only -> "with --fix: " + Mutation.Usage.nameOnly
 
 let private severityName (s: int) =
     if s >= 3 then "error"
@@ -442,6 +456,45 @@ let private pathMatcher (pattern: string) : ObjectRef -> bool =
     else
         fun r -> (ObjectRef.format r).StartsWith(pattern, StringComparison.OrdinalIgnoreCase)
 
+/// What --fix did, for the editing pipeline's notes and warnings.
+let private fixEffect (unfixable: int) (result: BpaFix.FixResult) : Tessera.Mutation.Effect =
+    let fixedFindings = BpaFix.FixResult.fixedFindings result
+
+    let byRule =
+        fixedFindings
+        |> List.countBy (fun o -> o.Finding.Rule.Id)
+        |> List.map (fun (id, n) -> $"{id}: {n}")
+        |> String.concat ", "
+
+    {
+        Tessera.Mutation.Effect.none with
+            Notes = [
+                if fixedFindings.IsEmpty then
+                    "Nothing to fix."
+                else
+                    $"""Fixed {plural fixedFindings.Length "finding"} ({byRule})."""
+                yield! result.Notes
+            ]
+            Warnings = [
+                // One line per rule and reason.
+                for (id, reason), outcomes in
+                    BpaFix.FixResult.refused result
+                    |> List.groupBy (fun o -> o.Finding.Rule.Id, o.Refused.Value) do
+                    let refs = outcomes |> List.map (fun o -> ObjectRef.format o.Finding.Ref)
+
+                    let where =
+                        match refs with
+                        | [ one ] -> one
+                        | first :: rest -> $"{first} and {rest.Length} more"
+                        | [] -> ""
+
+                    $"{id}: not fixed on {where}: {reason}"
+
+                if unfixable > 0 then
+                    $"""{plural unfixable "finding"} of rules without a fix expression; `tess bpa` lists them"""
+            ]
+    }
+
 let private analyze (ctx: Ctx) (args: ParseResults<Args>) (modelPath: string) =
     let started = DateTime.Now
     let clock = Diagnostics.Stopwatch.StartNew()
@@ -488,10 +541,65 @@ let private analyze (ctx: Ctx) (args: ParseResults<Args>) (modelPath: string) =
             |> Option.map Ok
             |> Option.defaultValue (Error(ValidateCommand.ciUnknown c))
 
+    let fixing = args.Contains Args.Fix
+
+    let editSwitches =
+        args.Contains Args.Save
+        || args.Contains Args.Save_To
+        || args.Contains Args.Force
+        || args.Contains Args.Stat
+        || args.Contains Args.Name_Only
+
+    let reportSwitches =
+        [
+            args.Contains Args.Fail_On, "--fail-on"
+            args.Contains Args.Ci, "--ci"
+            args.Contains Args.Trx, "--trx"
+            args.Contains Args.Sarif, "--sarif"
+            args.Contains Args.List_Rules, "--list-rules"
+        ]
+        |> List.filter fst
+        |> List.map snd
+
     match failOn, ci, opts with
     | Error problem, _, _
     | _, Error problem, _ -> usage problem
     | _, _, Error message -> UsageError message
+    | Ok _, Ok _, Ok _ when not fixing && editSwitches ->
+        UsageError "--save, --save-to, --force, --stat and --name-only need --fix"
+    | Ok _, Ok _, Ok _ when fixing && not reportSwitches.IsEmpty ->
+        let names = String.concat ", " reportSwitches
+        UsageError $"{names} report findings; they don't combine with --fix"
+    | Ok _, Ok _, Ok opts when fixing ->
+        match
+            Mutation.options
+                (args.Contains Args.Save)
+                (args.TryGetResult Args.Save_To)
+                (args.Contains Args.Force)
+                (args.Contains Args.Stat)
+                (args.Contains Args.Name_Only)
+        with
+        | Error message -> UsageError message
+        | Ok mopts ->
+            Mutation.runWith ctx "bpa" mopts modelPath (fun source db ->
+                Bpa.collectRules source db opts
+                |> Result.bind (fun collected ->
+                    BpaRulesCommand.reportCollected ctx "bpa" collected
+                    let rules = collected.Effective |> List.filter selected
+
+                    let results = Bpa.analyze db rules
+
+                    for rule, stage, error in problems results do
+                        let what = if stage = "compile" then "not supported" else "failed"
+                        ctx.Err.WriteLine $"tess: bpa: rule {rule.Id} ({rule.Name}) {what}: {error}"
+
+                    let findings = results |> List.collect (fun r -> r.Findings) |> List.filter inPaths
+
+                    let fixable, unfixable =
+                        findings |> List.partition (fun f -> f.Rule.FixExpression.IsSome)
+
+                    BpaFix.apply db fixable
+                    |> Result.map (fun result -> fixEffect unfixable.Length result, [])))
     | Ok failOn, Ok ci, Ok opts ->
 
         match

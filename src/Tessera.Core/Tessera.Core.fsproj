@@ -37,6 +37,7 @@
     <Compile Include="Where.fs" />
     <Compile Include="AddObject.fs" />
     <Compile Include="RemoveObject.fs" />
+    <Compile Include="BpaFix.fs" />
     <Compile Include="MoveObject.fs" />
     <Compile Include="Translations.fs" />
     <Compile Include="Perspectives.fs" />
@@ -84,6 +85,7 @@
     <Compile Include="Engine/Registry.fs" />
     <Compile Include="Engine/Security.fs" />
     <Compile Include="Engine/Engine.fs" />
+    <Compile Include="ValidateSemantic.fs" />
     <Compile Include="TestSuite.fs" />
     <Compile Include="TestRun.fs" />
     <Compile Include="SourceLocations.fs" />

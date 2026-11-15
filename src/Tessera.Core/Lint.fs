@@ -67,13 +67,13 @@ let rules = [
         "Replace IFERROR with DIVIDE"
         "Improvement"
         Validate.Severity.Warning
-        "IFERROR(a / b, x), which DIVIDE(a, b, x) says directly"
+        "IFERROR(a / b, x), which DIVIDE(a, b, x) says directly. The fix can change results: DIVIDE gives x for a zero or blank divisor, where a / b gives infinity (or NaN), and doesn't catch errors raised inside a or b"
     rule
         "DR014"
         "Simplify using IN"
         "Readability"
         Validate.Severity.Info
-        "x = 1 || x = 2 || ..., which x IN {1, 2, ...} says more briefly"
+        "x = 1 || x = 2 || ..., or OR(x = 1, x = 2), which x IN {1, 2, ...} says more briefly"
 ]
 
 let private ruleById = rules |> List.map (fun r -> r.Id, r) |> dict
@@ -892,8 +892,9 @@ let private iferrorRule (dax: string) (all: Token array) (code: Token array) = [
 
 /// x = 1 || x = 2 || ... -> x IN {1, 2, ...}: the whole expression (or argument) is such a chain,
 /// x is a column, measure or variable, and the values are literals that no BLANK equals (non-zero
-/// numbers, or non-empty strings), so = and IN agree.
-let private inRule (dax: string) (all: Token array) (code: Token array) (variables: HashSet<string>) = [
+/// numbers, or non-empty strings), so = and IN agree. OR(x = 1, x = 2) too, nested ORs included.
+/// Each candidate comes with its span.
+let private inRuleSpans (dax: string) (all: Token array) (code: Token array) (variables: HashSet<string>) = [
     let n = code.Length
 
     let starts = [
@@ -961,24 +962,48 @@ let private inRule (dax: string) (all: Token array) (code: Token array) (variabl
                     x.Kind = y.Kind && eqCi x.Text y.Text)
                 [ 0 .. len - 1 ]
 
-        // Parse comparisons joined by ||.
-        let rec chain (k: int) (acc: (int * int * int * int * bool) list) =
+        // One comparison `lhs = literal` at k: (lhs, lhs length, value, value length, is a string),
+        // and the index after it.
+        let item (k: int) =
             match lhs k with
             | Some ll when k + ll < n && isOp "=" code.[k + ll] ->
-                match literal (k + ll + 1) with
-                | Some(vl, isString) ->
-                    let item = k, ll, k + ll + 1, vl, isString
-                    let next = k + ll + 1 + vl
-
-                    if next < n && isOp "||" code.[next] then
-                        chain (next + 1) (item :: acc)
-                    else
-                        Some(List.rev (item :: acc), next)
-                | None -> None
+                literal (k + ll + 1)
+                |> Option.map (fun (vl, isString) -> (k, ll, k + ll + 1, vl, isString), k + ll + 1 + vl)
             | _ -> None
 
-        match chain s [] with
-        | Some(items, e) when items.Length >= 2 ->
+        // Comparisons joined by ||.
+        let rec chain (k: int) acc =
+            match item k with
+            | Some(it, next) when next < n && isOp "||" code.[next] -> chain (next + 1) (it :: acc)
+            | Some(it, next) -> Some(List.rev (it :: acc), next)
+            | None -> None
+
+        // OR(a, b), each argument a comparison or another such OR call; the index after the `)`.
+        let rec orCall (k: int) =
+            let argument (k: int) =
+                if k < n && isKw "OR" code.[k] then
+                    orCall k
+                else
+                    item k |> Option.map (fun (it, next) -> [ it ], next)
+
+            if k + 1 < n && isKw "OR" code.[k] && isPunct "(" code.[k + 1] then
+                match argument (k + 2) with
+                | Some(first, comma) when comma < n && isPunct "," code.[comma] ->
+                    match argument (comma + 1) with
+                    | Some(second, close) when close < n && isPunct ")" code.[close] -> Some(first @ second, close + 1)
+                    | _ -> None
+                | _ -> None
+            else
+                None
+
+        let parsed =
+            if isKw "OR" code.[s] then
+                orCall s |> Option.map (fun (items, e) -> items, e, "OR")
+            else
+                chain s [] |> Option.map (fun (items, e) -> items, e, "||")
+
+        match parsed with
+        | Some(items, e, joiner) when items.Length >= 2 ->
             let ends =
                 e = n
                 || isPunct ")" code.[e]
@@ -1010,10 +1035,14 @@ let private inRule (dax: string) (all: Token array) (code: Token array) (variabl
                     all
                     |> Array.exists (fun t -> t.Kind = TokenKind.Comment && t.Start > spanStart && t.Start < spanEnd)
 
-                {
+                ({
                     RuleId = "DR014"
                     Offset = spanStart
-                    Message = $"{items.Length} comparisons of {text k0 l0} joined by ||: write {replacement}"
+                    Message =
+                        if joiner = "OR" then
+                            $"OR of {items.Length} comparisons of {text k0 l0}: write {replacement}"
+                        else
+                            $"{items.Length} comparisons of {text k0 l0} joined by ||: write {replacement}"
                     Fix =
                         if hasComments then
                             None
@@ -1028,9 +1057,26 @@ let private inRule (dax: string) (all: Token array) (code: Token array) (variabl
                                 ],
                                 SameObjects
                             )
-                }
+                 },
+                 spanStart,
+                 spanEnd)
         | _ -> ()
 ]
+
+/// DR014's candidates, without those inside another (an OR nested in an OR that is fixed whole).
+let private inRule (dax: string) (all: Token array) (code: Token array) (variables: HashSet<string>) =
+    let found = inRuleSpans dax all code variables
+
+    [
+        for c, s, e in found do
+            if
+                not (
+                    found
+                    |> List.exists (fun (_, s2, e2) -> s2 <= s && e <= e2 && (s2, e2) <> (s, e))
+                )
+            then
+                c
+    ]
 
 /// What a reference points at, for comparing an expression before and after a fix. Unresolved
 /// references compare by their text without whitespace.
@@ -1108,11 +1154,72 @@ let lintSource (ctx: Context) (src: Deps.DaxSource) : Finding list =
     })
     |> List.sortBy (fun f -> f.Offset, rules |> List.findIndex (fun r -> r.Id = f.Rule.Id))
 
-/// Lint every DAX expression in the model, in model order.
-let lint (db: Database) : Finding list =
+// ---- Suppressing findings -----------------------------------------------------------------------
+
+/// The annotation that turns lint rules off: on an object, for its expressions; on the model, for
+/// every expression. Tabular Editor has no such convention for its code actions, so this one is
+/// tess's own, holding a value in the format of TE's BPA ignore annotation
+/// (`BestPracticeAnalyzer_IgnoreRules`): `{"RuleIDs":["DI004","DR014"]}`.
+let ignoreAnnotation = "TesseraLint_IgnoreRules"
+
+/// The rule ids (upper case) an object's ignore annotation lists. TOM has no common interface for
+/// annotations, so this reads them by reflection; objects without any (calculation items) list none.
+let ignoredOn (o: MetadataObject) : Set<string> =
+    let value =
+        match o.GetType().GetProperty("Annotations") with
+        | null -> None
+        | p ->
+            match p.GetValue o with
+            | :? Collections.IEnumerable as coll ->
+                coll
+                |> Seq.cast<obj>
+                |> Seq.tryPick (fun a ->
+                    match a with
+                    | :? Annotation as a when a.Name = ignoreAnnotation && not (String.IsNullOrEmpty a.Value) ->
+                        Some a.Value
+                    | _ -> None)
+            | _ -> None
+
+    match value with
+    | Some json ->
+        BpaRules.parseIgnoreList json
+        |> List.map (fun id -> id.Trim().ToUpperInvariant())
+        |> Set.ofList
+    | None -> Set.empty
+
+/// Whether an expression's owner (or the model) ignores a finding's rule.
+let private ignoredIn (db: Database) =
+    let onModel = ignoredOn db.Model
+    let cache = Dictionary<MetadataObject, Set<string>>(HashIdentity.Reference)
+
+    fun (src: Deps.DaxSource) (f: Finding) ->
+        let own =
+            match cache.TryGetValue src.Owner.Object with
+            | true, s -> s
+            | _ ->
+                let s = ignoredOn src.Owner.Object
+                cache.[src.Owner.Object] <- s
+                s
+
+        onModel.Contains f.Rule.Id || own.Contains f.Rule.Id
+
+/// Lint every DAX expression in the model, in model order: the findings, and those the ignore
+/// annotation suppresses.
+let lintWithIgnored (db: Database) : Finding list * Finding list =
     let entries = objects db
     let ctx = context entries
-    Deps.daxSources entries |> List.collect (lintSource ctx)
+    let ignored = ignoredIn db
+
+    let all = [
+        for src in Deps.daxSources entries do
+            for f in lintSource ctx src -> f, ignored src f
+    ]
+
+    all |> List.filter (snd >> not) |> List.map fst, all |> List.filter snd |> List.map fst
+
+/// Lint every DAX expression in the model, in model order (without the findings the ignore
+/// annotation suppresses).
+let lint (db: Database) : Finding list = fst (lintWithIgnored db)
 
 // ---- Fixing -------------------------------------------------------------------------------------
 
@@ -1186,6 +1293,7 @@ let private fixSource (ctx: Context) (select: Finding -> bool) (src: Deps.DaxSou
     pass 0 src.Dax []
 
 /// Fix the selected findings across the model (without changing it): what each expression becomes.
+/// Findings the ignore annotation suppresses are left alone.
 let fix (db: Database) (select: Finding -> bool) : FixResult =
     let entries = objects db
     let ctx = context entries
@@ -1193,7 +1301,11 @@ let fix (db: Database) (select: Finding -> bool) : FixResult =
     let remaining = ResizeArray<Finding>()
     let unsettled = ResizeArray<Deps.DaxSource>()
 
+    let ignored = ignoredIn db
+
     for src in Deps.daxSources entries do
+        let select (f: Finding) = select f && not (ignored src f)
+
         match fixSource ctx select src with
         | Ok(after, fixedIds, left) ->
             remaining.AddRange left

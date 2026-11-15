@@ -31,7 +31,7 @@ type Args =
             | Fail_On _ ->
                 "exit 1 if any issue is this severe or more, shown or not: error, warning or info (default: error)."
             | Rule _ ->
-                let ids = rules |> List.map fst |> String.concat ", "
+                let ids = ValidateSemantic.allRules |> List.map fst |> String.concat ", "
                 $"only these rules (repeatable or comma-separated): {ids}."
             | Ci _ -> $"also write CI annotations to stderr: {Findings.Ci.names}."
             | No_Group -> "list every issue on its own, instead of folding issues with one root cause into the first."
@@ -223,7 +223,9 @@ let severityArg (name: string) (value: string option) (fallback: Severity) =
 let ciArg (value: string option) = ciArgWith value |> Result.mapError fst
 
 /// The validate rules, for SARIF.
-let sarifRules: Sarif.Rule list = [ for id, description in rules -> Sarif.Rule.simple id description ]
+let sarifRules: Sarif.Rule list = [
+    for id, description in ValidateSemantic.allRules -> Sarif.Rule.simple id description
+]
 
 /// Write `issues` as SARIF to `path`, located in the model's files.
 let writeSarif
@@ -239,7 +241,7 @@ let writeSarif
 let run (ctx: Ctx) (args: ParseResults<Args>) =
     let modelPath = args.GetResult Args.Model
     let selected = parseList (args.GetResults Args.Rule)
-    let known = rules |> List.map fst
+    let known = ValidateSemantic.allRules |> List.map fst
 
     let options =
         match selected |> List.tryFind (fun r -> not (List.contains r known)) with
@@ -264,7 +266,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
                 let g = Deps.build db
 
                 let issues =
-                    validateGraph g db
+                    ValidateSemantic.validateGraph g db
                     |> List.filter (fun i -> selected.IsEmpty || List.contains i.Rule selected)
 
                 let shown = issues |> List.filter (fun i -> Severity.atLeast minimum i.Severity)

@@ -369,6 +369,8 @@ type Finding = {
     ObjectName: string
     /// TE's type name, e.g. "Column", "Calculated Table", "Table (Import)".
     ObjectType: string
+    /// The TOM object the rule ran on (a KPI, a table permission...: not always Ref's object).
+    Object: MetadataObject
 }
 
 type RuleStatus =
@@ -484,6 +486,7 @@ let analyze (db: TomDatabase) (rules: Rule list) : RuleResult list =
                                         Ref = r
                                         ObjectName = name
                                         ObjectType = o.ObjectTypeName
+                                        Object = o.Tom
                                     })
 
                             {

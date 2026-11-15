@@ -83,10 +83,24 @@ let lintText (out: TextWriter) (findings: Lint.Finding list) =
     | 0 -> ()
     | n -> out.WriteLine($"{n} can be fixed with --fix.")
 
+/// `lintText`, plus how many findings the ignore annotation suppressed.
+let lintTextIgnoring (out: TextWriter) (findings: Lint.Finding list) (ignored: int) =
+    lintText out findings
+
+    if ignored > 0 then
+        out.WriteLine($"""{plural ignored "finding"} ignored by {Lint.ignoreAnnotation} annotations.""")
+
 /// The findings envelope, plus "fixable": how many findings --fix would fix.
 let lintJson (duration: TimeSpan) (findings: Lint.Finding list) =
     Findings.envelope "lint" duration (findings |> List.map toFinding) [
         "fixable", num (findings |> List.filter Lint.Finding.fixable |> List.length)
+    ]
+
+/// `lintJson`, plus "ignored": the findings the ignore annotation suppressed.
+let lintJsonIgnoring (duration: TimeSpan) (findings: Lint.Finding list) (ignored: Lint.Finding list) =
+    Findings.envelope "lint" duration (findings |> List.map toFinding) [
+        "fixable", num (findings |> List.filter Lint.Finding.fixable |> List.length)
+        "ignored", arr (ignored |> List.map (toFinding >> Findings.findingJson))
     ]
 
 /// What --fix did, for the editing pipeline's notes and warnings.
@@ -194,7 +208,13 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
         let linted =
             Source.load ctx modelPath
             |> Result.bind (fun (source, db) ->
-                let findings = Lint.lint db |> List.filter (isSelected selected)
+                let findings, ignored = Lint.lintWithIgnored db
+                let findings = findings |> List.filter (isSelected selected)
+
+                let ignored =
+                    ignored
+                    |> List.filter (fun f ->
+                        isSelected selected f && Validate.Severity.atLeast minimum f.Rule.Severity)
 
                 let shown =
                     findings
@@ -208,17 +228,17 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
                         |> List.map sarifRule
 
                     ValidateCommand.writeSarif path modelPath source ruleSet (shown |> List.map toFinding)
-                    |> Result.map (fun () -> findings, shown)
-                | None -> Ok(findings, shown))
+                    |> Result.map (fun () -> findings, shown, ignored)
+                | None -> Ok(findings, shown, ignored))
 
         match linted with
         | Error e -> Failed e
-        | Ok(findings, shown) ->
+        | Ok(findings, shown, ignored) ->
 
             if ctx.Json then
-                writeJson ctx.Out (lintJson clock.Elapsed shown)
+                writeJson ctx.Out (lintJsonIgnoring clock.Elapsed shown ignored)
             else
-                lintText ctx.Out shown
+                lintTextIgnoring ctx.Out shown ignored.Length
 
             Findings.annotate ci ctx.Err (shown |> List.map toFinding)
 

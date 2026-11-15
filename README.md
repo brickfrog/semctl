@@ -514,6 +514,20 @@ summary line such as `2 errors, 1 warning`.
 | `relationship-self-join` | error | a relationship from a table to itself |
 | `invalid-sort-by` | warning | a column sorted by itself, or by a column that has its own sort-by column |
 | `tom-validation` | error | TOM's own validation, e.g. a sort-by column, level or relationship that names a column that doesn't exist |
+| `invalid-culture` | error | a model culture or translation language that isn't a culture name at all (`en US`) |
+| | warning | a well-formed name this system's culture data doesn't list (`English`, `xx-YY`): a server may still know it, as the lists differ by OS |
+| `calculate-variable` | warning | a variable as the first argument of `CALCULATE` or `CALCULATETABLE` (parentheses around it don't matter): it was evaluated where it was defined, so the filters don't change it. Variables as filter arguments are fine, and a function's parameters aren't variables |
+| `ignore-outside-summarizecolumns` | error | `IGNORE` anywhere but directly as an expression argument of `SUMMARIZECOLUMNS` (the argument after a name) |
+| `week-without-weekly-calendar` | warning | a week-based time intelligence function (`DATESWTD`, `TOTALWTD`, `STARTOFWEEK`, `ENDOFWEEK`, `PREVIOUSWEEK`, `NEXTWEEK`, `OPENINGBALANCEWEEK`, `CLOSINGBALANCEWEEK`) in a model that has calendars but none that can tell weeks apart, or over a named calendar that can't. A calendar can when it tags Week, or Week of Year and Year, or another of Learn's "Period Uniqueness" sets, as the [local engine](#calendar-based-time-intelligence) reads them. Models without calendars aren't checked |
+
+The last four follow Tabular Editor 3's semantic analyzer (release notes 3.27.1, 3.18.0, 3.26.2 and 3.24.0).
+They read DAX as a syntax tree, so they skip DAX that doesn't parse. They run in `validate` only: the save gate
+of the editing commands and `deploy` don't use them.
+
+There is no rule for a compatibility level too low for the features a model uses, because TOM already refuses
+to load a `.bim` file or TMDL folder that uses an object, property or value its compatibility level doesn't have
+(a function below 1702, a calendar below 1701, a Direct Lake partition below 1604): such a model never gets as far
+as `validate`. (TE3 3.25.1's check is a different one: a compatibility level the connected server doesn't support.)
 
 Options:
 - `--rule` picks rules (repeatable or comma-separated).
@@ -948,6 +962,7 @@ tess bpa ./Sales.pbip --list-rules                 # what would run, and whether
 tess bpa ./Sales.pbip --path 'measure:Sales/*'     # only findings on matching objects
 tess bpa ./Sales.pbip --json                       # the findings envelope, plus ignored findings and rule errors
 tess bpa ./Sales.pbip --trx bpa.trx                # VSTest results, one test per rule (Azure DevOps etc.)
+tess bpa ./Sales.pbip --fix --save                 # apply the rules' fix expressions
 ```
 
 Text output is one finding per line, most severe first, then a summary:
@@ -1042,7 +1057,7 @@ A rule file is a JSON array of rules:
 
 Only `ID`, `Scope` and `Expression` are required. As in TE, property names are case-insensitive, and comments,
 trailing commas and extra fields such as `Source` are accepted. `Name` defaults to the ID, and `Severity`
-defaults to 1. `LearnMoreUrl` is read. `FixExpression` is read but not applied; applying fixes is future work. A rule whose
+defaults to 1. `LearnMoreUrl` is read. `FixExpression` is applied by [`--fix`](#fixing-findings---fix). A rule whose
 `CompatibilityLevel` is above the model's is skipped.
 
 `Scope` is a comma-separated list. It can also be TE's flags number.
@@ -1112,6 +1127,49 @@ filter belongs to its table permission.
 
 If an expression doesn't compile for one of its scopes, the rule is reported as unsupported, with the parser's
 error. A runtime error fails just that rule. Neither stops the run.
+
+#### Fixing findings (`--fix`)
+
+```
+tess bpa ./Sales.pbip --fix                        # show what the fix expressions would change (a dry run)
+tess bpa ./Sales.pbip -r BPARules.json --fix --save
+```
+
+`--fix` applies each finding's rule's `FixExpression` to the object it was found on. It is an
+[editing command](#editing-commands): a dry run unless `--save` or `--save-to`, with `--stat`, `--name-only`,
+`--force`, `--json` (the change set) and the save gate as for the others. It fixes the findings the rule switches,
+`--category`, `--min-severity` and `--path` select; findings ignored by annotations are left alone. `--fail-on`,
+`--ci`, `--trx`, `--sarif` and `--list-rules` report findings and are refused with `--fix` (exit 2), as are the
+editing switches without it.
+
+A fix expression is a C# statement about the object: Tabular Editor 2 runs `<object>.` + the expression + `;` as a
+script (its BPA window, `GetFixScript`). tess doesn't run C#. It applies the statements the published rule files
+use, with the side effects TE's object model gives them, and refuses everything else:
+
+| Fix expression | What tess does |
+|---|---|
+| `IsHidden = true`, `IsAvailableInMDX = false`, `IsKey = true` | sets the property (`isHidden`, `isAvailableInMdx`, `isKey`). `IsKey = true` also clears `IsKey` on the table's other columns |
+| `DataType = DataType.Decimal`, `SummarizeBy = AggregateFunction.None` | sets the enum property; the type must be the property's (`DataType`, `AggregateFunction`) |
+| `FormatString = "#,0"`, `Description = "..."`, `DisplayFolder = "..."` | sets the string (C#'s escapes apply: `"\u003B"` is `;`; `null` clears). A changed format string removes the object's `Format` annotation, as TE does |
+| `Delete()` | removes the object as `tess remove` does, with the relationships, levels, sort-by links, perspectives, security and translations that point at it. Unlike TE, it is refused while other DAX still refers to the object, instead of leaving that DAX broken. Like TE, it doesn't know what reports use |
+| `TranslatedDisplayFolders.Reset()` | sets every culture's display folder translation to the object's own display folder |
+
+Refused, with a warning naming the rule, the objects and why: anything else (`Name = ...`: use `tess rename`; values
+computed from the object, such as `string.Concat(it.Name...)`; other methods; other properties), an expression
+containing `{`, `}` or `;` (TE skips those too), a property the object doesn't have or can't set at its
+compatibility level, a value it doesn't take, a finding on an object tess can't edit by itself (a KPI, a table
+permission, a role member, a variation), and two rules setting one property of one object to different values
+(neither is applied; the same value is applied once). Findings of rules without a fix expression are counted in a
+warning.
+
+One run applies the fixes of one analysis. Fixes can make other rules fire (removing a column can leave another
+unused), and rules from different files can disagree (BPARules-standard's `DISABLE_ATTRIBUTE_HIERACHIES` and
+Microsoft's `SET_ISAVAILABLEINMDX_TO_TRUE_ON_NECESSARY_COLUMNS`), so run `bpa` again afterwards.
+
+Of the community files' fix expressions (TabularEditor/BestPracticeRules and microsoft/Analysis-Services), tess
+applies all but four: `AVOID_INVALID_NAME_CHARACTERS` and `AVOID_INVALID_DESCRIPTION_CHARACTERS` (computed values),
+`PARTITION_NAME_SHOULD_MATCH_TABLE_NAME_FOR_SINGLE_PARTITION_TABLES` (another object's property) and
+BPARules-standard-lax's `TranslatedDisplayFolder.Reset()` (a typo TE's script wouldn't compile either).
 
 #### Ignoring findings
 
@@ -1207,7 +1265,8 @@ analyzer. Known differences:
 - Rules that need data from a deployed model (e.g. a measure's `DataType`, or `Vertipaq_*` annotations that
   VertiPaq Analyzer writes) behave as they do in TE on a model loaded from files.
 - Object names in the output use tess references, e.g. `table:Sales`.
-- Only read-only members are available, so rules can't call TE's methods that change the model.
+- Rule expressions see only read-only members, so they can't call TE's methods that change the model. Fix
+  expressions are applied as [above](#fixing-findings---fix), not run as C#.
 
 ### Translations (`translations`)
 
@@ -1469,8 +1528,8 @@ What each rule reports, and when it doesn't fix:
   zero or blank, where `a / b` gives infinity (or NaN for 0/0) and IFERROR passes that through. DIVIDE also
   doesn't catch errors raised inside `a` or `b`. Usually that is what the IFERROR was meant to do. Use
   `--rule` to leave `DI014` out if not.
-- **`DR014`:** two or more `=` comparisons of the same column, measure or variable, joined by `||`, as a whole
-  expression or argument. The values must be non-zero numbers or non-empty strings, all of one kind. `=`
+- **`DR014`:** two or more `=` comparisons of the same column, measure or variable, joined by `||` or by
+  `OR(...)` (nested `OR`s count, and are rewritten whole), as a whole expression or argument. The values must be non-zero numbers or non-empty strings, all of one kind. `=`
   treats BLANK as equal to `0`, `""` and `FALSE`, but `IN` doesn't, so for these values the two agree.
   Chains containing comments are reported but not fixed.
 
@@ -1480,7 +1539,7 @@ Options:
 - Text output has `validate`'s layout, plus a line saying how many findings `--fix` would fix.
 - `--json` writes the [findings envelope](#findings-json-and-ci-annotations). Each finding has `ruleName`, a
   `category` (TE3's `Improvement` or `Readability`, or `Correctness` for `TS001`) and `fixable`. The envelope
-  adds a top-level `fixable` count.
+  adds a top-level `fixable` count, and `ignored`: the findings suppressed by annotations (see below).
 
 With `--fix`, `lint` is an [editing command](#editing-commands):
 - It is a dry run unless `--save` or `--save-to`. `--stat` and `--name-only` work as for the other editing
@@ -1495,7 +1554,17 @@ With `--fix`, `lint` is an [editing command](#editing-commands):
   refused with `--fix` (exit 2), as are `--save`, `--save-to`, `--force`, `--stat` and `--name-only`
   without it.
 
-Findings can't be suppressed on individual objects yet.
+To suppress findings, give the object a `TesseraLint_IgnoreRules` annotation listing rule ids, in the format of
+TE's BPA ignore annotation: `{"RuleIDs":["DI004","DR014"]}` (TE's plain array form, `["DI004"]`, works too; ids are
+case-insensitive). It covers every expression the object holds (a measure's KPI and format string expressions
+too, and a role's row filters). On the model, it turns the rules off for every expression; that is also the way
+to ignore a rule on a calculation item, which TOM gives no annotations. Ignored findings are counted under the
+report (`ignored` in JSON), don't count for `--fail-on`, and `--fix` leaves them alone. TE has no convention for
+suppressing its code actions, so the annotation is tess's own; TE leaves it alone. To set it:
+
+```
+tess set ./Sales.pbip 'measure:Sales/Margin' -p 'annotations.TesseraLint_IgnoreRules={"RuleIDs":["DI004"]}' --save
+```
 
 ### Formatting DAX (`format`)
 
