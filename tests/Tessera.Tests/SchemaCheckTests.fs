@@ -758,6 +758,48 @@ let tests =
                 Expect.stringContains r.Out "invalid-schema-source" ""
                 Expect.stringContains r.Out "unknown type 'number'" ""
 
+            testCase "set --update-schema: the same update for one table"
+            <| fun () ->
+                let t, path = setup ()
+                use _ = t
+                let schema = writeSchema t fullSchemaText
+
+                let saved =
+                    tess [ "set"; path; "Sales"; "--update-schema"; "--source"; schema; "--save" ]
+
+                Expect.equal saved.Code ExitCode.ok saved.Err
+                let db = Tessera.ModelIO.loadPath path |> Result.map snd
+
+                match db with
+                | Ok db ->
+                    Expect.isNotNull (db.Model.Tables.["Sales"].Columns.Find "Region") ""
+                    Expect.equal db.Model.Tables.["Sales"].Columns.["Amount"].DataType DataType.Decimal ""
+                | Error e -> failtest (TessError.message e)
+
+                Expect.equal (tess [ "set"; path; "Sales"; "--update-schema" ]).Code ExitCode.usage "needs --source"
+
+                Expect.equal
+                    (tess [
+                        "set"
+                        path
+                        "Sales"
+                        "--update-schema"
+                        "--source"
+                        schema
+                        "-p"
+                        "isHidden=true"
+                    ])
+                        .Code
+                    ExitCode.usage
+                    ""
+
+                Expect.equal (tess [ "set"; path; "Sales"; "--source"; schema ]).Code ExitCode.usage "--source alone"
+
+                Expect.equal
+                    (tess [ "set"; path; "[Olds]"; "--update-schema"; "--source"; schema ]).Code
+                    ExitCode.usage
+                    "a measure has no schema"
+
             testCase "a sql: source with no SQL tables never connects"
             <| fun () ->
                 let t, path = setup ()

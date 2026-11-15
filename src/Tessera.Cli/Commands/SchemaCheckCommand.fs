@@ -54,8 +54,7 @@ type Args =
             | Stat -> "with --update: " + Mutation.Usage.stat
             | Name_Only -> "with --update: " + Mutation.Usage.nameOnly
 
-/// Opens a describer for a SQL endpoint (the live one is in Tessera.Xmla; tests pass their own).
-type SqlConnect = SchemaCheckSql.SqlAddress -> SchemaCheckSql.ISqlDescriber
+type SqlConnect = SchemaCheckSource.SqlConnect
 
 let private toSeverity =
     function
@@ -297,31 +296,6 @@ let trx (modelPath: string) (started: DateTime) (r: Report) : string =
 
 let sarifRules: Sarif.Rule list = [ for code, _, description in Codes.all -> Sarif.Rule.simple code description ]
 
-/// The schema source a --source value names. A SQL source's describer is opened (lazily, on the
-/// first table that needs it) only for a `sql:` value.
-let private openSource (connect: SqlConnect) (db: Microsoft.AnalysisServices.Tabular.Database) (source: string) =
-    if SchemaCheckSql.SqlAddress.isSql source then
-        SchemaCheckSql.SqlAddress.parse source
-        |> Result.map (fun address ->
-            let describer = connect address
-            SchemaCheckSql.source address db describer, Some(describer :> IDisposable))
-    elif Directory.Exists source then
-        SchemaCheckSources.fixtureSource source |> Result.map (fun s -> s, None)
-    elif File.Exists source then
-        SchemaCheckSources.SchemaFile.load source
-        |> Result.map (fun parsed -> SchemaCheckSources.SchemaFile.source source parsed, None)
-    else
-        Error(InvalidSchemaSource(source, "no such file or directory (or sql:<server>;<database>)"))
-
-/// Check `db` against `source`; the describer (if any) is closed afterwards.
-let private checkWith (connect: SqlConnect) db (source: string) (tables: string list) =
-    openSource connect db source
-    |> Result.bind (fun (s, disposable) ->
-        try
-            check db s tables
-        finally
-            disposable |> Option.iter (fun d -> d.Dispose()))
-
 let runWith (connect: SqlConnect) (ctx: Ctx) (args: ParseResults<Args>) =
     let started = DateTime.Now
     let clock = Diagnostics.Stopwatch.StartNew()
@@ -379,18 +353,12 @@ let runWith (connect: SqlConnect) (ctx: Ctx) (args: ParseResults<Args>) =
             | Ok mopts ->
                 let drop = args.Contains Args.Drop_Removed_Columns
 
-                Mutation.run ctx "schemacheck" mopts modelPath (fun db ->
-                    checkWith connect db source tables
-                    |> Result.bind (fun report ->
-                        // What the check found goes to stderr; stdout is the change set.
-                        for i in report.Issues do
-                            ctx.Err.WriteLine $"tess: schemacheck: {ObjectRef.format i.Ref}: {i.Message} [{i.Code}]"
-
-                        update db report drop))
+                Mutation.run ctx "schemacheck" mopts modelPath (SchemaCheckSource.update ctx connect source tables drop)
         | Ok failOn, Ok ci ->
             match
                 Source.load ctx modelPath
-                |> Result.bind (fun (ms, db) -> checkWith connect db source tables |> Result.map (fun r -> ms, r))
+                |> Result.bind (fun (ms, db) ->
+                    SchemaCheckSource.check connect db source tables |> Result.map (fun r -> ms, r))
             with
             | Error e -> Failed e
             | Ok(modelSource, report) ->
@@ -436,4 +404,4 @@ let runWith (connect: SqlConnect) (ctx: Ctx) (args: ParseResults<Args>) =
 
 /// With connections to a SQL endpoint made for real (only for a `sql:` source).
 let run (ctx: Ctx) (args: ParseResults<Args>) =
-    runWith (Tessera.Xmla.LiveSql.connect (Source.access ctx).Environment) ctx args
+    runWith (SchemaCheckSource.live ctx) ctx args

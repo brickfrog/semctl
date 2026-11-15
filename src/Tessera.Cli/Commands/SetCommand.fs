@@ -18,6 +18,9 @@ type Args =
     | Force
     | Stat
     | Name_Only
+    | Update_Schema
+    | Source of source: string
+    | Drop_Removed_Columns
 
     interface IArgParserTemplate with
         member this.Usage =
@@ -32,6 +35,11 @@ type Args =
             | Force -> Mutation.Usage.force
             | Stat -> Mutation.Usage.stat
             | Name_Only -> Mutation.Usage.nameOnly
+            | Update_Schema ->
+                "instead of -p: bring the table's columns (or every table's, for `model`) in line with --source, "
+                + "as `schemacheck --update` does."
+            | Source _ -> "with --update-schema: a schema file, a fixture directory, or sql:<server>;<database>."
+            | Drop_Removed_Columns -> "with --update-schema: also remove columns whose source column is gone."
 
 /// The assignments, in command-line order. At most one value can come from stdin.
 let private assignments (args: ParseResults<Args>) =
@@ -61,6 +69,35 @@ let private assignments (args: ParseResults<Args>) =
             | [] -> Error "nothing to set: pass -p <path>=<value> or --unset <path>"
             | xs -> Ok(List.rev xs))
 
+/// `set <model> <table|model> --update-schema --source <src>`: schemacheck's update, for one table.
+let private updateSchema (ctx: Ctx) (args: ParseResults<Args>) model selector opts =
+    match opts, args.TryGetResult Args.Source with
+    | Error message, _ -> UsageError message
+    | _ when args.Contains Args.Property || args.Contains Args.Unset ->
+        UsageError "--update-schema sets the columns from the source; it doesn't combine with -p or --unset"
+    | _, None ->
+        UsageError "--update-schema needs --source: a schema file, a fixture directory, or sql:<server>;<database>"
+    | Ok opts, Some source ->
+        let drop = args.Contains Args.Drop_Removed_Columns
+
+        Mutation.run ctx "set" opts model (fun db ->
+            Selector.resolve (objects db) selector
+            |> Result.bind (fun target ->
+                let update tables =
+                    SchemaCheckSource.update ctx (SchemaCheckSource.live ctx) source tables drop db
+
+                match target.Ref.Kind, target.Ref.Path with
+                | ObjectKind.Table, [ table ] -> update [ table ]
+                | ObjectKind.Model, _ -> update []
+                | _ ->
+                    Error(
+                        ReadOnlyProperty(
+                            ObjectRef.format target.Ref,
+                            "schema",
+                            "--update-schema takes a table, or `model` for every table"
+                        )
+                    )))
+
 let run (ctx: Ctx) (args: ParseResults<Args>) =
     let model, selector = args.GetResult Args.Target
 
@@ -72,10 +109,24 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             (args.Contains Args.Stat)
             (args.Contains Args.Name_Only)
 
-    match opts, assignments args with
-    | Error message, _
-    | _, Error message -> UsageError message
-    | Ok opts, Ok assignments ->
-        Mutation.run ctx "set" opts model (fun db ->
-            Selector.resolve (objects db) selector
-            |> Result.bind (fun target -> SetProperty.set db target assignments))
+    let schemaSwitches =
+        [
+            args.Contains Args.Source, "--source"
+            args.Contains Args.Drop_Removed_Columns, "--drop-removed-columns"
+        ]
+        |> List.filter fst
+        |> List.map snd
+
+    if args.Contains Args.Update_Schema then
+        updateSchema ctx args model selector opts
+    elif not schemaSwitches.IsEmpty then
+        let names = String.concat ", " schemaSwitches
+        UsageError $"{names}: only with --update-schema"
+    else
+        match opts, assignments args with
+        | Error message, _
+        | _, Error message -> UsageError message
+        | Ok opts, Ok assignments ->
+            Mutation.run ctx "set" opts model (fun db ->
+                Selector.resolve (objects db) selector
+                |> Result.bind (fun target -> SetProperty.set db target assignments))

@@ -4,7 +4,7 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query preview deploy data refresh test completion mcp schemacheck' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
@@ -39,7 +39,7 @@ _tess_options() {
         'bpa rules remove') _tess_r='--to --from --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'bpa rules ignore') _tess_r='--save --save-to --force --stat --name-only --json -j --help -h' ;;
         'bpa rules unignore') _tess_r='--save --save-to --force --stat --name-only --json -j --help -h' ;;
-        'set') _tess_r='--property -p --unset --save --save-to --force --stat --name-only --json -j --help -h' ;;
+        'set') _tess_r='--property -p --unset --save --save-to --force --stat --name-only --update-schema --source --drop-removed-columns --json -j --help -h' ;;
         'add') _tess_r='--expression -e --m-expression -m --format-string --display-folder --description --hidden --data-type --source-column --mode --calculation-group --precedence --column --levels --ordinal --format-string-expression --from --to --inactive --cross-filter --cardinality --permission --filter --include --category --time-related --if-not-exists --save --save-to --force --stat --name-only --json -j --help -h' ;;
         'translations') _tess_r='--json -j --help -h' ;;
         'translations export') _tess_r='--culture --format --output -o --only-translated --bom --force --json -j --help -h' ;;
@@ -72,6 +72,7 @@ _tess_options() {
         'test list') _tess_r='--filter --tag --json -j --help -h' ;;
         'completion') _tess_r='--json -j --help -h' ;;
         'mcp') _tess_r='--allow --data --server --save --audit-log --json -j --help -h' ;;
+        'schemacheck') _tess_r='--source --fail-on --ci --trx --sarif --update --drop-removed-columns --save --save-to --force --stat --name-only --json -j --help -h' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -159,6 +160,7 @@ _tess_value() {
         'set|-p') _tess_r='text' ;;
         'set|--unset') _tess_r='text' ;;
         'set|--save-to') _tess_r='path' ;;
+        'set|--source') _tess_r='path' ;;
         'add|--expression') _tess_r='text' ;;
         'add|-e') _tess_r='text' ;;
         'add|--m-expression') _tess_r='text' ;;
@@ -275,6 +277,12 @@ _tess_value() {
         'mcp|--data') _tess_r='dir' ;;
         'mcp|--server') _tess_r='text' ;;
         'mcp|--audit-log') _tess_r='path' ;;
+        'schemacheck|--source') _tess_r='path' ;;
+        'schemacheck|--fail-on') _tess_r='choice error warning info' ;;
+        'schemacheck|--ci') _tess_r='choice github azdo none' ;;
+        'schemacheck|--trx') _tess_r='path' ;;
+        'schemacheck|--sarif') _tess_r='path' ;;
+        'schemacheck|--save-to') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -370,6 +378,8 @@ _tess_positional() {
         'test list|'*) _tess_r='path' ;;
         'completion|0') _tess_r='text' ;;
         'mcp|0') _tess_r='path' ;;
+        'schemacheck|0') _tess_r='path' ;;
+        'schemacheck|'*) _tess_r='text' ;;
         *) _tess_r='' ;;
     esac
 }

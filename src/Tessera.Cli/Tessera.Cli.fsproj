@@ -20,6 +20,7 @@
     <Compile Include="Changes.fs" />
     <Compile Include="Mutation.fs" />
     <Compile Include="Watch.fs" />
+    <Compile Include="SchemaCheckSource.fs" />
     <Compile Include="Commands/InfoCommand.fs" />
     <Compile Include="Commands/ListCommand.fs" />
     <Compile Include="Commands/GetCommand.fs" />

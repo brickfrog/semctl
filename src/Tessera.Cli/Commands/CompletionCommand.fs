@@ -128,6 +128,7 @@ let private optionOverride (command: string) (option: string) : Value option =
     | _, "--ci" -> Some(Choice [ "github"; "azdo"; "none" ])
     | ("validate" | "lint" | "data check"), ("--min-severity" | "--fail-on") -> Some(Choice severities)
     | "bpa", "--fail-on" -> Some(Choice severities)
+    | "schemacheck", "--fail-on" -> Some(Choice severities)
     | "bpa", "--min-severity" -> Some(Choice [ "1"; "2"; "3" ])
     | ("test run" | "test compare"), "--fail-on" -> Some(Choice [ "error"; "warning" ])
     | ("convert" | "init" | "data embed"), "--format" -> Some(Choice outputFormats)
@@ -156,6 +157,8 @@ let private positionalOverride (command: string) : (Value list * Value option) o
     | "deploy" -> Some([ Path; Text; Text ], None)
     // The new object's reference: nothing to offer.
     | "add" -> Some([ Path; Text ], None)
+    // The model, then table names.
+    | "schemacheck" -> Some([ Path ], Some Text)
     | _ -> None
 
 /// What a field's name says about its value.
