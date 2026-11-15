@@ -49,6 +49,7 @@
     <Compile Include="Commands/RefreshCommand.fs" />
     <Compile Include="Commands/TestCommand.fs" />
     <Compile Include="Commands/WatchCommands.fs" />
+    <Compile Include="Commands/SchemaCheckCommand.fs" />
     <Compile Include="Commands/CompletionCommand.fs" />
     <Compile Include="Mcp/JsonRpc.fs" />
     <Compile Include="Mcp/Server.fs" />

@@ -82,6 +82,7 @@ module ExitCode =
         | NoTestSuites _ -> input
         | RoleNotFound _
         | RoleCannotRead _ -> input
+        | InvalidSchemaSource _ -> input
 
 let version () =
     let asm = Assembly.GetExecutingAssembly()

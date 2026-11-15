@@ -18,11 +18,17 @@
     <!-- Live.fs is the only file that uses the client libraries' connection types (AMO Server,
          ADOMD, MSAL). Everything else works through the interfaces in Session.fs. -->
     <Compile Include="Live.fs" />
+    <!-- schemacheck's SQL source: credential resolution (no connections), then the live describer,
+         the only code that uses Microsoft.Data.SqlClient. -->
+    <Compile Include="SchemaCheckSqlCredentials.fs" />
+    <Compile Include="SchemaCheckLiveSql.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- DAX queries. Same version as Microsoft.AnalysisServices (TOM/AMO) in Tessera.Core. -->
     <PackageReference Include="Microsoft.AnalysisServices.AdomdClient" Version="19.118.3" />
+    <!-- MIT. schemacheck's SQL source (SchemaCheckLiveSql.fs). -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.2" />
   </ItemGroup>
 
   <ItemGroup>

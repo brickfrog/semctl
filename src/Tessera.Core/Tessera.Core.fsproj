@@ -89,6 +89,9 @@
     <Compile Include="TestSuite.fs" />
     <Compile Include="TestRun.fs" />
     <Compile Include="SourceLocations.fs" />
+    <Compile Include="SchemaCheck.fs" />
+    <Compile Include="SchemaCheckSources.fs" />
+    <Compile Include="SchemaCheckSql.fs" />
   </ItemGroup>
 
   <ItemGroup>
