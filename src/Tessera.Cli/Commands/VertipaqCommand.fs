@@ -541,8 +541,25 @@ let private export
                         try
                             dictionary.WriteTo(dict, overwrite = true, indented = true)
 
+                            // As SQLBI's obfuscator CLI says: DAX's reserved names (a table called
+                            // Date, say) can't be changed, so they stay readable.
+                            let kept = dictionary.UnobfuscatedValues |> List.ofSeq
+
+                            let warnings =
+                                warnings
+                                @ [
+                                    if not kept.IsEmpty then
+                                        let names = kept |> List.map (fun n -> $"'{n}'") |> String.concat ", "
+                                        $"names that are reserved in DAX are not obfuscated: {names}"
+                                ]
+
                             Ok(
-                                obj [ "path", str written; "obfuscated", bool true; "dictionary", str dict ],
+                                obj [
+                                    "path", str written
+                                    "obfuscated", bool true
+                                    "dictionary", str dict
+                                    "unobfuscated", arr (kept |> List.map str)
+                                ],
                                 warnings
                             )
                         with e ->

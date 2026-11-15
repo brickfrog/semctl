@@ -30,9 +30,9 @@ let private name (n: Dax.Metadata.DaxName) = if isNull n then "" else n.Name
 
 /// Whether DaxModel.json says the statistics were not read from data (DAX Studio's "read
 /// statistics from data" off). Files from before ExtractorProperties existed don't say.
-let private statisticsSkipped (path: string) =
+let private statisticsSkipped (bytes: byte array) =
     try
-        use zip = ZipFile.OpenRead path
+        use zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read)
 
         match zip.GetEntry "DaxModel.json" with
         | null -> false
@@ -100,7 +100,8 @@ let toStats (origin: Origin) (estimated: bool) (riRead: bool) (m: DaxModel) : St
                     let unread = c.ColumnCardinality = 0L && t.RowsCount > 0L
                     // tess writes 0 for what it couldn't estimate: in its own files, a column
                     // without a cardinality has no sizes either.
-                    let size (n: int64) = if unread && estimated then None else Some n
+                    let size (n: int64) =
+                        if unread && estimated then None else Some n
 
                     {
                         Table = name t.TableName
@@ -189,13 +190,22 @@ let read (path: string) : Result<Imported, TessError> =
         Error(PathNotFound full)
     else
         try
-            let content = Dax.Vpax.Tools.VpaxTools.ImportVpax(full, importDatabase = true)
+            // Read with sharing, then parse from memory: Dax.Vpax opens a path exclusively, so two
+            // readers of one file (or a viewer holding it open) would collide.
+            let bytes =
+                use file = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
+                use copy = new MemoryStream()
+                file.CopyTo copy
+                copy.ToArray()
+
+            let content =
+                Dax.Vpax.Tools.VpaxTools.ImportVpax(new MemoryStream(bytes), importDatabase = true)
 
             match content.DaxModel with
             | null -> Error(LoadFailed(full, "not a VertiPaq Analyzer file: it has no DaxModel.json"))
             | m ->
                 let estimated = m.ExtractorLib = estimatedLib
-                let skipped = statisticsSkipped full
+                let skipped = statisticsSkipped bytes
 
                 let stats = toStats (Origin.Vpax full) estimated (not skipped) m
 
