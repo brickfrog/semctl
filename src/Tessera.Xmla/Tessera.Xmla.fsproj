@@ -15,6 +15,7 @@
     <Compile Include="ConnectionString.fs" />
     <Compile Include="TokenCache.fs" />
     <Compile Include="ResultReader.fs" />
+    <Compile Include="VertipaqServer.fs" />
     <!-- Live.fs is the only file that uses the client libraries' connection types (AMO Server,
          ADOMD, MSAL). Everything else works through the interfaces in Session.fs. -->
     <Compile Include="Live.fs" />
