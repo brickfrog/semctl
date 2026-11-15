@@ -153,6 +153,7 @@ let runWithConnector
                 | Some(Format args) -> FormatCommand.run ctx args
                 | Some(Connect args) -> ConnectCommand.run ctx args
                 | Some(Query args) -> QueryCommand.run ctx args
+                | Some(Preview args) -> PreviewCommand.run ctx args
                 | Some(Deploy args) -> DeployCommand.run ctx args
                 | Some(Data args) -> DataCommand.run ctx args
                 | Some(Refresh args) -> RefreshCommand.run ctx args

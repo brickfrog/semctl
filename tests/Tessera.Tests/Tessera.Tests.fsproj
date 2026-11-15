@@ -119,6 +119,7 @@
     <Compile Include="PlainOutputTests.fs" />
     <Compile Include="WatchTests.fs" />
     <Compile Include="CompletionTests.fs" />
+    <Compile Include="PreviewCommandTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
 

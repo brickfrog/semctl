@@ -1919,6 +1919,27 @@ What each needs, for whoever picks it up:
 - **Sessions and profiles:** somewhere to keep an address and auth mode (never a secret) per shell, and a decision
   on where; then `Source.load` reads it when no model is given.
 - **Interactive sign-in:** needs the MSAL broker the single-file builds leave out (see `Tessera.Cli.fsproj`).
+#### `preview`
+
+`tess preview <model> <table>` shows the first rows of a table, like Tabular Editor 3's table preview:
+
+```
+tess preview ./Sales.pbip Customer --data ./fixture                 # offline: the first 10 rows
+tess preview ./Sales.pbip Customer --data ./fixture -n 3 -c Name,Country --csv
+tess preview "xmla:powerbi://api.powerbi.com/v1.0/myorg/Sales;Sales" Customer --json
+```
+
+- Model files need `--data <fixture>`: the local engine evaluates the table (`EVALUATE 'Customer'`) and the first rows
+  in fixture order are shown. Nothing leaves the machine.
+- A server model (`xmla:`, as for [`query`](#query)) runs `EVALUATE TOPN ( N, 'Customer' )`, so the server does
+  only that much work. TOPN without an order "does not guarantee any sort order" (dax.guide), so these are the rows
+  the server returns first.
+- `--rows N` / `-n` (default 10), `--columns a,b` / `-c` (repeatable; in that order; names match ignoring case),
+  `--csv`. `--json` writes `{"command": "preview", "source", "table", "results", "durationMs"}`, with `results` in
+  the shape of [`query`](#query)'s; `truncated` is true when the table has more rows than shown.
+- An unknown table or column is exit 3 with close names, as everywhere. On a server, the table is the server's to
+  find, and its error is exit 5.
+
 ### Fixture data (`data`)
 
 A fixture is a directory of data files, one per table, that the local DAX engine evaluates a model against: no

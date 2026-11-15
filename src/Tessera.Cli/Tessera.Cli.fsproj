@@ -43,6 +43,7 @@
     <Compile Include="Commands/FormatCommand.fs" />
     <Compile Include="Commands/ConnectCommand.fs" />
     <Compile Include="Commands/QueryCommand.fs" />
+    <Compile Include="Commands/PreviewCommand.fs" />
     <Compile Include="Commands/DeployCommand.fs" />
     <Compile Include="Commands/DataCommand.fs" />
     <Compile Include="Commands/RefreshCommand.fs" />
