@@ -15,7 +15,7 @@ open Tessera.Cli.Common
 
 // ---- A model with every kind of source -----------------------------------------------------------
 
-let private navigationM =
+let navigationM =
     "let\n    Source = Sql.Database(#\"Server\", \"Shop\"),\n    dbo_Sales = Source{[Schema=\"dbo\",Item=\"Sales\"]}[Data]\nin\n    dbo_Sales"
 
 let private dataColumn (name: string) (source: string) (t: DataType) =
