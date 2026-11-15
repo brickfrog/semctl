@@ -24,6 +24,7 @@ let private model = {
             "YearMonth", DataType.Int64
             "MonthOfYear", DataType.Int64
             "Weekday", DataType.String
+            "MonthName", DataType.String
         ] [
             for d in days ->
                 [
@@ -32,6 +33,7 @@ let private model = {
                     box (d.Year * 100 + d.Month)
                     box d.Month
                     box (d.DayOfWeek.ToString().Substring(0, 3))
+                    box (d.ToString("MMM", Globalization.CultureInfo.InvariantCulture))
                 ]
         ]
         table "Sales" [ "Date", DataType.DateTime; "Amount", DataType.Int64 ] [ for d in days -> [ box d; box 1 ] ]
@@ -46,6 +48,9 @@ let private setupAt (level: int) =
     let t = new TempDir()
     let db, store = build model
     db.CompatibilityLevel <- level
+    // MonthName sorts by MonthOfYear, as a month name column does.
+    let date = db.Model.Tables.["Date"]
+    date.Columns.["MonthName"].SortByColumn <- date.Columns.["MonthOfYear"]
     let path = t.Combine "model.bim"
     File.WriteAllText(path, JsonSerializer.SerializeDatabase db)
     let dir = t.Combine "data"
@@ -253,6 +258,69 @@ let tests =
                 ]
 
             Expect.equal r.Code ExitCode.ok r.Err
+
+        testCase "a sort-by column goes with its column: it takes its category (SQLBI; TE3 3.25.5)"
+        <| fun () ->
+            let t, path, dir = setup ()
+            use _ = t
+
+            // MonthOfYear is MonthName's sort-by column, so it is in the category already: it can't be
+            // time-related, nor in another category, in this calendar or another.
+            for args in
+                [
+                    [
+                        "--category"
+                        "Month of Year=MonthName"
+                        "--category"
+                        "Date=Date"
+                        "--time-related"
+                        "MonthOfYear"
+                    ]
+                    [ "--category"; "Month of Year=MonthName"; "--category"; "Month=MonthOfYear" ]
+                ] do
+                let r = tess ([ "add"; path; "calendar:Date/C" ] @ args)
+                Expect.equal r.Code ExitCode.input (String.concat " " args + r.Err)
+                Expect.stringContains r.Err "MonthOfYear" ""
+
+            // Naming it in the same category is fine (it is there anyway).
+            let ok =
+                tess [
+                    "add"
+                    path
+                    "calendar:Date/C"
+                    "--category"
+                    "Year=Year"
+                    "--category"
+                    "Month=YearMonth"
+                    "--category"
+                    "Month of Year=MonthName,MonthOfYear"
+                    "--category"
+                    "Date=Date"
+                    "--save"
+                ]
+
+            Expect.equal ok.Code ExitCode.ok ok.Err
+
+            let r =
+                tess [
+                    "add"
+                    path
+                    "calendar:Date/D"
+                    "--category"
+                    "Date=Date"
+                    "--time-related"
+                    "MonthOfYear"
+                ]
+
+            Expect.equal r.Code ExitCode.input r.Err
+
+            // The engine takes the calendar as it was added: 1 to 10 February, as before.
+            let q =
+                "EVALUATE CALCULATETABLE ( ROW ( \"n\", COUNTROWS ( DATESMTD ( C ) ) ), 'Date'[Date] = dt\"2025-02-10\" )"
+
+            let r = tess [ "query"; path; "--data"; dir; q; "--csv" ]
+            Expect.equal r.Code ExitCode.ok r.Err
+            Expect.equal (r.Out.Replace("\r", "")) "[n]\n10\n" ""
 
         testCase "usage: unknown categories (with a hint), no category, calendar options on other kinds"
         <| fun () ->

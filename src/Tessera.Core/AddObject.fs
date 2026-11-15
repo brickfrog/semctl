@@ -1140,6 +1140,22 @@ let private addPartition (db: Database) entries (spec: AddSpec) (table: string) 
     }
 
 /// The categories a table's calendars give its columns, and its time-related columns.
+/// Columns with their sort-by columns: "The columns specified in the sort-by-column property are
+/// automatically considered as associated columns" (SQLBI, "Introducing calendar-based time
+/// intelligence in DAX"), and the local engine reads calendars that way.
+let private withSortBy (columns: Column list) =
+    columns
+    @ (columns
+       |> List.choose (fun c ->
+           if isNull c || isNull c.SortByColumn then
+               None
+           else
+               Some c.SortByColumn))
+    |> List.filter (isNull >> not)
+    |> List.distinctBy (fun c -> c.Name)
+
+/// The categories a table's calendars give its columns (sort-by columns included), and its
+/// time-related columns.
 let private calendarTags (t: Table) =
     let categories =
         Collections.Generic.Dictionary<Column, TimeUnit * string>(HashIdentity.Reference)
@@ -1150,11 +1166,10 @@ let private calendarTags (t: Table) =
         for g in cal.CalendarColumnGroups do
             match g with
             | :? TimeUnitColumnAssociation as a ->
-                for c in Seq.append [ a.PrimaryColumn ] a.AssociatedColumns do
-                    if not (isNull c) then
-                        categories.[c] <- (a.TimeUnit, cal.Name)
+                for c in withSortBy (a.PrimaryColumn :: List.ofSeq a.AssociatedColumns) do
+                    categories.[c] <- (a.TimeUnit, cal.Name)
             | :? TimeRelatedColumnGroup as r ->
-                for c in r.Columns do
+                for c in withSortBy (List.ofSeq r.Columns) do
                     related.[c] <- cal.Name
             | _ -> ()
 
@@ -1228,12 +1243,26 @@ let private addCalendar
 
                     // "Columns must have a consistent category across calendars" (Learn); within one
                     // calendar a column has one category, and a time-related column has none.
-                    let tagged =
+                    // Sort-by columns count as associated columns of their column's category, and as
+                    // time-related with a time-related column.
+                    let given =
                         groups
                         |> List.collect (fun (u, p, assoc) -> (p :: assoc) |> List.map (fun c -> c, u))
 
+                    let tagged =
+                        groups
+                        |> List.collect (fun (u, p, assoc) -> withSortBy (p :: assoc) |> List.map (fun c -> c, u))
+
+                    let sortedBy (c: Column) =
+                        t.Columns
+                        |> Seq.tryFind (fun x -> obj.ReferenceEquals(x.SortByColumn, c))
+                        |> Option.map (fun x -> $" (it is the sort-by column of '{x.Name}')")
+                        |> Option.defaultValue ""
+
+                    let relatedWithSortBy = withSortBy related
+
                     let problem =
-                        tagged
+                        given
                         |> List.groupBy (fun (c, _) -> c.Name)
                         |> List.tryPick (fun (col, uses) ->
                             if uses.Length > 1 then
@@ -1242,28 +1271,39 @@ let private addCalendar
                                 None)
                         |> Option.orElse (
                             tagged
+                            |> List.groupBy (fun (c, _) -> c.Name)
+                            |> List.tryPick (fun (_, uses) ->
+                                match uses |> List.map snd |> List.distinct with
+                                | a :: b :: _ ->
+                                    let c = fst uses.Head
+                                    Some $"the column '{c.Name}' would have two categories, {a} and {b}{sortedBy c}"
+                                | _ -> None)
+                        )
+                        |> Option.orElse (
+                            tagged
                             |> List.tryPick (fun (c, u) ->
                                 match existingCategories.TryGetValue c with
                                 | true, (other, cal) when other <> u ->
                                     Some
-                                        $"the calendar '{cal}' gives the column '{c.Name}' the category {other}; a column has the same category in every calendar"
+                                        $"the calendar '{cal}' gives the column '{c.Name}' the category {other}{sortedBy c}; a column has the same category in every calendar"
                                 | _ ->
                                     match existingRelated.TryGetValue c with
                                     | true, cal ->
                                         Some
-                                            $"the calendar '{cal}' has the column '{c.Name}' as time-related; a column can't also have a category"
+                                            $"the calendar '{cal}' has the column '{c.Name}' as time-related{sortedBy c}; a column can't also have a category"
                                     | _ -> None)
                         )
                         |> Option.orElse (
-                            related
+                            relatedWithSortBy
                             |> List.tryPick (fun c ->
                                 if tagged |> List.exists (fun (x, _) -> obj.ReferenceEquals(x, c)) then
-                                    Some $"the column '{c.Name}' has a category, so it can't also be time-related"
+                                    Some
+                                        $"the column '{c.Name}' has a category{sortedBy c}, so it can't also be time-related"
                                 else
                                     match existingCategories.TryGetValue c with
                                     | true, (u, cal) ->
                                         Some
-                                            $"the calendar '{cal}' gives the column '{c.Name}' the category {u}, so it can't be time-related"
+                                            $"the calendar '{cal}' gives the column '{c.Name}' the category {u}{sortedBy c}, so it can't be time-related"
                                     | _ -> None)
                         )
 

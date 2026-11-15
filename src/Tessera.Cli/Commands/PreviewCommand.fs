@@ -37,7 +37,8 @@ type Args =
                 + "Nothing leaves the machine."
             | Csv -> "write CSV."
 
-/// The query: on a server, TOPN bounds the work ("TOPN does not guarantee any sort order", dax.guide,
+/// The query: on a server, TOPN bounds the work (asked for one row more than shown, so a longer
+/// table is marked truncated) ("TOPN does not guarantee any sort order", dax.guide,
 /// so a server's rows are whichever it returns first). The local engine evaluates the table itself
 /// and its first rows, in fixture order, are kept.
 let query (table: string) (topn: int option) =
@@ -172,7 +173,8 @@ let private remote (ctx: Ctx) (args: ParseResults<Args>) source table rows colum
     match XmlaAddress.parse source with
     | Error e -> Failed e
     | Ok address ->
-        match Remote.query (Source.access ctx) address (query table (Some rows)) (Some rows) with
+        // One row more than shown, to tell whether the table has more.
+        match Remote.query (Source.access ctx) address (query table (Some(rows + 1))) (Some(rows + 1)) with
         | Error e -> Failed e
         | Ok(address, r :: _) -> finish ctx args (XmlaAddress.display address) table rows columns clock.Elapsed r
         | Ok(_, []) -> Failed(QueryFailed "the server returned no result")

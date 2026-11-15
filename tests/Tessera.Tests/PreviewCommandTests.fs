@@ -172,6 +172,23 @@ let serverTests =
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.equal (lines r.Out) [ "Sales[Note]"; "-----------"; "a"; "b" ] r.Out
             let _, dax, limit = server.Queries |> List.exactlyOne
-            Expect.equal dax "EVALUATE TOPN ( 2, 'It''s [odd]' )" "the name is quoted"
-            Expect.equal limit (Some 2) "rows capped on the way back too"
+            Expect.equal dax "EVALUATE TOPN ( 3, 'It''s [odd]' )" "the name is quoted; one row more than shown"
+            Expect.equal limit (Some 3) "rows capped on the way back too"
+            Expect.stringContains r.Err "Showing the first 2 rows" "the table has more"
+
+            let j =
+                tessOn server tokenEnv [ "preview"; $"xmla:{workspace};Sales"; "T"; "-n"; "2"; "--json" ]
+
+            use doc = JsonDocument.Parse j.Out
+            let result = doc.RootElement.GetProperty("results").[0]
+            Expect.equal (result.GetProperty("rows").GetArrayLength()) 2 ""
+            Expect.isTrue (result.GetProperty("truncated").GetBoolean()) "3 rows came back for 2"
+
+            let all =
+                tessOn server tokenEnv [ "preview"; $"xmla:{workspace};Sales"; "T"; "-n"; "3"; "--json" ]
+
+            use doc = JsonDocument.Parse all.Out
+            let result = doc.RootElement.GetProperty("results").[0]
+            Expect.equal (result.GetProperty("rows").GetArrayLength()) 3 ""
+            Expect.isFalse (result.GetProperty("truncated").GetBoolean()) "3 rows for 4 asked: that's all of them"
     ]

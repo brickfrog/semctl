@@ -840,7 +840,10 @@ Learn's: `Year`, `Quarter`, `QuarterOfYear`, `Month`, `MonthOfYear`, `MonthOfQua
 hyphens don't matter: `"Month of Year"`). TOM's semester units are refused: no page describes them. `add` refuses
 what the engine would: a category given twice, a column in two categories, a column whose category differs from
 the one another calendar of the table gives it ("Columns must have a consistent category across calendars"), and a
-column that is both in a category and time-related, in this calendar or another. A calendar is named like a table:
+column that is both in a category and time-related, in this calendar or another. A column's sort-by column counts
+as an associated column of the column's category ("The columns specified in the sort-by-column property are
+automatically considered as associated columns", SQLBI; Tabular Editor 3's calendar editor does the same), or as
+time-related with it, so it can't go anywhere else. A calendar is named like a table:
 no table or other calendar may have its name. A calendar without a `Date` category is added with a warning, as the
 local engine refuses time intelligence over one. Calendars on calculation groups are refused.
 
@@ -1958,8 +1961,8 @@ tess preview "xmla:powerbi://api.powerbi.com/v1.0/myorg/Sales;Sales" Customer --
 - Model files need `--data <fixture>`: the local engine evaluates the table (`EVALUATE 'Customer'`) and the first rows
   in fixture order are shown. Nothing leaves the machine.
 - A server model (`xmla:`, as for [`query`](#query)) runs `EVALUATE TOPN ( N, 'Customer' )`, so the server does
-  only that much work. TOPN without an order "does not guarantee any sort order" (dax.guide), so these are the rows
-  the server returns first.
+  only that much work (it asks for N + 1 rows, to know whether there are more). TOPN without an order "does not
+  guarantee any sort order" (dax.guide), so these are the rows the server returns first.
 - `--rows N` / `-n` (default 10), `--columns a,b` / `-c` (repeatable; in that order; names match ignoring case),
   `--csv`. `--json` writes `{"command": "preview", "source", "table", "results", "durationMs"}`, with `results` in
   the shape of [`query`](#query)'s; `truncated` is true when the table has more rows than shown.
