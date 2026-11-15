@@ -55,7 +55,7 @@ let catalogJson (descriptors: SetProperty.Descriptor list) =
             // "value" is null for a property with no value: null is the value there, so it stays.
             objWithNulls [
                 "property", str d.Path
-                "type", str (SetProperty.PropertyType.token d.Type)
+                "type", str (PropertyCatalog.PropertyType.token d.Type)
                 "writable", bool d.Writable
                 "value", valueJson d.Value
                 if not d.Allowed.IsEmpty then
@@ -98,7 +98,7 @@ let catalogText (out: TextWriter) (all: bool) (descriptors: SetProperty.Descript
         for d in descriptors ->
             [
                 d.Path
-                SetProperty.PropertyType.token d.Type
+                PropertyCatalog.PropertyType.token d.Type
                 if all then
                     (if d.Writable then "writable" else "read-only")
                 valueText d.Value

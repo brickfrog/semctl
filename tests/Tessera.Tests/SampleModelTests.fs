@@ -28,6 +28,11 @@ let tests =
             testCase "not configured"
             <| fun () -> skiptest "TESSERA_SAMPLE_MODEL is not set"
         | Some path ->
+            testCase "every object's property catalog agrees with its type's table"
+            <| fun () ->
+                let _, db = loadPath path |> ok
+                Expect.isEmpty (SetTests.catalogDisagreements db) ""
+
             testCase "loads, lists, and round-trips through .bim and TMDL"
             <| fun () ->
                 use t = new TempDir()

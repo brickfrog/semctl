@@ -16,36 +16,7 @@ open System.Globalization
 open System.Reflection
 open Microsoft.AnalysisServices.Tabular
 open Tessera.Inventory
-
-[<RequireQualifiedAccess>]
-type PropertyType =
-    | String
-    /// A string holding code: DAX, M or a query.
-    | Expression
-    | Bool
-    /// Int32 or Int64.
-    | Int
-    /// A floating-point number.
-    | Number
-    /// One of `Allowed`, as TOM's JSON writes it.
-    | Enum
-    /// Another object in the model, of kind `RefersTo`.
-    | Reference
-    /// A sub-object (`kpi`, `formatStringDefinition`, ...): its own properties are listed under it.
-    /// It can only be set to null, which removes it.
-    | Object
-
-module PropertyType =
-    let token =
-        function
-        | PropertyType.String -> "string"
-        | PropertyType.Expression -> "expression"
-        | PropertyType.Bool -> "bool"
-        | PropertyType.Int -> "int"
-        | PropertyType.Number -> "number"
-        | PropertyType.Enum -> "enum"
-        | PropertyType.Reference -> "reference"
-        | PropertyType.Object -> "object"
+open Tessera.PropertyCatalog
 
 /// A property's current value.
 [<RequireQualifiedAccess>]
@@ -120,235 +91,6 @@ module Assignment =
         Value = Value.Null
     }
 
-// ---------------------------------------------------------------------------------------------
-// Reflection
-
-/// Properties that are TOM plumbing, engine state or timestamps, never part of a model's definition.
-let private internalNames =
-    set [
-        "ObjectType"
-        "Parent"
-        "Model"
-        "Database"
-        "Server"
-        "IsRemoved"
-        "HasLocalChanges"
-        "IsEmpty"
-        "State"
-        "ErrorMessage"
-        "ModifiedTime"
-        "StructureModifiedTime"
-        "RefreshedTime"
-        // Partition: shown under `source` as `source.type`.
-        "SourceType"
-        // Engine-built structures.
-        "AttributeHierarchy"
-        "StringIndex"
-        "FullTextIndex"
-    ]
-
-/// Secrets: TOM's JSON masks them, so a change can't be shown or diffed.
-let private secretNames = set [ "Password" ]
-
-/// Values TOM's JSON partly masks (a connection string's password): shown as `get -p` shows them.
-let private maskedNames = set [ "ConnectionString" ]
-
-/// Sub-objects `set` won't create or remove: a partition always has a source, and a calculation group
-/// makes its table a calculation-group table.
-let private structural = set [ "Source"; "CalculationGroup" ]
-
-/// TOM's JSON property name: lower-case first letter, except where TOM spells it differently.
-let private jsonName (name: string) =
-    match name with
-    | "IsAvailableInMDX" -> "isAvailableInMdx"
-    | "KPI" -> "kpi"
-    | _ -> string (Char.ToLowerInvariant name.[0]) + name.Substring 1
-
-/// Enum member names are written the same way (`int64`, `powerBI_V3`).
-let private enumJsonName (name: string) =
-    string (Char.ToLowerInvariant name.[0]) + name.Substring 1
-
-/// Addressable kinds a reference property can point at, by TOM type.
-let private referenceKinds = [
-    typeof<Column>, ObjectKind.Column
-    typeof<Measure>, ObjectKind.Measure
-    typeof<Table>, ObjectKind.Table
-    typeof<Hierarchy>, ObjectKind.Hierarchy
-    typeof<Level>, ObjectKind.Level
-    typeof<Partition>, ObjectKind.Partition
-    typeof<DataSource>, ObjectKind.DataSource
-    typeof<NamedExpression>, ObjectKind.Expression
-    typeof<Function>, ObjectKind.Function
-    typeof<Relationship>, ObjectKind.Relationship
-    typeof<ModelRole>, ObjectKind.Role
-    typeof<Perspective>, ObjectKind.Perspective
-    typeof<Culture>, ObjectKind.Culture
-    typeof<Calendar>, ObjectKind.Calendar
-    typeof<CalculationItem>, ObjectKind.CalculationItem
-]
-
-/// Named objects TOM references that tess can't address.
-let private unaddressable = [ typeof<QueryGroup>, "query groups" ]
-
-type private Compat =
-    | Supported
-    | Hidden
-    | Needs of string
-
-/// TOM's (internal) CompatibilityRequirement attribute, read by name: the level a property or enum
-/// member needs in each compatibility mode.
-let private compatibility (level: int) (mode: Microsoft.AnalysisServices.CompatibilityMode) (m: MemberInfo) =
-    let attr =
-        m.GetCustomAttributes(true)
-        |> Array.tryFind (fun a -> a.GetType().Name = "CompatibilityRequirementAttribute")
-
-    match attr with
-    | None -> Supported
-    | Some a ->
-        let field =
-            match mode with
-            | Microsoft.AnalysisServices.CompatibilityMode.PowerBI -> "Pbi"
-            | Microsoft.AnalysisServices.CompatibilityMode.Excel -> "Excel"
-            | _ -> "Box"
-
-        let modeName =
-            match mode with
-            | Microsoft.AnalysisServices.CompatibilityMode.PowerBI -> "Power BI"
-            | Microsoft.AnalysisServices.CompatibilityMode.Excel -> "Excel"
-            | _ -> "Analysis Services"
-
-        match a.GetType().GetProperty(field) with
-        | null -> Supported
-        | p ->
-            match p.GetValue a with
-            | :? string as required ->
-                match Int32.TryParse(required, NumberStyles.None, CultureInfo.InvariantCulture) with
-                | true, n when n <= level -> Supported
-                | true, n -> Needs $"needs compatibility level {n} (the model is at {level})"
-                | _ when required = "Unsupported" -> Needs $"not supported in {modeName} models"
-                | _ -> Hidden // Internal, Preview
-            | _ -> Supported
-
-let private hiddenMember (m: MemberInfo) =
-    m.IsDefined(typeof<ObsoleteAttribute>, true)
-    || (match m.GetCustomAttribute<EditorBrowsableAttribute>(true) with
-        | null -> false
-        | a -> a.State = EditorBrowsableState.Never)
-
-type private Named =
-    | Annotations
-    | ExtendedProperties
-
-type private Kind =
-    | Scalar of PropertyType
-    | Ref of ObjectKind
-    | Unaddressable of string
-    /// A Power Query property bag (a structured data source's credential, connection details, ...):
-    /// its JSON keys are whatever M put there, not the TOM properties.
-    | PropertyBag
-    | NamedItems of Named
-    | Children
-    | Sub
-    | Skip
-
-let private isSettable (p: PropertyInfo) = not (isNull (p.GetSetMethod()))
-
-/// Property bags whose typed properties are exactly their JSON (checked by the tests).
-let private typedBags = [ typeof<DataAccessOptions>; typeof<AutomaticAggregationOptions> ]
-
-let private isPropertyBag (t: Type) =
-    not (List.contains t typedBags)
-    && t.GetProperties() |> Array.exists (fun p -> p.GetIndexParameters().Length > 0)
-
-let private classify (p: PropertyInfo) =
-    let t = p.PropertyType
-
-    if
-        p.GetIndexParameters().Length > 0
-        || internalNames.Contains p.Name
-        || hiddenMember p
-    then
-        Skip
-    elif t = typeof<DateTime> then
-        Skip
-    elif p.Name = "Annotations" && typeof<IEnumerable>.IsAssignableFrom t then
-        NamedItems Annotations
-    elif p.Name = "ExtendedProperties" && typeof<IEnumerable>.IsAssignableFrom t then
-        NamedItems ExtendedProperties
-    elif t = typeof<string> then
-        if p.Name.EndsWith("Expression", StringComparison.Ordinal) || p.Name = "Query" then
-            Scalar PropertyType.Expression
-        else
-            Scalar PropertyType.String
-    elif t = typeof<bool> then
-        Scalar PropertyType.Bool
-    elif t = typeof<int> || t = typeof<int64> then
-        Scalar PropertyType.Int
-    elif t = typeof<float> then
-        Scalar PropertyType.Number
-    elif t.IsEnum then
-        Scalar PropertyType.Enum
-    elif typeof<IEnumerable>.IsAssignableFrom t then
-        Children
-    else
-        match referenceKinds |> List.tryFind (fun (rt, _) -> rt = t) with
-        | Some(_, kind) -> if isSettable p then Ref kind else Skip
-        | None ->
-            match unaddressable |> List.tryFind (fun (ut, _) -> ut = t) with
-            | Some(_, what) -> if isSettable p then Unaddressable what else Skip
-            | None when t.IsClass ->
-                // A read-only TOM object property is a back-pointer (or engine state), not a sub-object.
-                if typeof<MetadataObject>.IsAssignableFrom t && not (isSettable p) then
-                    Skip
-                elif isPropertyBag t then
-                    PropertyBag
-                else
-                    Sub
-            | None -> Skip
-
-/// Public properties in a stable order: the type's own first, then its bases'.
-let private propertiesOf (t: Type) =
-    t.GetProperties(BindingFlags.Instance ||| BindingFlags.Public)
-    |> Array.sortBy (fun p -> p.MetadataToken)
-    |> Array.distinctBy (fun p -> p.Name)
-
-let private freshInstances = Dictionary<Type, obj option>()
-
-/// A new instance of `t`, to read TOM's default values from.
-let private fresh (t: Type) =
-    lock freshInstances (fun () ->
-        match freshInstances.TryGetValue t with
-        | true, v -> v
-        | _ ->
-            let v =
-                if not t.IsAbstract && not (isNull (t.GetConstructor Type.EmptyTypes)) then
-                    try
-                        Some(Activator.CreateInstance t)
-                    with _ ->
-                        None
-                else
-                    None
-
-            freshInstances.[t] <- v
-            v)
-
-/// TOM's default for a property: what a new object of that type has.
-let private defaultOf (owner: Type) (p: PropertyInfo) =
-    match fresh owner with
-    | Some o -> p.GetValue o
-    | None ->
-        if p.PropertyType.IsValueType then
-            Activator.CreateInstance p.PropertyType
-        else
-            null
-
-let private creatable (p: PropertyInfo) =
-    let t = p.PropertyType
-
-    isSettable p
-    && not (structural.Contains p.Name)
-    && not t.IsAbstract
-    && not (isNull (t.GetConstructor Type.EmptyTypes))
 
 /// A sub-object that isn't there, or (for property bags TOM always returns) is empty: either way,
 /// TOM's JSON leaves it out.
@@ -429,15 +171,7 @@ let private guarded (ctx: Ctx) (path: string) (value: Value) (write: unit -> uni
         with e ->
             Error(InvalidPropertyValue(ctx.Ref, path, valueText value, (unwrap e).Message))
 
-/// Enum members TOM accepts but stores as something else (an Automatic data type reads back as Unknown).
-let private unsettableMembers = set [ typeof<DataType>.FullName, "Automatic" ]
-
-let private enumMembers (ctx: Ctx) (t: Type) =
-    t.GetFields(BindingFlags.Public ||| BindingFlags.Static)
-    |> Array.filter (fun f -> not (hiddenMember f) && not (unsettableMembers.Contains(t.FullName, f.Name)))
-    |> Array.map (fun f -> f, compatibility ctx.Level ctx.Mode f)
-    |> Array.filter (fun (_, c) -> c <> Hidden)
-    |> List.ofArray
+let private enumMembers (ctx: Ctx) (t: Type) = enumMembers ctx.Level ctx.Mode t
 
 let private parseScalar (ctx: Ctx) (path: string) (t: Type) (pt: PropertyType) (text: string) =
     let fail reason =
@@ -480,7 +214,13 @@ let private parseScalar (ctx: Ctx) (path: string) (t: Type) (pt: PropertyType) (
         with
         | Some(f, Supported) -> Ok(f.GetValue null)
         | Some(f, Needs why) -> fail $"{enumJsonName f.Name} {why}"
-        | _ -> fail $"expected one of: {allowed}"
+        | _ ->
+            let names =
+                members
+                |> List.filter (fun (_, c) -> c = Supported)
+                |> List.map (fun (f, _) -> enumJsonName f.Name)
+
+            fail $"expected one of: {allowed}{Suggest.hint (Suggest.closest names s)}"
     | PropertyType.Reference
     | PropertyType.Object -> fail "not a scalar"
 
@@ -554,9 +294,11 @@ let private resolveReference (ctx: Ctx) (path: string) (kind: ObjectKind) (local
 let rec private isEmpty (o: obj) =
     let t = o.GetType()
 
-    propertiesOf t
-    |> Array.forall (fun p ->
-        match classify p with
+    members t
+    |> Array.forall (fun m ->
+        let p = m.Info
+
+        match m.Kind with
         | Scalar _ when isSettable p -> obj.Equals(p.GetValue o, defaultOf t p)
         | Ref _ -> isNull (p.GetValue o)
         | NamedItems _ ->
@@ -695,9 +437,10 @@ let rec private describe (ctx: Ctx) (depth: int) (node: Node) : Catalog =
     let current = node.Current()
 
     let parts =
-        propertiesOf node.Type
-        |> Array.map (fun p ->
-            let path = join node.Path (jsonName p.Name)
+        members node.Type
+        |> Array.map (fun m ->
+            let p = m.Info
+            let path = join node.Path m.Segment
             let compat = compatibility ctx.Level ctx.Mode p
 
             let info pt value = {
@@ -726,7 +469,7 @@ let rec private describe (ctx: Ctx) (depth: int) (node: Node) : Catalog =
                 Templates = []
             }
 
-            match compat, classify p with
+            match compat, m.Kind with
             | Hidden, _
             | _, Skip -> {
                 Entries = []

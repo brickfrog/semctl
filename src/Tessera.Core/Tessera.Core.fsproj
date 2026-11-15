@@ -32,6 +32,7 @@
     <Compile Include="Bpa.fs" />
     <Compile Include="ChangeSet.fs" />
     <Compile Include="Mutation.fs" />
+    <Compile Include="PropertyCatalog.fs" />
     <Compile Include="SetProperty.fs" />
     <Compile Include="AddObject.fs" />
     <Compile Include="RemoveObject.fs" />

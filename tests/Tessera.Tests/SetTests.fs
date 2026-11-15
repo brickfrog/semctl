@@ -4,6 +4,7 @@ open Expecto
 open Microsoft.AnalysisServices.Tabular
 open Tessera
 open Tessera.SetProperty
+open Tessera.PropertyCatalog
 open Tessera.Tests.Fixtures
 
 let private ok =
@@ -76,6 +77,39 @@ let private richDatabase () =
     pq.Credential <- new Credential(AuthenticationKind = "UsernamePassword", Username = "u")
     db.Model.DataSources.Add pq
     db
+
+/// Where an object's catalog (SetProperty.catalog) and its type's table (PropertyCatalog.forObject)
+/// disagree: a path of the object's that the type's table lacks, or lists with another type, allowed
+/// values or writability. Existing named items (annotations.X) stand for `annotations.<name>`.
+let catalogDisagreements (db: Database) = [
+    for e in Inventory.objects db do
+        let rows = PropertyCatalog.forObject db e.Object
+
+        for d in catalog db e do
+            let segments = d.Path.Split '.'
+
+            let named =
+                segments.Length > 1
+                && (let parent = segments.[segments.Length - 2]
+                    parent = "annotations" || parent = "extendedProperties")
+
+            let path =
+                if named then
+                    String.concat "." segments.[.. segments.Length - 2] + ".<name>"
+                else
+                    d.Path
+
+            let candidates = rows |> List.filter (fun r -> r.Path = path)
+
+            let agrees (r: Row) =
+                r.Type = d.Type && r.Allowed = d.Allowed && r.Writable = d.Writable
+
+            match candidates with
+            | [] -> yield $"{ObjectRef.format e.Ref} {d.Path}: not in the table of {e.Object.GetType().Name}"
+            | cs when not (List.exists agrees cs) ->
+                yield $"{ObjectRef.format e.Ref} {d.Path}: {d.Type} {d.Writable} {d.Allowed} vs {cs}"
+            | _ -> ()
+]
 
 [<Tests>]
 let tests =
@@ -613,6 +647,52 @@ let tests =
         ]
 
         testList "catalog" [
+            testCase "an object's catalog agrees with its type's table (PropertyCatalog)"
+            <| fun () ->
+                let db = richDatabase ()
+                Expect.isEmpty (catalogDisagreements db) ""
+                // The table is built once per type, level and mode.
+                let measure = (total db) :> MetadataObject
+                Expect.isTrue (obj.ReferenceEquals(forObject db measure, forObject db measure)) "cached"
+
+            testCase "the type table: paths of every concrete sub-object type, enum members by level"
+            <| fun () ->
+                let mode = Microsoft.AnalysisServices.CompatibilityMode.PowerBI
+                let rows = forType 1702 mode typeof<Partition>
+
+                let at path =
+                    rows |> List.filter (fun r -> r.Path = path)
+                // A partition's source varies: each concrete type's paths, marked with Only.
+                Expect.exists (at "source.expression") (fun r -> r.Only = [ "MPartitionSource" ]) "M"
+                Expect.exists (at "source.expression") (fun r -> r.Only = [ "CalculatedPartitionSource" ]) "DAX"
+                Expect.isFalse (at "source" |> List.exactlyOne).Writable "structural"
+                Expect.isFalse (at "name" |> List.exactlyOne).Writable "rename"
+                let measureRows = forType 1702 mode typeof<Measure>
+                let fs = measureRows |> List.find (fun r -> r.Path = "formatString")
+                Expect.equal fs.Type PropertyType.String ""
+                Expect.isTrue fs.Writable ""
+                Expect.exists measureRows (fun r -> r.Path = "annotations.<name>") "named items"
+
+                Expect.exists
+                    measureRows
+                    (fun r -> r.Path = "kpi.targetExpression" && r.Type = PropertyType.Expression)
+                    ""
+
+                let columnRows = forType 1200 mode typeof<DataColumn>
+                let summarizeBy = columnRows |> List.find (fun r -> r.Path = "summarizeBy")
+                Expect.contains summarizeBy.Allowed "none" ""
+                Expect.isFalse (summarizeBy.Allowed |> List.contains "Automatic") "JSON names"
+
+            testCase "a bad enum value lists the members and suggests the closest"
+            <| fun () ->
+                let db = richDatabase ()
+
+                match fails db "Sales[Amount]" [ p "summarizeBy" "summ" ] with
+                | InvalidPropertyValue(_, "summarizeBy", "summ", reason) ->
+                    Expect.stringContains reason "expected one of: default, none, sum" ""
+                    Expect.stringContains reason "did you mean 'sum'" ""
+                | e -> failtestf "%A" e
+
             testCase "every object has one; sorted by path; read-only entries say why"
             <| fun () ->
                 let db = richDatabase ()

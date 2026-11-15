@@ -334,6 +334,12 @@ Each entry has:
 `annotations.<name>` and `extendedProperties.<name>` stand for new items of any name. Existing ones are listed
 by name. Text output shows the first line of long values; `--json` has them in full.
 
+Both `get --properties` and `set` read one property catalog (`Tessera.PropertyCatalog`), built once per TOM type
+by reflection and cached: each path's type, whether `set` writes it at the model's compatibility level and mode,
+and the enum members that level allows. An object's list is that table plus its current values (and the
+annotations it has). A value outside an enum's members is refused with the members and the closest one:
+`expected one of: default, none, sum, ... (did you mean 'sum'?)`.
+
 `find --in` takes path wildcards. A wildcard matches if it matches the whole path or just the last segment, so
 `--in expression` covers both `expression` and `source.expression`. `find` searches every property except
 lineage tags, and prints `ref  property[:line]  text`, one hit per matching line.
