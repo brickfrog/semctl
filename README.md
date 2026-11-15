@@ -478,6 +478,20 @@ summary line such as `2 errors, 1 warning`.
 | `relationship-self-join` | error | a relationship from a table to itself |
 | `invalid-sort-by` | warning | a column sorted by itself, or by a column that has its own sort-by column |
 | `tom-validation` | error | TOM's own validation, e.g. a sort-by column, level or relationship that names a column that doesn't exist |
+| `invalid-culture` | error | a model culture or translation language that isn't a culture name at all (`en US`) |
+| | warning | a well-formed name this system's culture data doesn't list (`English`, `xx-YY`): a server may still know it, as the lists differ by OS |
+| `calculate-variable` | warning | a variable as the first argument of `CALCULATE` or `CALCULATETABLE` (parentheses around it don't matter): it was evaluated where it was defined, so the filters don't change it. Variables as filter arguments are fine, and a function's parameters aren't variables |
+| `ignore-outside-summarizecolumns` | error | `IGNORE` anywhere but directly as an expression argument of `SUMMARIZECOLUMNS` (the argument after a name) |
+| `week-without-weekly-calendar` | warning | a week-based time intelligence function (`DATESWTD`, `TOTALWTD`, `STARTOFWEEK`, `ENDOFWEEK`, `PREVIOUSWEEK`, `NEXTWEEK`, `OPENINGBALANCEWEEK`, `CLOSINGBALANCEWEEK`) in a model that has calendars but none that can tell weeks apart, or over a named calendar that can't. A calendar can when it tags Week, or Week of Year and Year, or another of Learn's "Period Uniqueness" sets, as the [local engine](#calendar-based-time-intelligence) reads them. Models without calendars aren't checked |
+
+The last four follow Tabular Editor 3's semantic analyzer (release notes 3.27.1, 3.18.0, 3.26.2 and 3.24.0).
+They read DAX as a syntax tree, so they skip DAX that doesn't parse. They run in `validate` only: the save gate
+of the editing commands and `deploy` don't use them.
+
+TE3 also checks the compatibility level against the features a model uses. tess doesn't need to: TOM itself
+refuses to load a `.bim` file or TMDL folder that uses an object, property or value its compatibility level
+doesn't have (a function below 1702, a calendar below 1701, a Direct Lake partition below 1604), so such a model
+never gets as far as `validate`.
 
 Options:
 - `--rule` picks rules (repeatable or comma-separated).
@@ -1433,8 +1447,8 @@ What each rule reports, and when it doesn't fix:
   zero or blank, where `a / b` gives infinity (or NaN for 0/0) and IFERROR passes that through. DIVIDE also
   doesn't catch errors raised inside `a` or `b`. Usually that is what the IFERROR was meant to do. Use
   `--rule` to leave `DI014` out if not.
-- **`DR014`:** two or more `=` comparisons of the same column, measure or variable, joined by `||`, as a whole
-  expression or argument. The values must be non-zero numbers or non-empty strings, all of one kind. `=`
+- **`DR014`:** two or more `=` comparisons of the same column, measure or variable, joined by `||` or by
+  `OR(...)` (nested `OR`s count, and are rewritten whole), as a whole expression or argument. The values must be non-zero numbers or non-empty strings, all of one kind. `=`
   treats BLANK as equal to `0`, `""` and `FALSE`, but `IN` doesn't, so for these values the two agree.
   Chains containing comments are reported but not fixed.
 
