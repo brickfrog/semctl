@@ -488,10 +488,10 @@ The last four follow Tabular Editor 3's semantic analyzer (release notes 3.27.1,
 They read DAX as a syntax tree, so they skip DAX that doesn't parse. They run in `validate` only: the save gate
 of the editing commands and `deploy` don't use them.
 
-TE3 also checks the compatibility level against the features a model uses. tess doesn't need to: TOM itself
-refuses to load a `.bim` file or TMDL folder that uses an object, property or value its compatibility level
-doesn't have (a function below 1702, a calendar below 1701, a Direct Lake partition below 1604), so such a model
-never gets as far as `validate`.
+There is no rule for a compatibility level too low for the features a model uses, because TOM already refuses
+to load a `.bim` file or TMDL folder that uses an object, property or value its compatibility level doesn't have
+(a function below 1702, a calendar below 1701, a Direct Lake partition below 1604): such a model never gets as far
+as `validate`. (TE3 3.25.1's check is a different one: a compatibility level the connected server doesn't support.)
 
 Options:
 - `--rule` picks rules (repeatable or comma-separated).

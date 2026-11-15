@@ -452,44 +452,46 @@ let apply (db: Database) (findings: Bpa.Finding list) : Result<FixResult, TessEr
         // Same object, path and value from several rules: one write, every finding fixed.
         let written = HashSet<ObjectRef * string>()
 
-        let rec assign =
-            function
-            | [] -> Ok()
-            | (f: Bpa.Finding, e: ObjectEntry, property: string, path: string, value) :: rest when
-                not (outcomes.ContainsKey f)
-                ->
-                if written.Add((e.Ref, path.ToUpperInvariant())) then
-                    let current () =
-                        SetProperty.catalog db e
-                        |> List.tryFind (fun d -> d.Path = path)
-                        |> Option.map (fun d -> d.Value)
+        // A loop, not recursion: a model can have thousands of findings.
+        let assign (steps: (Bpa.Finding * ObjectEntry * string * string * SetProperty.Value) list) =
+            let mutable failure = None
 
-                    let before = current ()
+            for f, e, property, path, value in steps do
+                if failure.IsNone && not (outcomes.ContainsKey f) then
+                    if written.Add((e.Ref, path.ToUpperInvariant())) then
+                        let current () =
+                            SetProperty.catalog db e
+                            |> List.tryFind (fun d -> d.Path = path)
+                            |> Option.map (fun d -> d.Value)
 
-                    SetProperty.set db e [ { Path = path; Value = value } ]
-                    |> Result.map (fun _ ->
-                        let after = current ()
+                        let before = current ()
 
-                        // TE's wrapper: a changed format string drops Power BI's format hint, and a
-                        // column that becomes the key stops the table's other columns being keys.
-                        if before <> after then
-                            match property, e.Object with
-                            | "FormatString", (:? Column as c) when c.Annotations.Contains formatAnnotation ->
-                                c.Annotations.Remove formatAnnotation |> ignore
-                            | "FormatString", (:? Measure as m) when m.Annotations.Contains formatAnnotation ->
-                                m.Annotations.Remove formatAnnotation |> ignore
-                            | "IsKey", (:? Column as c) when c.IsKey ->
-                                for other in c.Table.Columns do
-                                    if not (obj.ReferenceEquals(other, c)) && other.Type <> ColumnType.RowNumber then
-                                        other.IsKey <- false
-                            | _ -> ()
+                        match SetProperty.set db e [ { Path = path; Value = value } ] with
+                        | Error err -> failure <- Some err
+                        | Ok _ ->
+                            // TE's wrapper: a changed format string drops Power BI's format hint, and a
+                            // column that becomes the key stops the table's other columns being keys.
+                            if before <> current () then
+                                match property, e.Object with
+                                | "FormatString", (:? Column as c) when c.Annotations.Contains formatAnnotation ->
+                                    c.Annotations.Remove formatAnnotation |> ignore
+                                | "FormatString", (:? Measure as m) when m.Annotations.Contains formatAnnotation ->
+                                    m.Annotations.Remove formatAnnotation |> ignore
+                                | "IsKey", (:? Column as c) when c.IsKey ->
+                                    for other in c.Table.Columns do
+                                        if
+                                            not (obj.ReferenceEquals(other, c)) && other.Type <> ColumnType.RowNumber
+                                        then
+                                            other.IsKey <- false
+                                | _ -> ()
 
-                        outcomes.[f] <- None)
-                    |> Result.bind (fun () -> assign rest)
-                else
-                    outcomes.[f] <- None
-                    assign rest
-            | _ :: rest -> assign rest
+                            outcomes.[f] <- None
+                    else
+                        outcomes.[f] <- None
+
+            match failure with
+            | Some err -> Error err
+            | None -> Ok()
 
         let resets () =
             for f, e, action in withFix do

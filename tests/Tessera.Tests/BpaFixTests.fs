@@ -144,6 +144,51 @@ let applyTests =
             Expect.isFalse amount.IsAvailableInMDX ""
         }
 
+        // META_AVOID_FLOAT's scope includes calculated and calculated table columns. TE's wrapper sets
+        // DataType on any column (no IsEditable override in TOMWrapper/Column.cs), and so does tess.
+        test "DataType on calculated and calculated table columns, as TE sets it" {
+            let db = sampleDatabase ()
+            let sales = db.Model.Tables.["Sales"]
+
+            sales.Columns.Add(
+                new CalculatedColumn(Name = "Twice", DataType = DataType.Double, Expression = "Sales[Amount] * 2")
+            )
+
+            let ct = new Table(Name = "Copy")
+
+            ct.Columns.Add(
+                new CalculatedTableColumn(
+                    Name = "X",
+                    DataType = DataType.Double,
+                    SourceColumn = "[X]",
+                    IsNameInferred = true
+                )
+            )
+
+            ct.Partitions.Add(
+                new Partition(
+                    Name = "Copy",
+                    Source = new CalculatedPartitionSource(Expression = "SELECTCOLUMNS(Sales, \"X\", Sales[Amount])")
+                )
+            )
+
+            db.Model.Tables.Add ct
+
+            let r =
+                fixWith db [
+                    rule
+                        "FLOAT"
+                        "CalculatedColumn, CalculatedTableColumn"
+                        "DataType = \"Double\""
+                        "DataType = DataType.Decimal"
+                ]
+
+            Expect.isEmpty (refusals r) ""
+            Expect.equal (FixResult.fixedFindings r).Length 2 ""
+            Expect.equal (column db "Sales" "Twice").DataType DataType.Decimal ""
+            Expect.equal (column db "Copy" "X").DataType DataType.Decimal ""
+        }
+
         test "IsKey = true clears IsKey on the table's other columns" {
             let db = sampleDatabase ()
             (column db "Date" "Year").IsKey <- true

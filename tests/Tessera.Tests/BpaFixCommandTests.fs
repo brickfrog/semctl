@@ -208,6 +208,15 @@ let tests =
                 let r = tess ([ "bpa"; path; "--rules"; rules ] @ args)
                 Expect.equal r.Code ExitCode.usage (String.concat " " args + ": " + r.Err)
 
+        testCase "rules that can't run are reported on stderr, as without --fix"
+        <| fun () ->
+            use t = new TempDir()
+            let path, rules = setup t [ "BROKEN", "Measure", "Nope", "IsHidden = true" ]
+            let r = tess [ "bpa"; path; "--no-builtin"; "--rules"; rules; "--fix" ]
+            Expect.equal r.Code ExitCode.ok r.Err
+            Expect.stringContains r.Err "tess: bpa: rule BROKEN (Rule BROKEN) not supported" ""
+            Expect.stringContains r.Err "Nothing to fix." ""
+
         testCase "--save-to writes a fixed copy and leaves the model alone"
         <| fun () ->
             use t = new TempDir()

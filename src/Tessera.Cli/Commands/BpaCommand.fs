@@ -587,10 +587,13 @@ let private analyze (ctx: Ctx) (args: ParseResults<Args>) (modelPath: string) =
                     BpaRulesCommand.reportCollected ctx "bpa" collected
                     let rules = collected.Effective |> List.filter selected
 
-                    let findings =
-                        Bpa.analyze db rules
-                        |> List.collect (fun r -> r.Findings)
-                        |> List.filter inPaths
+                    let results = Bpa.analyze db rules
+
+                    for rule, stage, error in problems results do
+                        let what = if stage = "compile" then "not supported" else "failed"
+                        ctx.Err.WriteLine $"tess: bpa: rule {rule.Id} ({rule.Name}) {what}: {error}"
+
+                    let findings = results |> List.collect (fun r -> r.Findings) |> List.filter inPaths
 
                     let fixable, unfixable =
                         findings |> List.partition (fun f -> f.Rule.FixExpression.IsSome)
