@@ -970,7 +970,7 @@ let tools: Tool list = [
             """{"type":"object","properties":{"container":{"type":"string","description":"an object; default the model"},"""
             + """"kinds":{"type":"array","items":{"type":"string","enum":["table","column","measure","hierarchy","level","partition","calcitem","calendar","relationship","role","perspective","culture","expression","function","datasource"]}},"""
             + """"name":{"type":"string","description":"wildcard on the object's name"},"""
-            + """"where":{"type":"array","items":{"type":"string"},"description":"<path>=<pattern> or <path>!=<pattern>; `kind` is the object's kind"}},"additionalProperties":false}"""
+            + """"where":{"type":"array","items":{"type":"string"},"description":"<path>=<pattern> or <path>!=<pattern>; `objectKind` is the object's kind (measure, column, ...)"}},"additionalProperties":false}"""
         ReadOnly = true
         Destructive = false
         Run = listObjects

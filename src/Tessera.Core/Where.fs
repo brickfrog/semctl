@@ -18,7 +18,8 @@ type Op =
     | DoesNotMatch
 
 type Condition = {
-    /// A property path (case-insensitive), or `kind` for the object's kind.
+    /// A property path (case-insensitive), or `objectKind` for the object's kind (`measure`, ...).
+    /// Not `kind`: named expressions have a TOM property of that name.
     Path: string
     Op: Op
     /// A wildcard: `*` any run of characters (line breaks included), `?` one character; the rest is
@@ -115,7 +116,7 @@ let private view (db: Database) (e: ObjectEntry) : View =
         |> List.filter (fun (p, _) -> not (own |> List.exists (fun (q, _) -> eq p q)))
 
     {
-        Values = ("kind", ObjectKind.token e.Ref.Kind) :: own @ flat
+        Values = own @ flat @ [ "objectKind", ObjectKind.token e.Ref.Kind ]
         Prefixes =
             named
             |> List.map (fun d -> d.Path.Substring(0, d.Path.Length - "<name>".Length))

@@ -36,8 +36,8 @@ let tests =
                 let c = cond "isHidden=true"
                 Expect.equal (c.Path, c.Op, c.Pattern) ("isHidden", Where.Op.Matches, "true") ""
 
-                Expect.equal (cond "kind!=measure").Op Where.Op.DoesNotMatch ""
-                Expect.equal (cond "kind!=measure").Path "kind" ""
+                Expect.equal (cond "objectKind!=measure").Op Where.Op.DoesNotMatch ""
+                Expect.equal (cond "objectKind!=measure").Path "objectKind" ""
                 Expect.equal (cond "expression=a=b").Pattern "a=b" ""
                 Expect.equal (cond "description=").Pattern "" "empty pattern"
                 Expect.isError (Where.Condition.parse "isHidden") "no ="
@@ -75,12 +75,12 @@ let tests =
                     ""
 
                 Expect.equal
-                    (found db "Date" [ "kind=level" ] |> ok)
+                    (found db "Date" [ "objectKind=level" ] |> ok)
                     [ "level:Date/Calendar/Year"; "level:Date/Calendar/Month" ]
                     ""
 
                 Expect.equal
-                    (found db "hierarchy:Date/Calendar" [ "kind=*" ] |> ok)
+                    (found db "hierarchy:Date/Calendar" [ "objectKind=*" ] |> ok)
                     [ "level:Date/Calendar/Year"; "level:Date/Calendar/Month" ]
                     ""
 
@@ -89,7 +89,7 @@ let tests =
                 let db = sampleDatabase ()
 
                 Expect.equal
-                    (found db "model" [ "kind=measure"; "expression=*sum(*" ] |> ok)
+                    (found db "model" [ "objectKind=measure"; "expression=*sum(*" ] |> ok)
                     [ "measure:Sales/Total" ]
                     ""
 
@@ -108,19 +108,26 @@ let tests =
                 )
 
                 Expect.equal
-                    (found db "Sales" [ "kind=measure"; "description=" ] |> ok)
+                    (found db "Sales" [ "objectKind=measure"; "description=" ] |> ok)
                     [ "measure:Sales/Total"; "measure:Sales/Total (hidden)" ]
                     ""
 
                 Expect.equal (found db "Sales" [ "annotations.owner=fin*" ] |> ok) [ "measure:Sales/Total" ] ""
                 // A measure without the annotation reads it as "": != picks it.
                 Expect.equal
-                    (found db "Sales" [ "kind=measure"; "annotations.Owner!=finance" ] |> ok)
+                    (found db "Sales" [ "objectKind=measure"; "annotations.Owner!=finance" ] |> ok)
                     [ "measure:Sales/Total (hidden)" ]
                     ""
 
                 Expect.equal (found db "Sales" [ "source.expression=let*" ] |> ok) [ "partition:Sales/Sales" ] ""
                 Expect.equal (found db "model" [ "formatString=#,0" ] |> ok) [ "measure:Sales/Total" ] "a literal #"
+
+            testCase "objectKind is the object's kind; a real `kind` property (named expressions) stays itself"
+            <| fun () ->
+                let db = sampleDatabase ()
+                Expect.equal (found db "model" [ "kind=m" ] |> ok) [ "expression:ServerName" ] "TOM's ExpressionKind"
+                Expect.equal (found db "model" [ "objectKind=expression" ] |> ok) [ "expression:ServerName" ] ""
+                Expect.equal (found db "model" [ "objectKind=function" ] |> ok) [ "function:Double" ] ""
 
             testCase "a path no object inside has is an error with close matches"
             <| fun () ->
@@ -149,7 +156,7 @@ let tests =
                         t.Path
                         "Sales"
                         "--where"
-                        "kind=measure"
+                        "objectKind=measure"
                         "--where"
                         "isHidden=false"
                         "--json"
@@ -166,7 +173,7 @@ let tests =
 
                 Expect.equal (items.Head.GetProperty("kind").GetString()) "measure" ""
 
-                let none = tess [ "get"; t.Path; "model"; "--where"; "kind=nothing" ]
+                let none = tess [ "get"; t.Path; "model"; "--where"; "objectKind=nothing" ]
                 Expect.equal none.Code ExitCode.ok none.Err
                 Expect.equal none.Out "" ""
 
@@ -180,7 +187,7 @@ let tests =
                         t.Path
                         "model"
                         "--where"
-                        "kind=measure"
+                        "objectKind=measure"
                         "-p"
                         "expression"
                         "-p"
@@ -204,7 +211,7 @@ let tests =
                         t.Path
                         "model"
                         "--where"
-                        "kind=measure"
+                        "objectKind=measure"
                         "-p"
                         "expression"
                         "--json"
@@ -238,11 +245,11 @@ let tests =
                 Expect.stringContains bad.Err "<path>=<pattern>" ""
 
                 let combined =
-                    tess [ "get"; t.Path; "model"; "--where"; "kind=measure"; "--properties" ]
+                    tess [ "get"; t.Path; "model"; "--where"; "objectKind=measure"; "--properties" ]
 
                 Expect.equal combined.Code ExitCode.usage combined.Err
 
-                let missing = tess [ "get"; t.Path; "Nope"; "--where"; "kind=measure" ]
+                let missing = tess [ "get"; t.Path; "Nope"; "--where"; "objectKind=measure" ]
                 Expect.equal missing.Code ExitCode.input missing.Err
         ]
     ]

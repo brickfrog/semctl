@@ -348,16 +348,16 @@ literal. Matching is case-insensitive and covers the whole value. `<path>!=<patt
 don't match. `--where` is repeatable, and every condition must hold.
 
 ```sh
-tess get ./Sales.pbip model --where kind=measure --where 'expression=*CALCULATE*'
+tess get ./Sales.pbip model --where objectKind=measure --where 'expression=*CALCULATE*'
 tess get ./Sales.pbip Sales --where isHidden=true
-tess get ./Sales.pbip model --where kind=measure --where description= -p expression   # undocumented measures
-tess get ./Sales.pbip model --where annotations.Owner!=finance --where kind=table
+tess get ./Sales.pbip model --where objectKind=measure --where description= -p expression   # undocumented measures
+tess get ./Sales.pbip model --where annotations.Owner!=finance --where objectKind=table
 ```
 
 - **Container:** the objects whose TOM parent chain reaches it. For the model that is every object; for a table
   its columns, measures, hierarchies, levels, partitions, calculation items and calendars; for a hierarchy its
   levels. The container itself is not listed.
-- **Paths** are the ones `get --properties` and `get -p` use, matched case-insensitively. `kind` is the object's
+- **Paths** are the ones `get --properties` and `get -p` use, matched case-insensitively. `objectKind` is the object's
   kind (`measure`, `column`, ...).
 - **Values** are read as `get --properties` shows them, so TOM's defaults have values: `isHidden=false` finds the
   visible objects even though TOM's JSON leaves `isHidden` out. Values that are not in the catalog, such as

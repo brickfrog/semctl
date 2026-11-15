@@ -35,7 +35,7 @@ type Args =
             | Where _ ->
                 "list the objects inside the object (the model: all; a table: its columns, measures, ...) whose "
                 + "property matches: <path>=<pattern> or <path>!=<pattern>, * and ? wildcards, case-insensitive "
-                + "(repeatable: all must hold). `kind` is the object's kind. With -p, print those properties."
+                + "(repeatable: all must hold). `objectKind` is the object's kind. With -p, print those properties."
 
 let getJson (e: ObjectEntry) (objectJson: string) =
     obj (refFields e @ [ "object", JsonNode.Parse objectJson ])
