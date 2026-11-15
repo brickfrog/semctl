@@ -67,13 +67,13 @@ let rules = [
         "Replace IFERROR with DIVIDE"
         "Improvement"
         Validate.Severity.Warning
-        "IFERROR(a / b, x), which DIVIDE(a, b, x) says directly"
+        "IFERROR(a / b, x), which DIVIDE(a, b, x) says directly. The fix can change results: DIVIDE gives x for a zero or blank divisor, where a / b gives infinity (or NaN), and doesn't catch errors raised inside a or b"
     rule
         "DR014"
         "Simplify using IN"
         "Readability"
         Validate.Severity.Info
-        "x = 1 || x = 2 || ..., which x IN {1, 2, ...} says more briefly"
+        "x = 1 || x = 2 || ..., or OR(x = 1, x = 2), which x IN {1, 2, ...} says more briefly"
 ]
 
 let private ruleById = rules |> List.map (fun r -> r.Id, r) |> dict
@@ -892,8 +892,9 @@ let private iferrorRule (dax: string) (all: Token array) (code: Token array) = [
 
 /// x = 1 || x = 2 || ... -> x IN {1, 2, ...}: the whole expression (or argument) is such a chain,
 /// x is a column, measure or variable, and the values are literals that no BLANK equals (non-zero
-/// numbers, or non-empty strings), so = and IN agree.
-let private inRule (dax: string) (all: Token array) (code: Token array) (variables: HashSet<string>) = [
+/// numbers, or non-empty strings), so = and IN agree. OR(x = 1, x = 2) too, nested ORs included.
+/// Each candidate comes with its span.
+let private inRuleSpans (dax: string) (all: Token array) (code: Token array) (variables: HashSet<string>) = [
     let n = code.Length
 
     let starts = [
@@ -961,24 +962,48 @@ let private inRule (dax: string) (all: Token array) (code: Token array) (variabl
                     x.Kind = y.Kind && eqCi x.Text y.Text)
                 [ 0 .. len - 1 ]
 
-        // Parse comparisons joined by ||.
-        let rec chain (k: int) (acc: (int * int * int * int * bool) list) =
+        // One comparison `lhs = literal` at k: (lhs, lhs length, value, value length, is a string),
+        // and the index after it.
+        let item (k: int) =
             match lhs k with
             | Some ll when k + ll < n && isOp "=" code.[k + ll] ->
-                match literal (k + ll + 1) with
-                | Some(vl, isString) ->
-                    let item = k, ll, k + ll + 1, vl, isString
-                    let next = k + ll + 1 + vl
-
-                    if next < n && isOp "||" code.[next] then
-                        chain (next + 1) (item :: acc)
-                    else
-                        Some(List.rev (item :: acc), next)
-                | None -> None
+                literal (k + ll + 1)
+                |> Option.map (fun (vl, isString) -> (k, ll, k + ll + 1, vl, isString), k + ll + 1 + vl)
             | _ -> None
 
-        match chain s [] with
-        | Some(items, e) when items.Length >= 2 ->
+        // Comparisons joined by ||.
+        let rec chain (k: int) acc =
+            match item k with
+            | Some(it, next) when next < n && isOp "||" code.[next] -> chain (next + 1) (it :: acc)
+            | Some(it, next) -> Some(List.rev (it :: acc), next)
+            | None -> None
+
+        // OR(a, b), each argument a comparison or another such OR call; the index after the `)`.
+        let rec orCall (k: int) =
+            let argument (k: int) =
+                if isKw "OR" code.[k] then
+                    orCall k
+                else
+                    item k |> Option.map (fun (it, next) -> [ it ], next)
+
+            if k + 1 < n && isKw "OR" code.[k] && isPunct "(" code.[k + 1] then
+                match argument (k + 2) with
+                | Some(first, comma) when comma < n && isPunct "," code.[comma] ->
+                    match argument (comma + 1) with
+                    | Some(second, close) when close < n && isPunct ")" code.[close] -> Some(first @ second, close + 1)
+                    | _ -> None
+                | _ -> None
+            else
+                None
+
+        let parsed =
+            if isKw "OR" code.[s] then
+                orCall s |> Option.map (fun (items, e) -> items, e, "OR")
+            else
+                chain s [] |> Option.map (fun (items, e) -> items, e, "||")
+
+        match parsed with
+        | Some(items, e, joiner) when items.Length >= 2 ->
             let ends =
                 e = n
                 || isPunct ")" code.[e]
@@ -1010,10 +1035,14 @@ let private inRule (dax: string) (all: Token array) (code: Token array) (variabl
                     all
                     |> Array.exists (fun t -> t.Kind = TokenKind.Comment && t.Start > spanStart && t.Start < spanEnd)
 
-                {
+                ({
                     RuleId = "DR014"
                     Offset = spanStart
-                    Message = $"{items.Length} comparisons of {text k0 l0} joined by ||: write {replacement}"
+                    Message =
+                        if joiner = "OR" then
+                            $"OR of {items.Length} comparisons of {text k0 l0}: write {replacement}"
+                        else
+                            $"{items.Length} comparisons of {text k0 l0} joined by ||: write {replacement}"
                     Fix =
                         if hasComments then
                             None
@@ -1028,9 +1057,26 @@ let private inRule (dax: string) (all: Token array) (code: Token array) (variabl
                                 ],
                                 SameObjects
                             )
-                }
+                 },
+                 spanStart,
+                 spanEnd)
         | _ -> ()
 ]
+
+/// DR014's candidates, without those inside another (an OR nested in an OR that is fixed whole).
+let private inRule (dax: string) (all: Token array) (code: Token array) (variables: HashSet<string>) =
+    let found = inRuleSpans dax all code variables
+
+    [
+        for c, s, e in found do
+            if
+                not (
+                    found
+                    |> List.exists (fun (_, s2, e2) -> s2 <= s && e <= e2 && (s2, e2) <> (s, e))
+                )
+            then
+                c
+    ]
 
 /// What a reference points at, for comparing an expression before and after a fix. Unresolved
 /// references compare by their text without whitespace.

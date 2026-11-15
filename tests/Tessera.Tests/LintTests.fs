@@ -288,6 +288,37 @@ let ruleTests =
 
             testCase "comments inside the chain: reported, not fixed"
             <| fun () -> Expect.equal (found "[Total] = 1 /* one */ || [Total] = 2") [ "DR014", false ] ""
+
+            // TE3's DR014 page: "equality comparisons of the same expression that are combined using
+            // OR or ||" (docs.tabulareditor.com/en/kb/DR014.html).
+            testCase "OR(...) calls, nested ones fixed whole"
+            <| fun () ->
+                Expect.equal (found "OR('Date'[Month] = \"Jan\", 'Date'[Month] = \"Feb\")") [ "DR014", true ] ""
+
+                fixesTo
+                    "IF(OR('Date'[Month] = \"Jan\", 'Date'[Month] = \"Feb\"), 1, 0)"
+                    "IF('Date'[Month] IN {\"Jan\", \"Feb\"}, 1, 0)"
+
+                fixesTo "or ( [Total] = 1, OR([Total] = 2, [Total] = 3) )" "[Total] IN {1, 2, 3}"
+                Expect.equal (found "OR(OR([Total] = 1, [Total] = 2), [Total] = 3)") [ "DR014", true ] ""
+                fixesTo "VAR a = OR([Total] = 1, [Total] = 2) RETURN a" "VAR a = [Total] IN {1, 2} RETURN a"
+
+            testCase "OR(...) as an operand, or with other shapes: not reported"
+            <| fun () ->
+                for expr in
+                    [
+                        // IN binds differently from a call: these would regroup.
+                        "NOT OR([Total] = 1, [Total] = 2)"
+                        "1 = OR([Total] = 1, [Total] = 2)"
+                        "OR([Total] = 1, [Total] = 2) && [Total] > 0"
+                        "OR([Total] = 1, [Total] = 2) || [Total] = 3"
+                        "OR([Total] = 1, [Total] = 2) + 1"
+                        "OR([Total] = 1, [Total (hidden)] = 2)"
+                        "OR([Total] = 0, [Total] = 2)"
+                        "OR([Total] = 1, [Total] > 2)"
+                        "OR([Total] = 1)"
+                    ] do
+                    Expect.isEmpty (found expr) expr
         ]
     ]
 
