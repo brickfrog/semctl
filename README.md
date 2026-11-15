@@ -1820,7 +1820,7 @@ Only commands given a server contact anything, and only these, all through the c
   the region's host and `global.asazure.windows.net`.
 
 tess adds no telemetry and no other calls. The test suite checks, on the compiled assemblies, that
-`Tessera.Core` uses no network type outside the explicit BPA rule download, that the CLI uses none itself, and that
+`Tessera.Core` uses no network type outside the explicit BPA rule download and `pkg`'s daxlib.org fetch, that the CLI uses none itself, and that
 in `Tessera.Xmla` only the live connector does.
 
 #### Remote models in other commands

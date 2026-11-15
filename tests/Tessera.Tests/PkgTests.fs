@@ -637,6 +637,36 @@ let sourceTests =
             | e -> failtestf "%A" e
         }
 
+        test "a zip of a daxlib checkout: every package folder in it" {
+            use t = new TempDir()
+            let zip = t.Combine "daxlib-main.zip"
+
+            File.WriteAllBytes(
+                zip,
+                zipBytes [
+                    "daxlib-main/README.md", "hi"
+                    "daxlib-main/packages/a/a.one/1.0.0/manifest.daxlib", manifestJson "A.One" "1.0.0" ""
+                    "daxlib-main/packages/a/a.one/1.0.0/lib/functions.tmdl", functionsTmdl [ "A.One.F", "() => 1" ]
+                    "daxlib-main/packages/a/a.one/1.1.0/manifest.daxlib", manifestJson "A.One" "1.1.0" ""
+                    "daxlib-main/packages/a/a.one/1.1.0/lib/functions.tmdl", functionsTmdl [ "A.One.F", "() => 2" ]
+                    "daxlib-main/packages/b/b.two/0.1.0/manifest.daxlib", manifestJson "B.Two" "0.1.0" ""
+                    "daxlib-main/packages/b/b.two/0.1.0/lib/functions.tmdl", functionsTmdl [ "B.Two.G", "() => 3" ]
+                    "daxlib-main/.hidden/manifest.daxlib", manifestJson "Hidden.X" "1.0.0" ""
+                ]
+            )
+
+            let src = ok (PkgSource.local zip)
+
+            Expect.equal
+                (ok (src.Search "" false) |> List.map (fun s -> s.Id, s.Version))
+                [ "A.One", "1.1.0"; "B.Two", "0.1.0" ]
+                ""
+
+            let p = ok (src.Get "A.One" "1.0.0")
+            Expect.equal p.Functions.Head.Expression "() => 1" ""
+            Expect.stringContains p.Origin "!/daxlib-main/packages/a/a.one/1.0.0" "names the folder in the archive"
+        }
+
         test "one package folder, one .daxpkg file, nothing there" {
             use t = new TempDir()
             let dir = writePackage t.Path "P.Q" "1.0.0" [ "P.Q.A", "() => 1" ]
@@ -662,6 +692,14 @@ let sourceTests =
             Expect.isFalse (ok (PkgSource.choose (Some vendored) (Some "daxlib") false get)).IsOnline "--from wins"
             Expect.isError (PkgSource.choose (Some "daxlib") None true get) "--offline refuses"
             Expect.isError (PkgSource.choose None (Some "daxlib") true get) "--offline refuses the variable too"
+
+            let here = PkgSource.chooseWith (fun s -> s = "daxlib")
+
+            match err (here (Some "daxlib") None false get) with
+            | NoPackageSource reason -> Expect.stringContains reason "./daxlib" "a folder named daxlib: ambiguous"
+            | e -> failtestf "%A" e
+
+            Expect.isTrue (ok (here (Some "https://api.daxlib.org/") None false get)).IsOnline "the URL is never a path"
         }
 
         test "daxlib.org: the URLs asked for, and the answers read" {
@@ -772,6 +810,15 @@ let commandTests =
             Expect.equal (first.GetProperty("id").GetString()) "TimeSeries.MovingAverage" ""
             Expect.equal (first.GetProperty("provider").GetString()) "https://api.daxlib.org" ""
             Expect.equal (first.GetProperty("functions").GetArrayLength()) 7 ""
+
+            for f in first.GetProperty("functions").EnumerateArray() do
+                Expect.equal (f.GetProperty("state").GetString()) "unchanged" "unchanged after tess saved it"
+
+            // Hashes as TE3 recorded them, after tess's own TMDL save and reload.
+            let _, saved = ok (ModelIO.loadPath model)
+
+            for name, hash in spacepartsHashes do
+                Expect.equal (fnExt (saved.Model.Functions.Find name) Pkg.hashProperty) (Some hash) name
 
             let text = tess [ "pkg"; "list"; model ]
             Expect.stringContains text.Out "TimeSeries.MovingAverage 0.1.1  (7 functions)" ""

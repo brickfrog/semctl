@@ -67,7 +67,8 @@ let private maxDepth = 6
 type private LocalEntry = {
     Manifest: Manifest
     Path: string
-    IsZip: bool
+    /// For a package inside a zip: its folder in the archive ("" for a .daxpkg).
+    ZipPrefix: string option
 }
 
 let private isZip (path: string) =
@@ -76,34 +77,69 @@ let private isZip (path: string) =
     ext.Equals(".daxpkg", StringComparison.OrdinalIgnoreCase)
     || ext.Equals(".zip", StringComparison.OrdinalIgnoreCase)
 
-/// Every package under a folder: folders holding a manifest.daxlib, and .daxpkg files. Hidden
-/// folders (.git) are not searched.
+/// How an entry is named in messages: the path, and the folder in the archive.
+let private display (e: LocalEntry) =
+    match e.ZipPrefix with
+    | Some p when p <> "" -> $"{e.Path}!/{p.TrimEnd('/')}"
+    | _ -> e.Path
+
+/// The packages in a .daxpkg or .zip file (one at its root, or one per folder holding a
+/// manifest.daxlib: a zip of a daxlib checkout), and the ones that can't be read.
+let private zipEntries (path: string) : LocalEntry list * (string * string) list =
+    let bytes =
+        try
+            if FileInfo(path).Length > maxArchiveBytes then
+                Error(InvalidPackage(path, "the file is too large"))
+            else
+                Ok(File.ReadAllBytes path)
+        with e ->
+            Error(InvalidPackage(path, e.Message))
+
+    match
+        bytes
+        |> Result.bind (fun b -> zipPackages path b |> Result.map (fun ps -> b, ps))
+    with
+    | Error e -> [], [ path, TessError.message e ]
+    | Ok(_, []) -> [], [ path, "no manifest.daxlib in it" ]
+    | Ok(b, prefixes) ->
+        let results = [
+            for prefix in prefixes ->
+                let entry = {
+                    Manifest = Unchecked.defaultof<Manifest>
+                    Path = path
+                    ZipPrefix = Some prefix
+                }
+
+                match readZipManifestAt (display entry) b prefix with
+                | Ok m -> Ok { entry with Manifest = m }
+                | Error e -> Error(display entry, TessError.message e)
+        ]
+
+        (results
+         |> List.choose (function
+             | Ok e -> Some e
+             | Error _ -> None)),
+        (results
+         |> List.choose (function
+             | Error x -> Some x
+             | Ok _ -> None))
+
+/// Every package under a folder: folders holding a manifest.daxlib, and .daxpkg and .zip files.
+/// Hidden folders (.git) are not searched.
 let private scan (root: string) =
     let found = ResizeArray<LocalEntry>()
     let skipped = ResizeArray<string * string>()
 
-    let readZipAt (path: string) =
-        try
-            if FileInfo(path).Length > maxPackageBytes then
-                Error(InvalidPackage(path, "the package is too large"))
-            else
-                readZipManifest path (File.ReadAllBytes path)
-        with e ->
-            Error(InvalidPackage(path, e.Message))
-
-    let add (path: string) (zip: bool) (result: Result<Manifest, TessError>) =
-        match result with
-        | Ok m ->
-            found.Add {
-                Manifest = m
-                Path = path
-                IsZip = zip
-            }
-        | Error e -> skipped.Add(path, TessError.message e)
-
     let rec walk (dir: string) (depth: int) =
         if File.Exists(Path.Combine(dir, "manifest.daxlib")) then
-            add dir false (readFolderManifest dir)
+            match readFolderManifest dir with
+            | Ok m ->
+                found.Add {
+                    Manifest = m
+                    Path = dir
+                    ZipPrefix = None
+                }
+            | Error e -> skipped.Add(dir, TessError.message e)
         else
             let files, dirs =
                 try
@@ -113,7 +149,9 @@ let private scan (root: string) =
 
             for f in files do
                 if isZip f then
-                    add f true (readZipAt f)
+                    let es, sk = zipEntries f
+                    found.AddRange es
+                    skipped.AddRange sk
 
             if depth < maxDepth then
                 for d in dirs do
@@ -123,31 +161,15 @@ let private scan (root: string) =
     walk root 0
     List.ofSeq found, List.ofSeq skipped
 
-/// A local source: a package folder, a .daxpkg file, or a folder of them (a daxlib checkout, a
-/// folder of downloads).
+/// A local source: a package folder, a .daxpkg file, a zip of packages, or a folder of any of
+/// them (a daxlib checkout, a folder of downloads).
 let local (path: string) : Result<Source, TessError> =
     let full = Path.GetFullPath path
 
     let entries, skipped =
         if File.Exists full then
             if isZip full then
-                let manifest =
-                    try
-                        readZipManifest full (File.ReadAllBytes full)
-                    with e ->
-                        Error(InvalidPackage(full, e.Message))
-
-                match manifest with
-                | Ok m ->
-                    [
-                        {
-                            Manifest = m
-                            Path = full
-                            IsZip = true
-                        }
-                    ],
-                    []
-                | Error e -> [], [ full, TessError.message e ]
+                zipEntries full
             else
                 [], [ full, "not a .daxpkg or .zip file" ]
         elif Directory.Exists full then
@@ -214,13 +236,13 @@ let local (path: string) : Result<Source, TessError> =
                         match vs |> List.tryFind (fun e -> Version.same e.Manifest.Version version) with
                         | None -> Error(PackageVersionNotFound(id, version, vs |> List.map _.Manifest.Version))
                         | Some e ->
-                            if e.IsZip then
+                            match e.ZipPrefix with
+                            | Some prefix ->
                                 try
-                                    readZip e.Path (File.ReadAllBytes e.Path)
+                                    readZipAt (display e) (File.ReadAllBytes e.Path) prefix
                                 with ex ->
-                                    Error(InvalidPackage(e.Path, ex.Message))
-                            else
-                                readFolder e.Path
+                                    Error(InvalidPackage(display e, ex.Message))
+                            | None -> readFolder e.Path
             Skipped = skipped
         }
 
@@ -379,26 +401,31 @@ let daxlib (get: Get) : Source =
 
 // ---- choosing ----------------------------------------------------------------------------------
 
-/// The value of --from (or TESS_PKG_SOURCE) that names daxlib.org.
+/// The value of --from (or TESS_PKG_SOURCE) that names daxlib.org...
 let daxlibToken = "daxlib"
 
+/// ... and its unambiguous spelling, which is never a path.
+let daxlibUrl = "https://api.daxlib.org"
+
 /// The source to use: `--from` first, then TESS_PKG_SOURCE. The online source only when one of
-/// them says `daxlib`, and never with `offline`. No source named is an error: tess never goes
-/// online on its own.
-let choose (from: string option) (env: string option) (offline: bool) (get: Get) : Result<Source, TessError> =
+/// them says `daxlib` (or https://api.daxlib.org), and never with `offline`. `daxlib` while a file
+/// or folder of that name is in the current directory is refused as ambiguous: a clone of the
+/// daxlib repository is called that, and reading it must never turn into a network call. No source
+/// named is an error: tess never goes online on its own.
+let chooseWith
+    (exists: string -> bool)
+    (from: string option)
+    (env: string option)
+    (offline: bool)
+    (get: Get)
+    : Result<Source, TessError> =
     let named, where =
         match from, env with
         | Some f, _ -> Some f, "--from"
         | None, Some e -> Some e, "TESS_PKG_SOURCE"
         | None, None -> None, ""
 
-    match named with
-    | None ->
-        Error(
-            NoPackageSource
-                "No package source: pass --from <folder|file> (a daxlib checkout, a package folder, a .daxpkg), or --from daxlib to use daxlib.org; or set TESS_PKG_SOURCE"
-        )
-    | Some s when s.Trim().Equals(daxlibToken, StringComparison.OrdinalIgnoreCase) ->
+    let online () =
         if offline then
             Error(
                 NoPackageSource
@@ -406,4 +433,23 @@ let choose (from: string option) (env: string option) (offline: bool) (get: Get)
             )
         else
             Ok(daxlib get)
+
+    match named with
+    | None ->
+        Error(
+            NoPackageSource
+                "No package source: pass --from <folder|file> (a daxlib checkout, a package folder, a .daxpkg), or --from daxlib to use daxlib.org; or set TESS_PKG_SOURCE"
+        )
+    | Some s when s.Trim().TrimEnd('/').Equals(daxlibUrl, StringComparison.OrdinalIgnoreCase) -> online ()
+    | Some s when s.Trim().Equals(daxlibToken, StringComparison.OrdinalIgnoreCase) ->
+        if exists s then
+            Error(
+                NoPackageSource
+                    $"{where} '{s}' could be daxlib.org or the '{s}' here: pass ./{s} for the folder, or {daxlibUrl} for daxlib.org"
+            )
+        else
+            online ()
     | Some path -> local path
+
+/// `chooseWith`, looking in the current directory.
+let choose = chooseWith (fun s -> File.Exists s || Directory.Exists s)

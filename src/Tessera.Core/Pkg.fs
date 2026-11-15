@@ -329,18 +329,23 @@ let readFolder (dir: string) : Result<Package, TessError> =
         with e ->
             Error(InvalidPackage(dir, e.Message))
 
-/// Text files of a `.daxpkg` (a zip: /manifest.daxlib, /lib/functions.tmdl, the icon, a readme),
-/// read in memory, no more than `maxPackageBytes` of any.
+/// The largest zip read: a `.daxpkg`, or an archive of many packages (a zip of a daxlib checkout
+/// is about 5 MB).
+let maxArchiveBytes = 256L * 1024L * 1024L
+
+let private entryName (e: ZipArchiveEntry) =
+    e.FullName.Replace('\\', '/').TrimStart('/')
+
+/// Text files of a zip, read in memory, no more than `maxPackageBytes` of any.
 let private zipTexts (origin: string) (bytes: byte array) (names: string list) : Result<string option list, TessError> =
-    if int64 bytes.Length > maxPackageBytes then
-        Error(InvalidPackage(origin, "the package is too large"))
+    if int64 bytes.Length > maxArchiveBytes then
+        Error(InvalidPackage(origin, "the file is too large"))
     else
         try
             use zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read)
 
             let entry (name: string) =
-                zip.Entries
-                |> Seq.tryFind (fun e -> e.FullName.Replace('\\', '/').TrimStart('/') = name)
+                zip.Entries |> Seq.tryFind (fun e -> entryName e = name)
 
             let read (e: ZipArchiveEntry) =
                 use s = e.Open()
@@ -363,21 +368,56 @@ let private zipTexts (origin: string) (bytes: byte array) (names: string list) :
         | :? InvalidDataException as e -> Error(InvalidPackage(origin, $"not a zip file: {e.Message}"))
         | e -> Error(InvalidPackage(origin, e.Message))
 
-/// A `.daxpkg`, read in memory.
-let readZip (origin: string) (bytes: byte array) : Result<Package, TessError> =
-    zipTexts origin bytes [ "manifest.daxlib"; "lib/functions.tmdl" ]
+/// The packages in a zip: the folders in it (as entry-name prefixes, "" for the root, as in a
+/// `.daxpkg`) that hold a manifest.daxlib. Hidden folders are skipped.
+let zipPackages (origin: string) (bytes: byte array) : Result<string list, TessError> =
+    if int64 bytes.Length > maxArchiveBytes then
+        Error(InvalidPackage(origin, "the file is too large"))
+    else
+        try
+            use zip = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read)
+
+            Ok [
+                for e in zip.Entries do
+                    let name = entryName e
+
+                    if name = "manifest.daxlib" || name.EndsWith "/manifest.daxlib" then
+                        let prefix = name.Substring(0, name.Length - "manifest.daxlib".Length)
+
+                        if not (prefix.Split('/') |> Array.exists (fun p -> p.StartsWith '.')) then
+                            yield prefix
+            ]
+            |> Result.map List.sort
+        with
+        | :? InvalidDataException as e -> Error(InvalidPackage(origin, $"not a zip file: {e.Message}"))
+        | e -> Error(InvalidPackage(origin, e.Message))
+
+/// The package in a zip's folder `prefix` ("" for a `.daxpkg`), read in memory.
+let readZipAt (origin: string) (bytes: byte array) (prefix: string) : Result<Package, TessError> =
+    zipTexts origin bytes [ prefix + "manifest.daxlib"; prefix + "lib/functions.tmdl" ]
     |> Result.bind (function
         | [ None; _ ] -> Error(InvalidPackage(origin, "no manifest.daxlib"))
         | [ _; None ] -> Error(InvalidPackage(origin, "no lib/functions.tmdl"))
         | [ Some m; Some f ] -> build origin m f
         | _ -> Error(InvalidPackage(origin, "unreadable")))
 
-/// Just the manifest of a `.daxpkg`.
-let readZipManifest (origin: string) (bytes: byte array) : Result<Manifest, TessError> =
-    zipTexts origin bytes [ "manifest.daxlib" ]
+/// Just the manifest of the package in a zip's folder `prefix`.
+let readZipManifestAt (origin: string) (bytes: byte array) (prefix: string) : Result<Manifest, TessError> =
+    zipTexts origin bytes [ prefix + "manifest.daxlib" ]
     |> Result.bind (function
         | [ Some m ] -> parseManifest m |> Result.mapError (fun r -> InvalidPackage(origin, r))
         | _ -> Error(InvalidPackage(origin, "no manifest.daxlib")))
+
+/// A `.daxpkg`, read in memory.
+let readZip (origin: string) (bytes: byte array) : Result<Package, TessError> =
+    if int64 bytes.Length > maxPackageBytes then
+        Error(InvalidPackage(origin, "the package is too large"))
+    else
+        readZipAt origin bytes ""
+
+/// Just the manifest of a `.daxpkg`.
+let readZipManifest (origin: string) (bytes: byte array) : Result<Manifest, TessError> =
+    readZipManifestAt origin bytes ""
 
 /// Just the manifest of a package folder.
 let readFolderManifest (dir: string) : Result<Manifest, TessError> =
