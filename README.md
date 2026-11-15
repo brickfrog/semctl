@@ -3282,7 +3282,9 @@ its own. `list` and `remove` need no source at all.
 goes online, and `--offline` refuses it even then. `daxlib` while a file or folder of that name is in the current
 directory (a clone is called that) is refused as ambiguous: pass `./daxlib` for the folder, or the URL. tess then sends HTTPS GET requests to `https://api.daxlib.org` and nowhere else (another host, plain
 http, a non-default port or a redirect is refused), with no cookies, no credentials, no body, and the User-Agent
-`tessera`; nothing about the model is sent. The requests are the ones daxlib's own client makes:
+`tessera`. Nothing about the model is sent except, by `update`, the IDs of the packages being updated: with no
+IDs named, every installed package recorded under daxlib.org's provider (one recorded under another provider is
+skipped with a warning, its ID never sent). The requests are the ones daxlib's own client makes:
 
 | What | URL |
 |---|---|
@@ -3349,6 +3351,10 @@ foreach (var m in Model.Tables.SelectMany(t => t.Measures).Where(m => m.Name.End
 
 - **The script** is a C# file of top-level statements. `using` directives, local functions and classes work as in
   any C# file.
+- **References:** the whole .NET 10 shared framework, TOM and Tessera.Core. `#r` and NuGet packages are not
+  supported.
+- **Names TOM shares with the framework** are ambiguous, because TOM's namespace is imported: write
+  `System.Text.Json.JsonSerializer`, not `JsonSerializer`.
 - **In scope:**
   - `System`, `System.Linq`, `System.Collections.Generic` and `Microsoft.AnalysisServices.Tabular`;
   - `Model`, the model's TOM `Model`;

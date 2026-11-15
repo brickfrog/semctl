@@ -124,6 +124,24 @@ let tests =
                 Expect.stringContains r.Out "No changes." "")
         }
 
+        test "the framework's assemblies are there before the script loads any" {
+            withModel (fun model p ->
+                let s =
+                    script p [
+                        "using System.Xml.Linq;"
+                        "using System.IO.Compression;"
+                        "var x = new XElement(\"m\", new XAttribute(\"name\", Model.Name));"
+                        "using var ms = new System.IO.MemoryStream();"
+                        "using (var z = new ZipArchive(ms, ZipArchiveMode.Create, true)) { z.CreateEntry(\"a\"); }"
+                        "var json = System.Text.Json.JsonSerializer.Serialize(new { n = Model.Tables.Count });"
+                        "Output($\"{x} {ms.Length > 0} {typeof(System.Net.Http.HttpClient).Name} {new System.Data.DataTable().GetType().Name} {json}\");"
+                    ]
+
+                let r = tess [ "csharp"; model; s ]
+                Expect.equal r.Code ExitCode.ok r.Err
+                Expect.stringContains r.Err "<m name=\"Model\" /> True HttpClient DataTable {\"n\":3}" "")
+        }
+
         test "scripts are local files: a URL is refused, a missing file is an error" {
             withModel (fun model p ->
                 let url = tess [ "csharp"; model; "https://example.com/s.csx" ]

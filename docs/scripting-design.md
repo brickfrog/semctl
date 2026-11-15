@@ -57,7 +57,10 @@ Running a script costs, on top of loading the model:
 - **Roslyn compiler API:**
   - compiling: 0.8-1.5 s, cold JIT of Roslyn in every process;
   - running: about 1 ms;
-  - total wall clock about 1.9 s.
+  - total wall clock about 1.9 s, against the TOM-only references of the spike.
+  - As built, every assembly of the shared framework is loaded and referenced first, so a script can use
+    System.Xml.Linq, System.IO.Compression, System.Net.Http and the rest. That makes it about 2.6 s wall clock
+    from the release binary.
 - **Not measured:** ReadyToRun-compiling the Roslyn assemblies would likely cut the compile time, at a size cost.
 
 ## Does it work from the single-file binary?
@@ -100,7 +103,9 @@ The scripting layer always adds a reference to the core library by its file path
 
 `CSharpCompilation` doesn't need files:
 
-1. **References.** Every assembly loaded in the process is referenced from its in-memory metadata:
+1. **References.** A single-file bundle doesn't list the framework's assemblies: `TRUSTED_PLATFORM_ASSEMBLIES` is
+   empty. So the shared framework's managed assemblies are loaded first, by name: about 170 names, the same on
+   every OS. Then every assembly loaded in the process is referenced from its in-memory metadata:
    `Assembly.TryGetRawMetadata` → `ModuleMetadata.CreateFromMetadata` → `AssemblyMetadata.GetReference()`.
    That covers the framework, TOM and Tessera.Core, including assemblies inside the bundle. Collecting the 35
    references takes 13-30 ms.
@@ -191,5 +196,5 @@ file, so it can be dropped by removing one project reference and one command. Se
 - **No TE wrapper API.** `Selected` has no meaning in a CLI, and `AllMeasures`, `Output`, `FormatDax` and the
   rest don't exist yet.
 - **No ReadyToRun build of Roslyn**, so each run compiles with a cold JIT.
-- **Assemblies a script loads itself** (`#r`, or `Assembly.Load` at run time) aren't supported: references are
-  the assemblies already loaded when compilation starts.
+- **No `#r` and no NuGet packages.** References are the shared framework, TOM and tess's own assemblies. The
+  framework's list of names is fixed in `CsScript.fs` for .NET 10, and a name the runtime lacks is skipped.

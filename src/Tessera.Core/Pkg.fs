@@ -286,7 +286,14 @@ let parseFunctions (tmdl: string) : Result<Function list, string> =
         ]
 
         match others with
-        | [] -> Ok [ for f in m.Functions -> f ]
+        | [] ->
+            // Expressions with "\n" line ends on every OS, whatever the file has: the content hash
+            // is taken over them, and TE3's recorded hashes are of the "\n" form.
+            for f in m.Functions do
+                if not (isNull f.Expression) && f.Expression.Contains '\r' then
+                    f.Expression <- f.Expression.Replace("\r\n", "\n")
+
+            Ok [ for f in m.Functions -> f ]
         | o -> Error("functions.tmdl holds more than functions: " + String.concat ", " o)
     with e ->
         Error $"lib/functions.tmdl can't be read: {e.Message}"

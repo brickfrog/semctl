@@ -453,3 +453,120 @@ let chooseWith
 
 /// `chooseWith`, looking in the current directory.
 let choose = chooseWith (fun s -> File.Exists s || Directory.Exists s)
+
+// ---- updating ----------------------------------------------------------------------------------
+
+/// `pkg update`: move the named packages (ID, and a version or the latest) or, with none named,
+/// every installed package to its latest version, from `src`. With every package, one the source
+/// doesn't have is a warning; online, packages recorded under another provider are skipped with a
+/// warning, so their IDs are never sent to daxlib.org.
+let update
+    (src: Source)
+    (db: Microsoft.AnalysisServices.Tabular.Database)
+    (specs: (string * string option) list)
+    (prerelease: bool)
+    (onModified: OnModified)
+    (onConflict: OnConflict)
+    (force: bool)
+    : Result<Mutation.Effect, TessError> =
+    state db
+    |> Result.bind (fun st ->
+        let isDaxlib (i: Installed) =
+            String.Equals(i.Provider.TrimEnd('/'), daxlibProvider, StringComparison.OrdinalIgnoreCase)
+
+        let targets, skipped =
+            match specs with
+            | [] ->
+                let foreign =
+                    st.Installed |> List.filter (fun i -> src.IsOnline && not (isDaxlib i))
+
+                Ok(
+                    st.Installed
+                    |> List.filter (fun i -> not (List.contains i foreign))
+                    |> List.map (fun i -> i, None)
+                ),
+                foreign
+                |> List.map (fun i -> $"{i.PackageId} was installed from {i.Provider}, not daxlib.org; not updated")
+            | _ ->
+                let picked =
+                    specs
+                    |> List.map (fun (id, version) ->
+                        match
+                            st.Installed
+                            |> List.tryFind (fun i ->
+                                String.Equals(i.PackageId, id, StringComparison.OrdinalIgnoreCase))
+                        with
+                        | Some i -> Ok(i, version)
+                        | None -> Error(PackageNotInstalled(id, st.Installed |> List.map _.PackageId)))
+
+                match
+                    picked
+                    |> List.tryPick (function
+                        | Error e -> Some e
+                        | Ok _ -> None)
+                with
+                | Some e -> Error e, []
+                | None ->
+                    Ok(
+                        picked
+                        |> List.choose (function
+                            | Ok x -> Some x
+                            | Error _ -> None)
+                    ),
+                    []
+
+        let rec go (acc: Mutation.Effect) targets =
+            match targets with
+            | [] -> Ok acc
+            | ((i: Installed), version) :: rest ->
+                let chosen =
+                    match version with
+                    | Some v -> src.Get i.PackageId v |> Result.map Some
+                    | None ->
+                        src.Versions i.PackageId
+                        |> Result.bind (fun vs ->
+                            match Version.latest prerelease vs with
+                            | Some latest when Version.compareStrings latest i.Version > 0 ->
+                                src.Get i.PackageId latest |> Result.map Some
+                            | _ -> Ok None)
+
+                let step =
+                    match chosen with
+                    | Error(PackageNotFound _) when specs.IsEmpty ->
+                        Ok {
+                            Mutation.Effect.none with
+                                Warnings = [ $"{i.PackageId} isn't in {src.Name}; not updated" ]
+                        }
+                    | Error e -> Error e
+                    | Ok None ->
+                        Ok {
+                            Mutation.Effect.none with
+                                Notes = [ $"{i.PackageId} {i.Version} is the latest version" ]
+                        }
+                    | Ok(Some pkg) -> Pkg.update db pkg onModified onConflict force
+
+                match step with
+                | Error e -> Error e
+                | Ok e ->
+                    go
+                        {
+                            acc with
+                                Warnings = acc.Warnings @ e.Warnings
+                                Notes = acc.Notes @ e.Notes
+                        }
+                        rest
+
+        targets
+        |> Result.bind (fun targets ->
+            let start = {
+                Mutation.Effect.none with
+                    Warnings = skipped
+            }
+
+            match targets, skipped with
+            | [], [] ->
+                Ok {
+                    start with
+                        Notes = [ "No packages installed" ]
+                }
+            | _ -> go start targets))

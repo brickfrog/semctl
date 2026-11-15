@@ -736,6 +736,44 @@ let sourceTests =
             Expect.all fake.Asked (fun u -> u.StartsWith "https://api.daxlib.org/v1/") "only the daxlib API"
         }
 
+        test "online, update never sends the IDs of packages from another provider" {
+            let db = emptyModel ()
+
+            ok (Pkg.install db (packageOf "DaxLib.Fake" "1.0.0" [ "DaxLib.Fake.F", "() => 1" ]) installOpts)
+            |> ignore
+
+            ok (
+                Pkg.install db (packageOf "Private.Lib" "1.0.0" [ "Private.Lib.F", "() => 1" ]) {
+                    installOpts with
+                        Provider = "https://packages.example.com"
+                }
+            )
+            |> ignore
+
+            let fake =
+                FakeDaxlib(
+                    Map.ofList [
+                        "https://api.daxlib.org/v1/package/daxlib.fake/versions.json",
+                        Text.Encoding.UTF8.GetBytes "{\"versions\":[\"1.0.0\"]}"
+                    ]
+                )
+
+            let effect =
+                ok (
+                    PkgSource.update
+                        (PkgSource.daxlib fake.Get)
+                        db
+                        []
+                        false
+                        Pkg.RefuseModified
+                        Pkg.RefuseConflicts
+                        false
+                )
+
+            Expect.equal fake.Asked [ "https://api.daxlib.org/v1/package/daxlib.fake/versions.json" ] "only daxlib's"
+            Expect.exists effect.Warnings (fun w -> w.Contains "Private.Lib") "says it skipped it"
+        }
+
         test "daxlib.org failing is a fetch error" {
             let src = PkgSource.daxlib (fun _ -> Error "connection refused")
 

@@ -224,6 +224,12 @@ let tests =
 
             Expect.isEmpty elsewhere (describe elsewhere)
 
+        testCase "Tessera.Scripting (tess csharp) touches no network type"
+        <| fun () ->
+            let found = usages typeof<Tessera.Scripting.CsScript.Host>.Assembly network
+
+            Expect.isEmpty found (describe found)
+
         testCase "in Tessera.Xmla only the live connector touches a network type"
         <| fun () ->
             let elsewhere =
