@@ -3271,14 +3271,16 @@ Packages hold functions, which need compatibility level 1702 or higher; a lower 
 named at once; they apply in order as one change.
 
 **Sources.** A package is a folder holding `manifest.daxlib` and `lib/functions.tmdl`, or the same as a `.daxpkg`
-(zip) file. `--from` takes one package (folder or `.daxpkg`), or a folder searched for them (up to six levels
-deep, hidden folders skipped): a checkout of [github.com/daxlib/daxlib](https://github.com/daxlib/daxlib), or a
-folder of downloaded `.daxpkg` files. Without `--from`, the `TESS_PKG_SOURCE` environment variable names the
+(zip) file. `--from` takes one package (folder or `.daxpkg`), a `.zip` of many (every folder in it holding a
+`manifest.daxlib`: GitHub's "Download ZIP" of [github.com/daxlib/daxlib](https://github.com/daxlib/daxlib)), or a
+folder searched for any of these (up to six levels deep, hidden folders skipped): a checkout of daxlib, or a
+folder of downloaded `.daxpkg` files. Package files over 16 MB and zips over 256 MB are refused. Without `--from`, the `TESS_PKG_SOURCE` environment variable names the
 source (a path, or `daxlib`). With neither, the command fails: tess never picks a source, and never goes online, on
 its own. `list` and `remove` need no source at all.
 
-**Online (daxlib.org).** Only `--from daxlib` (or `TESS_PKG_SOURCE=daxlib`) goes online, and `--offline` refuses it
-even then. tess then sends HTTPS GET requests to `https://api.daxlib.org` and nowhere else (another host, plain
+**Online (daxlib.org).** Only `--from daxlib` or `--from https://api.daxlib.org` (or the same in `TESS_PKG_SOURCE`)
+goes online, and `--offline` refuses it even then. `daxlib` while a file or folder of that name is in the current
+directory (a clone is called that) is refused as ambiguous: pass `./daxlib` for the folder, or the URL. tess then sends HTTPS GET requests to `https://api.daxlib.org` and nowhere else (another host, plain
 http, a non-default port or a redirect is refused), with no cookies, no credentials, no body, and the User-Agent
 `tessera`; nothing about the model is sent. The requests are the ones daxlib's own client makes:
 
