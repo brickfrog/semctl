@@ -97,6 +97,11 @@ let toStats (origin: Origin) (estimated: bool) (riRead: bool) (m: DaxModel) : St
         Columns = [
             for t in tables do
                 for c in t.Columns ->
+                    let unread = c.ColumnCardinality = 0L && t.RowsCount > 0L
+                    // tess writes 0 for what it couldn't estimate: in its own files, a column
+                    // without a cardinality has no sizes either.
+                    let size (n: int64) = if unread && estimated then None else Some n
+
                     {
                         Table = name t.TableName
                         Column = name c.ColumnName
@@ -105,14 +110,10 @@ let toStats (origin: Origin) (estimated: bool) (riRead: bool) (m: DaxModel) : St
                         IsHidden = c.IsHidden
                         // A cardinality of 0 means "not read" (the RowNumber columns): a column with
                         // rows has at least one value.
-                        Cardinality =
-                            if c.ColumnCardinality = 0L && t.RowsCount > 0L then
-                                None
-                            else
-                                Some c.ColumnCardinality
-                        DictionarySize = Some c.DictionarySize
-                        DataSize = Some c.DataSize
-                        HierarchySize = Some c.HierarchiesSize
+                        Cardinality = if unread then None else Some c.ColumnCardinality
+                        DictionarySize = size c.DictionarySize
+                        DataSize = size c.DataSize
+                        HierarchySize = size c.HierarchiesSize
                         Encoding = Option.ofObj c.Encoding |> Option.filter (fun e -> e <> "" && e <> "UNKNOWN")
                         EncodingHint = Option.ofObj c.EncodingHint
                         Partitions = partsOf c

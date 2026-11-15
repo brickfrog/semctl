@@ -39,6 +39,7 @@ type Args =
     | Force
     | Stat
     | Name_Only
+    | Vpax of file: string
     | [<CliPrefix(CliPrefix.None); CustomCommandLine("rules")>] Rules_Cmd of ParseResults<BpaRulesCommand.Args>
 
     interface IArgParserTemplate with
@@ -71,6 +72,9 @@ type Args =
             | Force -> "with --fix: " + Mutation.Usage.force
             | Stat -> "with --fix: " + Mutation.Usage.stat
             | Name_Only -> "with --fix: " + Mutation.Usage.nameOnly
+            | Vpax _ ->
+                "read VertiPaq Analyzer statistics from this .vpax file, for rules that read Vertipaq_* annotations "
+                + "(`GetAnnotation(\"Vertipaq_Cardinality\")`); the model itself is not changed."
 
 let private severityName (s: int) =
     if s >= 3 then "error"
@@ -565,6 +569,9 @@ let private analyze (ctx: Ctx) (args: ParseResults<Args>) (modelPath: string) =
     | Error problem, _, _
     | _, Error problem, _ -> usage problem
     | _, _, Error message -> UsageError message
+    | Ok _, Ok _, Ok _ when fixing && args.Contains Args.Vpax ->
+        UsageError
+            "--vpax doesn't combine with --fix: the fix would save the statistics into the model. To keep them as annotations, run `tess vertipaq <model> --import <file.vpax> --annotate --save` first"
     | Ok _, Ok _, Ok _ when not fixing && editSwitches ->
         UsageError "--save, --save-to, --force, --stat and --name-only need --fix"
     | Ok _, Ok _, Ok _ when fixing && not reportSwitches.IsEmpty ->
@@ -602,8 +609,28 @@ let private analyze (ctx: Ctx) (args: ParseResults<Args>) (modelPath: string) =
                     |> Result.map (fun result -> fixEffect unfixable.Length result, [])))
     | Ok failOn, Ok ci, Ok opts ->
 
+        // --vpax: the file's statistics as Vertipaq_* annotations, on this in-memory copy only.
+        let withStats (source, db: Microsoft.AnalysisServices.Tabular.Database) =
+            match args.TryGetResult Args.Vpax with
+            | None -> Ok(source, db)
+            | Some vpax ->
+                VertipaqVpax.read vpax
+                |> Result.map (fun imported ->
+                    let applied = Vertipaq.Annotations.apply [] imported.Stats db
+
+                    for w in imported.Stats.Warnings do
+                        ctx.Err.WriteLine($"tess: warning: {vpax}: {w}")
+
+                    if not applied.Unmatched.IsEmpty then
+                        ctx.Err.WriteLine(
+                            $"tess: warning: {vpax} has statistics for {applied.Unmatched.Length} objects the model doesn't have (first: {applied.Unmatched.Head})"
+                        )
+
+                    source, db)
+
         match
             Source.load ctx modelPath
+            |> Result.bind withStats
             |> Result.bind (fun (source, db) ->
                 Bpa.collectRules source db opts |> Result.map (fun x -> (source, db), x))
         with
