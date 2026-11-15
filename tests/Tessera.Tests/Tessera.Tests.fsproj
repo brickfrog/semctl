@@ -126,6 +126,7 @@
     <Compile Include="BpaFixCommandTests.fs" />
     <Compile Include="PreviewCommandTests.fs" />
     <Compile Include="AddCalendarTests.fs" />
+    <Compile Include="SchemaCheckTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
 

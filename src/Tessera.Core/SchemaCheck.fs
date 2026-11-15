@@ -563,21 +563,37 @@ let update (db: Database) (report: Report) (dropRemoved: bool) : Result<Mutation
                     | _ -> ()
                 | _ -> ()
 
+    // One column at a time, so a column other DAX still uses is kept (with a warning) and the rest go.
     let removed =
-        if toRemove.Count = 0 then
-            Ok Mutation.Effect.none
-        else
-            RemoveObject.remove db (RemoveObject.RemoveSpec.ofSelectors (List.ofSeq toRemove))
+        toRemove
+        |> Seq.fold
+            (fun acc selector ->
+                acc
+                |> Result.bind (fun (effect: Mutation.Effect) ->
+                    match RemoveObject.remove db (RemoveObject.RemoveSpec.ofSelectors [ selector ]) with
+                    | Ok e ->
+                        Ok {
+                            effect with
+                                Warnings = effect.Warnings @ e.Warnings
+                                Notes = effect.Notes @ [ $"Removed {selector}: its source column is gone" ] @ e.Notes
+                        }
+                    | Error(RemoveBlocked(_, dependents)) ->
+                        let users = String.concat ", " dependents
+
+                        Ok {
+                            effect with
+                                Warnings =
+                                    effect.Warnings
+                                    @ [
+                                        $"{selector} has no source column any more but was kept: {users} still use it."
+                                    ]
+                        }
+                    | Error e -> Error e))
+            (Ok Mutation.Effect.none)
 
     removed
     |> Result.map (fun effect -> {
         effect with
             Warnings = List.ofSeq warnings @ effect.Warnings
-            Notes =
-                List.ofSeq notes
-                @ (if toRemove.Count > 0 then
-                       [ for r in toRemove -> $"Removed {r}: its source column is gone" ]
-                   else
-                       [])
-                @ effect.Notes
+            Notes = List.ofSeq notes @ effect.Notes
     })
