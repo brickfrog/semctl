@@ -74,8 +74,8 @@ let tests =
                          |> Seq.forall (fun c -> Char.IsAsciiLetterUpper c || Char.IsAsciiDigit c || c = '.'))
                         name
 
-                // Learn's TOC has 460; dax.guide adds 24.
-                Expect.equal DaxFunctions.all.Length 484 "count"
+                // Learn's TOC has 460; dax.guide adds 24, the formatter's list 1.
+                Expect.equal DaxFunctions.all.Length 485 "count"
             }
 
             test "has the newer and the deprecated functions, and none of DAX's keywords" {
@@ -101,6 +101,8 @@ let tests =
                         "TRUE"
                         "DISTINCT"
                         "sum"
+                        "KMEANSCLUSTERING"
+                        "INFO.SOMETHINGNEWER"
                     ] do
                     Expect.isTrue (DaxFunctions.isBuiltIn name) name
 
@@ -310,6 +312,43 @@ let tests =
 
                 Expect.equal (rules full) [ "ignore-outside-summarizecolumns"; "unknown-function" ] "SaveGate"
                 Expect.equal (rules plain) [ "unknown-function" ] "Deploy alone"
+            }
+        ]
+
+        testList "the CLI's editing commands" [
+            test "add --save refuses a syntax-tree rule's error, and an unknown function" {
+                use p = CliHarness.project ()
+                let model = IO.Path.Combine(p.Path, "Sales.SemanticModel")
+
+                for expression, rule in
+                    [
+                        "COUNTROWS ( { IGNORE ( 1 ) } )", "ignore-outside-summarizecolumns"
+                        "NoSuchFn ( 1 )", "unknown-function"
+                    ] do
+                    let r =
+                        CliHarness.tess [
+                            "add"
+                            model
+                            "measure:Sales/Bad"
+                            "--expression"
+                            expression
+                            "--save"
+                            "--json"
+                        ]
+
+                    Expect.equal r.Code Cli.Common.ExitCode.findings (r.Out + r.Err)
+                    use doc = CliHarness.json r
+                    let introduced = doc.RootElement.GetProperty("introducedErrors")
+                    Expect.equal (introduced.GetArrayLength()) 1 r.Out
+                    Expect.equal (introduced.[0].GetProperty("code").GetString()) rule r.Out
+
+                    Expect.equal
+                        (doc.RootElement.GetProperty("error").GetProperty("code").GetString())
+                        "change-introduces-errors"
+                        r.Out
+
+                let _, db = ModelIO.loadPath model |> ok
+                Expect.isNull (db.Model.Tables.["Sales"].Measures.Find "Bad") "not saved"
             }
         ]
 

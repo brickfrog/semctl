@@ -541,6 +541,35 @@ let tests =
 
                 Expect.contains codes "ignore-outside-summarizecolumns" ""
 
+            testCase "save_model counts the syntax-tree rules' errors"
+            <| fun () ->
+                use t = project ()
+
+                let s =
+                    serve [ t.Path; "--allow"; "metadata-write"; "--save" ] [
+                        callTool
+                            1
+                            "apply_changes"
+                            (dict [
+                                "operations",
+                                box [|
+                                    box (
+                                        dict [
+                                            "op", box "set"
+                                            "object", box "[Total]"
+                                            "properties", box (dict [ "expression", "COUNTROWS ( { IGNORE ( 1 ) } )" ])
+                                        ]
+                                    )
+                                |]
+                            ])
+                        callTool 2 "save_model" noArgs
+                    ]
+
+                let introduced = (ok s 1).GetProperty("introducedErrors")
+                Expect.equal (introduced.GetArrayLength()) 1 ""
+                Expect.equal (introduced.[0].GetProperty("code").GetString()) "ignore-outside-summarizecolumns" ""
+                Expect.equal ((failed s 2).GetProperty("code").GetString()) "change-introduces-errors" ""
+
             testCase "bpa: rules and findings; never a URL"
             <| fun () ->
                 use t = project ()

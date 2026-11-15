@@ -11,6 +11,11 @@
 ///     Power BI's own queries use, deprecated ones the engine still accepts). Its other entries
 ///     are operators, statements, keywords and data types (EVALUATE, VAR, ORDER BY, INTEGER,
 ///     DENSIFY, ...), which DAX never calls, so they're left out.
+///   - tess's formatter (Format.fs), which upper-cases calls to built-in functions: its list has one
+///     name in neither source, KMEANSCLUSTERING (`fromFormatter`, unverified), and it treats every
+///     INFO.* name as built-in. So does this catalog, so the rule never calls a function unknown that
+///     `tess format` writes as a built-in one, and an INFO function newer than this list isn't
+///     reported.
 ///
 /// When Microsoft adds a function, add it to `learn` (and note the date here): until then
 /// `tess validate` reports a call to it as an unknown-function error, and the save gate and
@@ -90,17 +95,22 @@ let private daxGuideOnly =
     TOPNSKIP
     """
 
+/// In tess's formatter's list (Format.fs) but neither source above.
+let private fromFormatter = "KMEANSCLUSTERING"
+
 let private words (s: string) =
     s.Split([| ' '; '\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)
 
 /// Every built-in DAX function name, upper case, sorted.
 let all: string list =
-    Array.append (words learn) (words daxGuideOnly)
+    Array.concat [ words learn; words daxGuideOnly; words fromFormatter ]
     |> Array.distinct
     |> Array.sort
     |> List.ofArray
 
 let private set = HashSet<string>(all, StringComparer.OrdinalIgnoreCase)
 
-/// Whether `name` is a built-in DAX function (case-insensitive, like DAX).
-let isBuiltIn (name: string) = set.Contains name
+/// Whether `name` is a built-in DAX function (case-insensitive, like DAX). Any INFO.* name counts.
+let isBuiltIn (name: string) =
+    set.Contains name
+    || name.StartsWith("INFO.", StringComparison.OrdinalIgnoreCase)

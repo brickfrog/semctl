@@ -532,6 +532,28 @@ let deployTests =
             Expect.stringContains (root.GetProperty("tmsl").GetString()) "createOrReplace" ""
             Expect.equal (root.GetProperty("introducedErrors").GetArrayLength()) 0 ""
 
+        testCase "the plan counts the syntax-tree rules' errors and unknown functions"
+        <| fun () ->
+            let server = salesServer ()
+
+            let t, local =
+                localModel (fun db ->
+                    let sales = db.Model.Tables.["Sales"]
+                    sales.Measures.Add(new Measure(Name = "Ignored", Expression = "COUNTROWS ( { IGNORE ( 1 ) } )"))
+                    sales.Measures.Add(new Measure(Name = "Unknown", Expression = "NoSuchFn ( 1 )")))
+
+            use _ = t
+            let r = run server [ "deploy"; local; workspace; "Sales"; "--json" ]
+            use doc = json r
+
+            let codes = [
+                for i in doc.RootElement.GetProperty("introducedErrors").EnumerateArray() ->
+                    i.GetProperty("code").GetString()
+            ]
+
+            Expect.equal (List.sort codes) [ "ignore-outside-summarizecolumns"; "unknown-function" ] r.Out
+            Expect.isEmpty server.Executed ""
+
         testCase "--execute on an existing database needs --overwrite; then it deploys"
         <| fun () ->
             let server = salesServer ()

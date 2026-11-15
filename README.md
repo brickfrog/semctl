@@ -3649,7 +3649,8 @@ packages), so TE3 offers their updates. Everything else in the package's TMDL (d
   matches the hash; line endings don't count, as in TE3 3.24.1): `--discard-changes` overwrites or removes them,
   `--keep-changes` leaves them (on `remove`, no longer linked to the package);
 - functions that other DAX still calls, on `remove` or when an update drops them: refused as by
-  [`remove`](#removing-objects-remove), unless `--force`;
+  [`remove`](#removing-objects-remove), unless `--force` (each call left behind is then an `unknown-function`
+  error, shown as introduced and reported by `validate` afterwards);
 - a package that depends on packages the model doesn't have: `--ignore-dependencies` installs it anyway
   (dependencies are not installed for you);
 - installing a package that is installed already: use `update`, which also takes `<id>@<version>` to move to an
