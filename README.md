@@ -30,6 +30,10 @@ With the .NET 10 SDK, you can install it as a .NET tool instead. Download `tesse
 dotnet tool install -g tessera --add-source ./folder-with-the-nupkg
 ```
 
+**For AI agents:** [SKILL.md](SKILL.md) tells an agent how to drive tess (JSON output, exit codes, dry runs and
+`--save`, no network). It ships next to the binary in every release archive, and in the .NET tool package (at its
+root and next to `tess.dll`).
+
 ## Usage
 
 ```sh
