@@ -25,22 +25,27 @@ type internal GroupAggSuppress private () =
 
 module GroupAgg =
 
-    /// What one iteration's CALCULATE needs, made on its first row: the rows of F under the
-    /// filters the transition keeps, by the row of T they belong to, and the values worked out.
+    /// What one iteration's CALCULATE (or measure) needs, made on its first row: the rows of F
+    /// under the filters the transition keeps, by the row of T they belong to, and the values
+    /// worked out.
     [<Sealed; AllowNullLiteral>]
     type private Entry
         (
             table: TableVal,
             source: SourceText,
             usable: bool,
+            agg: Expr,
             fact: BTable,
             kept: FilterCtx,
             buckets: Dictionary<int, ResizeArray<int>>,
             unique: bool
         ) =
         member _.Table = table
+        /// The text the aggregation is written in (its names resolve there).
         member _.Source = source
         member _.Usable = usable
+        /// The aggregation, `SUM ( F[x] )`.
+        member _.Agg = agg
         member _.Fact = fact
         member _.Kept = kept
         member _.Buckets = buckets
@@ -51,33 +56,66 @@ module GroupAgg =
         /// The value over no fact rows, once worked out.
         member val Empty = ValueNone with get, set
 
-    let private aggregations = [ "SUM" ]
+    /// The aggregations done by group: each reads nothing of its context but the visible stored
+    /// rows of one table (`Filters.visibleStored`), here F's (Functions/Aggregation.fs). One
+    /// that reads anything else (DISTINCTCOUNT reads whether the blank row is visible) must not
+    /// be added.
+    let private columnAggregations = [ "SUM"; "MIN"; "MAX"; "AVERAGE"; "COUNT"; "COUNTA" ]
 
-    /// The aggregation a CALCULATE argument is, if it is one this does: `SUM ( Table[Column] )`.
-    let private aggregation (e: Expr) : (Expr * Expr) option =
+    [<RequireQualifiedAccess>]
+    type private Over =
+        /// `F[x]`.
+        | Column of Expr
+        /// `F` (COUNTROWS).
+        | Table of Expr
+
+    /// The expression without the CALCULATEs around it that have no filter argument: with no row
+    /// context such a CALCULATE changes nothing (no transition, no filter, no modifier).
+    let rec private reduce (e: Expr) : Expr =
         let e = Fn.unparen e
 
         match e.Kind with
-        | Call(name, [ arg ]) when aggregations |> List.contains (name.Name.ToUpperInvariant()) ->
+        | Call(name, [ arg ]) when name.Name.ToUpperInvariant() = "CALCULATE" -> reduce arg
+        | _ -> e
+
+    /// The aggregation an expression is, if it is one done by group: `SUM ( F[x] )` (and the other
+    /// `columnAggregations` of one column), `COUNTROWS ( F )`.
+    let private aggregation (e: Expr) : (Expr * Over) option =
+        let e = reduce e
+
+        match e.Kind with
+        | Call(name, [ arg ]) ->
+            let n = name.Name.ToUpperInvariant()
+
             match (Fn.unparen arg).Kind with
-            | Qualified _ -> Some(e, arg)
+            | Qualified _ when columnAggregations |> List.contains n -> Some(e, Over.Column arg)
+            | QuotedTable _
+            | Identifier _ when n = "COUNTROWS" -> Some(e, Over.Table arg)
             | _ -> None
         | _ -> None
 
     let private unusable (table: TableVal) (source: SourceText) =
-        Entry(table, source, false, null, null, null, false)
+        Entry(table, source, false, Unchecked.defaultof<Expr>, null, null, null, false)
 
-    /// The entry for the iteration `rc` is a row of, or one that says to fall back.
-    let private make (ev: IEval) (ctx: Ctx) (rc: RowCtx) (arg: Expr) : Entry =
+    /// The entry for the iteration `rc` is a row of, or one that says to fall back. `inner`: the
+    /// context the aggregation is evaluated in, from the caller's and a filter context.
+    let private make
+        (ev: IEval)
+        (ctx: Ctx)
+        (rc: RowCtx)
+        (expr: Expr)
+        (source: SourceText)
+        (inner: Ctx -> FilterCtx -> Ctx)
+        : Entry =
         let model = ctx.Model
         let fc = ctx.Filter
         let cfg = fc.Config
         let t = rc.Table
-        let no () = unusable t ctx.Scope.Source
+        let no () = unusable t source
 
-        match aggregation arg with
+        match aggregation expr with
         | None -> no ()
-        | Some(_, column) ->
+        | Some(agg, over) ->
             if
                 model.Computing.Count > 0
                 || model.CalcGroups.Length > 0
@@ -100,12 +138,21 @@ module GroupAgg =
                 then
                     no ()
                 else
-                    let c = ev.Column({ ctx with Rows = [] }, column)
-                    let fact = c.Table
+                    let at = inner ctx fc
+
+                    let fact =
+                        match over with
+                        | Over.Column c -> ev.Column(at, c).Table
+                        | Over.Table x ->
+                            match ev.TryModelTable(at, x) with
+                            | Some f -> f
+                            | None -> null
+
                     let shared = VisCache.Of cfg
 
                     if
-                        not (obj.ReferenceEquals(fact, table) || cfg.IsExpanded(fact, table))
+                        isNull fact
+                        || not (obj.ReferenceEquals(fact, table) || cfg.IsExpanded(fact, table))
                         || (cfg.AmbiguousFrom fact).IsSome
                         || not shared.Usable
                         || not (shared.Intersective fact)
@@ -135,7 +182,7 @@ module GroupAgg =
                                             list.Add f
                                             buckets.[r] <- list
 
-                            Entry(t, ctx.Scope.Source, true, fact, kept, buckets, table.UniqueColumn.IsSome)
+                            Entry(t, source, true, agg, fact, kept, buckets, table.UniqueColumn.IsSome)
 
     /// The fact rows of a row set of T, ascending.
     let private factRows (e: Entry) (rows: RowSet) : int array =
@@ -157,23 +204,23 @@ module GroupAgg =
 
     /// The aggregation's value over these fact rows: the registered function, evaluated in a
     /// context with the row's filters whose rows of F are these.
-    let private valueOver (ev: IEval) (ctx: Ctx) (e: Entry) (agg: Expr) (rows: RowSet) (facts: int array) =
+    let private valueOver
+        (ev: IEval)
+        (ctx: Ctx)
+        (inner: Ctx -> FilterCtx -> Ctx)
+        (e: Entry)
+        (rows: RowSet)
+        (facts: int array)
+        =
         let cfg = ctx.Filter.Config
         let table = e.Table.BaseTable
         let fc = FilterCtx(e.Kept.Filters @ [ Rows(table, rows, cfg) ], cfg)
         let fact = e.Fact
         fc.Visible.[fact.Id * (fact.Model.Rels.Length + 1)] <- RowSet.OfSorted(fact.Size, facts)
-        ev.Scalar({ ctx with Filter = fc; Rows = [] }, agg)
+        ev.Scalar(inner ctx fc, e.Agg)
 
-    let private check
-        (ev: IEval)
-        (ctx: Ctx)
-        (call: Call)
-        (slow: IEval -> Ctx -> Call -> DaxValue)
-        (e: Entry)
-        (facts: int array)
-        (value: DaxValue)
-        =
+    /// Check mode: the value and the fact rows compared with the row-by-row evaluation's.
+    let private check (ctx: Ctx) (span: Span) (slow: unit -> DaxValue) (e: Entry) (facts: int array) (value: DaxValue) =
         let stats = ctx.Model.Incremental
         let all = IncrementalStats.Global
         GroupAggSuppress.On <- true
@@ -182,13 +229,13 @@ module GroupAgg =
             try
                 let v =
                     try
-                        Ok(slow ev ctx call)
+                        Ok(slow ())
                     with ex ->
                         Error ex.Message
 
                 let rows =
                     try
-                        let moved = Context.transition ctx call.Span
+                        let moved = Context.transition ctx span
                         Some(Filters.visibleStored moved.Filter e.Fact)
                     with _ ->
                         None
@@ -221,116 +268,175 @@ module GroupAgg =
 
             raise (
                 InvalidOperationException(
-                    $"the value of CALCULATE by group at {Fail.where ctx call.Span} differs from the row-by-row evaluation: %A{value} over {facts.Length} rows of '{e.Fact.Name}', row by row {says} over {rows |> Option.map _.Length} rows"
+                    $"the value by group at {Fail.where ctx span} differs from the row-by-row evaluation: %A{value} over {facts.Length} rows of '{e.Fact.Name}', row by row {says} over {rows |> Option.map _.Length} rows"
                 )
             )
+
+    /// Whether anything by group may be tried in this context.
+    let private allowed (ctx: Ctx) =
+        not GroupAggSuppress.On
+        && IncrementalStats.Global.GroupEnabled
+        && ctx.Model.Incremental.GroupEnabled
+        && isNull ctx.Group
+        && not ctx.CallerRows
+        && ctx.Model.Computing.Count = 0
+
+    let private entriesOf (state: FilterState) : Dictionary<obj, Entry> =
+        match state.GroupAgg with
+        | :? Dictionary<obj, Entry> as d -> d
+        | _ ->
+            let d = Dictionary<obj, Entry>(HashIdentity.Reference)
+            state.GroupAgg <- d
+            d
+
+    /// The value by group of the aggregation `expr` (kept under `key`) in the row `rc`, with
+    /// the fact rows it is over (in check mode, or when worked out); ValueNone to fall back.
+    let private lookup
+        (ev: IEval)
+        (ctx: Ctx)
+        (rc: RowCtx)
+        (key: obj)
+        (expr: Expr)
+        (source: SourceText)
+        (inner: Ctx -> FilterCtx -> Ctx)
+        : struct (Entry * DaxValue * int array) voption =
+        let stats = ctx.Model.Incremental
+        let all = IncrementalStats.Global
+        let entries = entriesOf ctx.Filter.State
+
+        let entry =
+            match entries.TryGetValue key with
+            | true, e when obj.ReferenceEquals(e.Table, rc.Table) && obj.ReferenceEquals(e.Source, source) -> e
+            | _ ->
+                let e =
+                    try
+                        make ev ctx rc expr source inner
+                    with _ ->
+                        unusable rc.Table source
+
+                entries.[key] <- e
+                e
+
+        if not entry.Usable || rc.Table.BaseRows.[rc.Row] >= entry.Table.BaseTable.RowCount then
+            ValueNone
+        else
+            let row = rc.Table.BaseRows.[rc.Row]
+
+            try
+                let table = entry.Table.BaseTable
+
+                let rows =
+                    if entry.Unique then
+                        RowSet.One(table.Size, row)
+                    else
+                        Filters.closeRows table [| row |]
+
+                let first = rows.Rows.[0]
+                let checking = all.Check || stats.Check
+
+                let cached =
+                    match entry.Values.TryGetValue first with
+                    | true, v -> ValueSome v
+                    | _ -> ValueNone
+
+                let facts =
+                    if cached.IsNone || checking then
+                        factRows entry rows
+                    else
+                        null
+
+                let value =
+                    match cached with
+                    | ValueSome v -> v
+                    | ValueNone when facts.Length = 0 ->
+                        match entry.Empty with
+                        | ValueSome v -> v
+                        | ValueNone ->
+                            let v = valueOver ev ctx inner entry rows facts
+                            entry.Empty <- ValueSome v
+                            v
+                    | ValueNone ->
+                        let v = valueOver ev ctx inner entry rows facts
+                        entry.Values.[first] <- v
+                        v
+
+                Interlocked.Increment(&stats.GroupApplied) |> ignore
+                Interlocked.Increment(&all.GroupApplied) |> ignore
+                ValueSome(struct (entry, value, facts))
+            with _ ->
+                // The row-by-row evaluation raises what it raises.
+                Interlocked.Increment(&stats.GroupErrors) |> ignore
+                Interlocked.Increment(&all.GroupErrors) |> ignore
+                ValueNone
+
+    let private calculateInner (ctx: Ctx) (fc: FilterCtx) : Ctx = { ctx with Filter = fc; Rows = [] }
 
     /// `CALCULATE ( <aggregation> )` with no filter argument: by group where that is exact (see the
     /// top of the file), else `slow` (the row-by-row evaluation).
     let calculate (ev: IEval) (ctx: Ctx) (call: Call) (slow: IEval -> Ctx -> Call -> DaxValue) : DaxValue =
-        let stats = ctx.Model.Incremental
-        let all = IncrementalStats.Global
-
         match ctx.Rows with
-        | [ rc ] when
-            not GroupAggSuppress.On
-            && all.GroupEnabled
-            && stats.GroupEnabled
-            && isNull ctx.Group
-            && not ctx.CallerRows
-            && call.Args.Length = 1
-            ->
-            let state = ctx.Filter.State
-
-            let entries =
-                match state.GroupAgg with
-                | :? Dictionary<Expr, Entry> as d -> d
-                | _ ->
-                    let d = Dictionary<Expr, Entry>(HashIdentity.Reference)
-                    state.GroupAgg <- d
-                    d
-
+        | [ rc ] when call.Args.Length = 1 && allowed ctx ->
             let arg = call.Args.Head
 
-            let entry =
-                match entries.TryGetValue arg with
-                | true, e when
-                    obj.ReferenceEquals(e.Table, rc.Table)
-                    && obj.ReferenceEquals(e.Source, ctx.Scope.Source)
-                    ->
-                    e
-                | _ ->
-                    let e =
-                        try
-                            make ev ctx rc arg
-                        with _ ->
-                            unusable rc.Table ctx.Scope.Source
+            match lookup ev ctx rc arg arg ctx.Scope.Source calculateInner with
+            | ValueNone -> slow ev ctx call
+            | ValueSome(struct (entry, value, facts)) ->
+                if IncrementalStats.Global.Check || ctx.Model.Incremental.Check then
+                    check ctx call.Span (fun () -> slow ev ctx call) entry facts value
 
-                    entries.[arg] <- e
-                    e
+                value
+        | _ -> slow ev ctx call
 
-            if not entry.Usable || rc.Table.BaseRows.[rc.Row] >= entry.Table.BaseTable.RowCount then
-                slow ev ctx call
+    /// A reference to a measure whose expression is an aggregation done by group (perhaps inside
+    /// CALCULATEs with no filter argument), in a row context: by group where that is exact, else
+    /// `slow` (the reference evaluated as written: Eval.fs). `inQuery`: whether the measure is
+    /// the query's.
+    let measure
+        (ev: IEval)
+        (ctx: Ctx)
+        (span: Span)
+        (m: BMeasure)
+        (inQuery: bool)
+        (slow: Ctx -> Span -> BMeasure -> DaxValue)
+        : DaxValue =
+        match ctx.Rows with
+        | [ rc ] when
+            allowed ctx
+            && ctx.Model.CalcGroups.Length = 0
+            && not (ctx.Measures |> List.exists (fun x -> obj.ReferenceEquals(x, m)))
+            ->
+            let expr =
+                try
+                    m.Expr
+                with _ ->
+                    Unchecked.defaultof<Expr>
+
+            // The measure's expression, evaluated as `Eval.evalMeasure` does after its transition.
+            let inner (c: Ctx) (fc: FilterCtx) : Ctx = {
+                c with
+                    Filter = fc
+                    Rows = []
+                    Scope = {
+                        Vars = Map.empty
+                        Source = m.Source
+                        InQuery = inQuery
+                    }
+                    Measures = m :: c.Measures
+                    Group = null
+                    Items = { c.Items with Current = None }
+            }
+
+            if obj.ReferenceEquals(expr, null) then
+                slow ctx span m
             else
-                let row = rc.Table.BaseRows.[rc.Row]
-
-                let attempt =
-                    try
-                        let table = entry.Table.BaseTable
-
-                        let rows =
-                            if entry.Unique then
-                                RowSet.One(table.Size, row)
-                            else
-                                Filters.closeRows table [| row |]
-
-                        let first = rows.Rows.[0]
-                        let agg = Fn.unparen arg
-                        let checking = all.Check || stats.Check
-
-                        let cached =
-                            match entry.Values.TryGetValue first with
-                            | true, v -> ValueSome v
-                            | _ -> ValueNone
-
-                        let facts =
-                            if cached.IsNone || checking then
-                                factRows entry rows
-                            else
-                                null
-
-                        let value =
-                            match cached with
-                            | ValueSome v -> v
-                            | ValueNone when facts.Length = 0 ->
-                                match entry.Empty with
-                                | ValueSome v -> v
-                                | ValueNone ->
-                                    let v = valueOver ev ctx entry agg rows facts
-                                    entry.Empty <- ValueSome v
-                                    v
-                            | ValueNone ->
-                                let v = valueOver ev ctx entry agg rows facts
-                                entry.Values.[first] <- v
-                                v
-
-                        ValueSome(value, facts)
-                    with _ ->
-                        Interlocked.Increment(&stats.GroupErrors) |> ignore
-                        Interlocked.Increment(&all.GroupErrors) |> ignore
-                        ValueNone
-
-                match attempt with
-                | ValueNone -> slow ev ctx call
-                | ValueSome(value, facts) ->
-                    Interlocked.Increment(&stats.GroupApplied) |> ignore
-                    Interlocked.Increment(&all.GroupApplied) |> ignore
-
-                    if all.Check || stats.Check then
-                        check ev ctx call slow entry facts value
+                match lookup ev ctx rc m expr m.Source inner with
+                | ValueNone -> slow ctx span m
+                | ValueSome(struct (entry, value, facts)) ->
+                    if IncrementalStats.Global.Check || ctx.Model.Incremental.Check then
+                        check ctx span (fun () -> slow ctx span m) entry facts value
 
                     value
-        | _ -> slow ev ctx call
+        | _ -> slow ctx span m
 
     // ---- Iterations whose rows have nothing in their buckets ------------------------------------
 
@@ -536,7 +642,7 @@ module GroupAgg =
 
         let fetch () =
             match ctx.Filter.State.GroupAgg with
-            | :? Dictionary<Expr, Entry> as d ->
+            | :? Dictionary<obj, Entry> as d ->
                 let found =
                     body.Calculates
                     |> Array.map (fun a ->

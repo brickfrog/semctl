@@ -193,7 +193,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
 
     // ---- Measures and functions -------------------------------------------------------------------
 
-    let evalMeasure (ctx: Ctx) (span: Span) (m: BMeasure) : DaxValue =
+    let evalMeasureAsWritten (ctx: Ctx) (span: Span) (m: BMeasure) : DaxValue =
         if ctx.Measures |> List.exists (fun x -> obj.ReferenceEquals(x, m)) then
             if not ctx.Items.Applied.IsEmpty then
                 Fail.notSupported
@@ -293,6 +293,11 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
                 // A value computed under an item in force depends on more than the filter
                 // context: only the plain measure is kept with it.
                 if moved.Items.Applied.IsEmpty then cached () else body ()
+
+    /// A measure reference; in a row context, by group where the measure is one aggregation
+    /// (GroupAgg.fs).
+    let evalMeasure (ctx: Ctx) (span: Span) (m: BMeasure) : DaxValue =
+        GroupAgg.measure ev ctx span m (isQueryMeasure ctx m) evalMeasureAsWritten
 
     /// Convert a VAL argument to the type its parameter asks for ("Value types ... support implicit
     /// type casting": Microsoft Learn, "DAX user-defined functions").
