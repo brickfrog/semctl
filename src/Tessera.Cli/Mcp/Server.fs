@@ -393,7 +393,7 @@ let private dependencies (s: Session) (args: JsonObject) =
 let private validate (s: Session) (_: JsonObject) =
     let clock = Stopwatch.StartNew()
     let g = Deps.build s.Db
-    let issues = Validate.validateGraph g s.Db
+    let issues = ValidateSemantic.validateGraph g s.Db
     Ok(ValidateCommand.validateJsonGrouped clock.Elapsed (Validate.group g issues))
 
 let private lint (s: Session) (args: JsonObject) =
@@ -925,7 +925,7 @@ let private applyChanges (s: Session) (args: JsonObject) =
                                 | _ -> Error(LoadFailed("apply_changes", "invalid operation"))))
                     (Ok Mutation.Effect.none)
 
-            match Mutation.applyResolving work edit with
+            match SaveGate.applyResolving work edit with
             | Error e -> Error(defaultArg failure (Tess e))
             | Ok(applied, resolved) ->
                 let files = batch.Edits

@@ -889,9 +889,23 @@ let commandTests =
             Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "remove-blocked" r.Out
             Expect.stringContains (tess [ "pkg"; "list"; model ]).Out "My.Lib 1.0.0" "still installed"
 
+            // Without --save the dry run shows the call it leaves broken as an introduced error.
+            let dry = tess [ "pkg"; "remove"; model; "My.Lib"; "--force"; "--json" ]
+            Expect.equal dry.Code ExitCode.ok dry.Err
+            use dryDoc = json dry
+            let introduced = dryDoc.RootElement.GetProperty("introducedErrors")
+            Expect.equal (introduced.GetArrayLength()) 1 dry.Out
+            Expect.equal (introduced.[0].GetProperty("code").GetString()) "unknown-function" dry.Out
+
             let forced = tess [ "pkg"; "remove"; model; "My.Lib"; "--save"; "--force" ]
             Expect.equal forced.Code ExitCode.ok forced.Err
+            Expect.stringContains forced.Err "My.Lib.Twice is not a DAX function" "reported though forced"
             Expect.stringContains (tess [ "pkg"; "list"; model ]).Out "No packages installed." "removed"
+
+            let v = tess [ "validate"; model ]
+            Expect.equal v.Code ExitCode.findings v.Out
+            Expect.stringContains v.Out "measure:Sales/Doubled" v.Out
+            Expect.stringContains v.Out "[unknown-function]" v.Out
         }
 
         test "update shows the diff and moves the version" {

@@ -28,7 +28,7 @@ type Args =
                 + $"Default: {Scaffold.defaultCompatibilityLevel}."
             | Format _ ->
                 "output format: bim | tmdl | pbip | database.json. Default: inferred from the path "
-                + "(*.bim -> bim, *.SemanticModel -> pbip, otherwise a tmdl folder)."
+                + "(*.bim -> bim, *.SemanticModel -> pbip, otherwise a tmdl folder). bim adds .bim to a path without it."
             | Culture _ -> $"model culture, also used as the source query culture. Default: {Scaffold.defaultCulture}."
             | Force -> "overwrite a non-empty destination."
 
@@ -101,12 +101,11 @@ let private unchangedJson (opts: Scaffold.Options) (format: ModelIO.OutputFormat
     ]
 
 let run (ctx: Ctx) (args: ParseResults<Args>) =
-    let path = args.GetResult Args.Destination
-    let defaults = Scaffold.defaults path
+    let given = args.GetResult Args.Destination
 
     let format =
         match args.TryGetResult Args.Format with
-        | None -> Ok(ModelIO.OutputFormat.infer path)
+        | None -> Ok(ModelIO.OutputFormat.infer given)
         | Some f ->
             ModelIO.OutputFormat.tryParse f
             |> Option.map Ok
@@ -114,6 +113,13 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
                 Error
                     $"""unknown format '{f}'{Suggest.hint (Suggest.closest ModelIO.OutputFormat.tokens f)} (expected {System.String.Join(", ", ModelIO.OutputFormat.tokens)})"""
             )
+
+    // `--format bim out` writes out.bim (see ModelIO.OutputFormat.destinationFor).
+    let destination =
+        format |> Result.bind (fun f -> ModelIO.OutputFormat.destinationFor f given)
+
+    let path = destination |> Result.defaultValue given
+    let defaults = Scaffold.defaults path
 
     let name =
         match args.TryGetResult Args.Name with
@@ -136,12 +142,13 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             |> Option.map Ok
             |> Option.defaultValue (Error $"unknown or non-specific culture '{c}' (expected e.g. en-US)")
 
-    match format, name, level, culture with
-    | Error e, _, _, _
-    | _, Error e, _, _
-    | _, _, Error e, _
-    | _, _, _, Error e -> UsageError e
-    | Ok format, Ok name, Ok level, Ok culture ->
+    match format, name, level, culture, destination with
+    | Error e, _, _, _, _
+    | _, Error e, _, _, _
+    | _, _, Error e, _, _
+    | _, _, _, Error e, _
+    | _, _, _, _, Error e -> UsageError e
+    | Ok format, Ok name, Ok level, Ok culture, Ok _ ->
         let opts: Scaffold.Options = {
             Name = name
             CompatibilityLevel = level

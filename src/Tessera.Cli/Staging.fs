@@ -6,7 +6,7 @@
 ///   - report files that a staged rename or move rewrites are staged too (an overlay of path ->
 ///     text), so later edits plan against the staged text and several renames compose; nothing is
 ///     written until `save`, which writes the model first, then the report files;
-///   - the save gate: a save is refused while the model has gated errors (Mutation.gatedErrors) it
+///   - the save gate: a save is refused while the model has gated errors (SaveGate.gatedErrors) it
 ///     didn't have when it was loaded or last saved, unless forced. Errors of renamed objects are
 ///     matched under the names they had then.
 ///
@@ -62,7 +62,7 @@ let private keyOf (origins: Map<ObjectRef, ObjectRef>) (i: Validate.Issue) =
     i.Rule, Map.tryFind i.Ref origins |> Option.defaultValue i.Ref, i.Message
 
 let private baselineOf (db: Database) =
-    Mutation.gatedErrors db |> List.map (keyOf Map.empty) |> Set.ofList
+    SaveGate.gatedErrors db |> List.map (keyOf Map.empty) |> Set.ofList
 
 let private fullPath (p: string) = Path.GetFullPath p
 
@@ -96,7 +96,7 @@ module StagedModel =
 
     /// The gated errors present now that weren't when the model was loaded (or last saved).
     let introducedSinceLoad (m: StagedModel) =
-        Mutation.gatedErrors m.Db
+        SaveGate.gatedErrors m.Db
         |> List.filter (fun i -> not (m.Baseline.Contains(keyOf m.Origins i)))
 
     /// Staged edits that aren't saved.

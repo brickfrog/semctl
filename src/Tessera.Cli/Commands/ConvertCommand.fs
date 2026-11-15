@@ -29,7 +29,8 @@ type Args =
                 "output format: "
                 + String.Join(" | ", ModelIO.OutputFormat.tokens)
                 + ". Default: inferred from the destination (*.bim -> bim, *.SemanticModel -> pbip, "
-                + ".../database.json or a folder holding one -> database.json, otherwise a tmdl folder)."
+                + ".../database.json or a folder holding one -> database.json, otherwise a tmdl folder). "
+                + "bim adds .bim to a path without it."
             | Force -> "overwrite a non-empty destination."
             | Eol _ ->
                 "line endings: auto (default: match files already at the destination, else the source, else lf) "
@@ -88,11 +89,17 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
         | Some n when n < 1 || n > 16 -> Error "--indent-spaces must be between 1 and 16"
         | other -> Ok other
 
-    match format, eol, indent with
-    | Error e, _, _
-    | _, Error e, _
-    | _, _, Error e -> UsageError e
-    | Ok format, Ok eol, Ok indent ->
+    // `--format bim out` writes out.bim (see ModelIO.OutputFormat.destinationFor).
+    let target =
+        format
+        |> Result.bind (fun f -> ModelIO.OutputFormat.destinationFor f destination)
+
+    match format, eol, indent, target with
+    | Error e, _, _, _
+    | _, Error e, _, _
+    | _, _, Error e, _
+    | _, _, _, Error e -> UsageError e
+    | Ok format, Ok eol, Ok indent, Ok destination ->
         let result =
             Source.load ctx source
             |> Result.bind (fun (src, db) ->

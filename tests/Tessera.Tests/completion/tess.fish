@@ -192,7 +192,7 @@ function __tess_options
         case 'validate'
             printf '%s\t%s\n' '--min-severity' 'only show issues this severe or more: error, warning or info (default: info)'
             printf '%s\t%s\n' '--fail-on' 'exit 1 if any issue is this severe or more, shown or not: error, warning or info (default: error)'
-            printf '%s\t%s\n' '--rule' 'only these rules (repeatable or comma-separated): unresolved-reference, circular-reference, invalid-token, empty-expression, duplicate-name, relationship-datatype-mismatch, relationship-self-join, invalid-sort-by, tom-validation, invalid-culture, calculate-variable, ignore-outside-summarizecolumns, week-without-weekly-calendar'
+            printf '%s\t%s\n' '--rule' 'only these rules (repeatable or comma-separated): unresolved-reference, circular-reference, invalid-token, empty-expression, duplicate-name, relationship-datatype-mismatch, relationship-self-join, invalid-sort-by, tom-validation, unknown-function, invalid-culture, calculate-variable, ignore-outside-summarizecolumns, week-without-weekly-calendar'
             printf '%s\t%s\n' '--ci' 'also write CI annotations to stderr: github (gh), azdo (azure-devops, vsts), none'
             printf '%s\t%s\n' '--no-group' 'list every issue on its own, instead of folding issues with one root cause into the first'
             printf '%s\t%s\n' '--sarif' 'also write the findings as a SARIF 2.1.0 file (e.g. for GitHub code scanning; paths relative to the repository root)'

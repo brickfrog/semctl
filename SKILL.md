@@ -56,7 +56,7 @@ tess info ./Sales.pbip --json                        # what's in the model
 tess list ./Sales.pbip -k measure --json             # objects, filtered by kind (-k) or table (-t)
 tess get ./Sales.pbip "[Margin]" --json              # one object
 tess deps ./Sales.pbip "[Margin]" --json             # what it uses, and what uses it
-tess validate ./Sales.pbip --json                    # broken references, cycles, ... (exit 1: issues)
+tess validate ./Sales.pbip --json                    # broken references, cycles, unknown functions, ... (exit 1: issues)
 tess bpa ./Sales.pbip --json                         # Best Practice Analyzer (built-in rules work offline)
 tess lint ./Sales.pbip --json                        # DAX code actions; --fix --save rewrites them
 tess format ./Sales.pbip --check --json              # exit 1 if any DAX isn't formatted

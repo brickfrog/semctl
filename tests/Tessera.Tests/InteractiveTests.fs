@@ -322,6 +322,20 @@ let sessionTests =
             Expect.stringContains r.Err "tess: Not saved: the staged edits introduce 1 error:\n  measure:Sales/Bad" ""
             Expect.contains (measures t.Path) "Bad" "saved with --force"
 
+        testCase "the save gate counts the syntax-tree rules' errors (IGNORE outside SUMMARIZECOLUMNS)"
+        <| fun () ->
+            use t = project ()
+
+            let r =
+                session [ t.Path; "--no-batch" ] [
+                    "add measure:Sales/Bad -e \"COUNTROWS ( { IGNORE ( 1 ) } )\""
+                    "save"
+                ]
+
+            Expect.stringContains r.Err "tess: Not saved: the staged edits introduce 1 error:" r.Err
+            Expect.stringContains r.Err "ignore-outside-summarizecolumns" r.Err
+            Expect.isFalse (measures t.Path |> List.contains "Bad") "not saved"
+
         testCase "a staged rename stages the report edit; save writes the model, then the report"
         <| fun () ->
             let t, file = withReport ()

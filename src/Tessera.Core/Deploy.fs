@@ -268,8 +268,11 @@ let private fixCalculationGroupColumns (level: int) (model: JsonObject) =
 let private issueKey (i: Validate.Issue) =
     ObjectRef.format i.Ref, i.Rule, i.Message
 
-let private errorsOf (db: Database) =
-    Validate.validate db
+/// Every error-severity issue: Validate's, and `extra`'s (SaveGate passes ValidateSemantic's).
+let private errorsWith (extra: Mutation.Checks) (db: Database) =
+    let g = Deps.build db
+
+    Validate.validateGraph g db @ extra g db
     |> List.filter (fun i -> i.Severity = Validate.Severity.Error)
 
 let private emptyLike (db: Database) =
@@ -304,9 +307,17 @@ let private kindChanges (local: Model) (deployed: Model) = [
         | None -> ()
 ]
 
-/// Plan deploying `local` to `target`. `diff` says which properties the reported changes leave out.
-/// Fails when the model can't go to this server at all.
-let plan (opts: Options) (diff: Diff.Options) (target: Target) (local: Database) : Result<Plan, TessError> =
+/// `plan`, also counting `extra`'s error-severity issues as errors (SaveGate.deployPlan passes
+/// ValidateSemantic's).
+let planWith
+    (extra: Mutation.Checks)
+    (opts: Options)
+    (diff: Diff.Options)
+    (target: Target)
+    (local: Database)
+    : Result<Plan, TessError> =
+    let errorsOf = errorsWith extra
+
     let fail (reason: string) =
         Error(DeployFailed("the server", target.Database, [ reason ]))
 
@@ -428,3 +439,9 @@ let plan (opts: Options) (diff: Diff.Options) (target: Target) (local: Database)
                 Warnings = List.ofSeq warnings
                 Kept = List.ofSeq kept
             }
+
+/// Plan deploying `local` to `target`. `diff` says which properties the reported changes leave out.
+/// Fails when the model can't go to this server at all. Errors are Validate's only; SaveGate.deployPlan
+/// adds ValidateSemantic's.
+let plan (opts: Options) (diff: Diff.Options) (target: Target) (local: Database) : Result<Plan, TessError> =
+    planWith Mutation.Checks.none opts diff target local

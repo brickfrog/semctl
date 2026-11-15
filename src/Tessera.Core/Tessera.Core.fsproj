@@ -23,6 +23,7 @@
     <Compile Include="DaxAst.fs" />
     <Compile Include="DaxParser.fs" />
     <Compile Include="DaxPrinter.fs" />
+    <Compile Include="DaxFunctions.fs" />
     <Compile Include="Deps.fs" />
     <Compile Include="Validate.fs" />
     <Compile Include="Rename.fs" />
@@ -92,6 +93,7 @@
     <Compile Include="Engine/Security.fs" />
     <Compile Include="Engine/Engine.fs" />
     <Compile Include="ValidateSemantic.fs" />
+    <Compile Include="SaveGate.fs" />
     <Compile Include="TestSuite.fs" />
     <Compile Include="TestRun.fs" />
     <Compile Include="SourceLocations.fs" />

@@ -515,6 +515,61 @@ let tests =
                 Expect.equal ((ok s 3).GetProperty("formatted").GetString()) "SUM ( Sales[Amount] )" ""
                 Expect.equal ((ok s 4).GetProperty("ref").GetString()) "measure:Sales/Total" ""
 
+            testCase "validate_model runs the syntax-tree rules too, as `tess validate` does"
+            <| fun () ->
+                use t = project ()
+                let model = Path.Combine(t.Path, "Sales.SemanticModel")
+
+                let add =
+                    CliHarness.tess [
+                        "add"
+                        model
+                        "measure:Sales/Bad"
+                        "--expression"
+                        "COUNTROWS ( { IGNORE ( 1 ) } )"
+                        "--save"
+                        "--force"
+                    ]
+
+                Expect.equal add.Code 0 add.Err
+
+                let s = serve [ t.Path ] [ callTool 1 "validate_model" noArgs ]
+
+                let codes = [
+                    for f in (ok s 1).GetProperty("findings").EnumerateArray() -> f.GetProperty("code").GetString()
+                ]
+
+                Expect.contains codes "ignore-outside-summarizecolumns" ""
+
+            testCase "save_model counts the syntax-tree rules' errors"
+            <| fun () ->
+                use t = project ()
+
+                let s =
+                    serve [ t.Path; "--allow"; "metadata-write"; "--save" ] [
+                        callTool
+                            1
+                            "apply_changes"
+                            (dict [
+                                "operations",
+                                box [|
+                                    box (
+                                        dict [
+                                            "op", box "set"
+                                            "object", box "[Total]"
+                                            "properties", box (dict [ "expression", "COUNTROWS ( { IGNORE ( 1 ) } )" ])
+                                        ]
+                                    )
+                                |]
+                            ])
+                        callTool 2 "save_model" noArgs
+                    ]
+
+                let introduced = (ok s 1).GetProperty("introducedErrors")
+                Expect.equal (introduced.GetArrayLength()) 1 ""
+                Expect.equal (introduced.[0].GetProperty("code").GetString()) "ignore-outside-summarizecolumns" ""
+                Expect.equal ((failed s 2).GetProperty("code").GetString()) "change-introduces-errors" ""
+
             testCase "bpa: rules and findings; never a URL"
             <| fun () ->
                 use t = project ()
