@@ -104,6 +104,41 @@ let tests =
             Expect.stringContains r.Err "--force" ""
             Expect.isTrue ((load t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "nothing removed"
 
+        testCase "schemacheck --drop-removed-columns keeps a column a visual uses, with a warning"
+        <| fun () ->
+            let t, _ = withReport ()
+            use _ = t
+            // Date's source returns every data column but Year, which the visual uses.
+            let date = (load t.Path).Model.Tables.["Date"]
+
+            let columns = [
+                for c in date.Columns do
+                    match c with
+                    | :? Microsoft.AnalysisServices.Tabular.DataColumn as d when d.SourceColumn <> "Year" ->
+                        $"\"{d.SourceColumn}\""
+                    | _ -> ()
+            ]
+
+            let schema = t.Combine "schema.json"
+            write schema ("""{ "tables": { "Date": [ """ + String.concat ", " columns + " ] } }")
+
+            let r =
+                tess [
+                    "schemacheck"
+                    t.Path
+                    "Date"
+                    "--source"
+                    schema
+                    "--update"
+                    "--drop-removed-columns"
+                    "--save"
+                ]
+
+            Expect.equal r.Code ExitCode.ok (r.Out + r.Err)
+            Expect.stringContains r.Err "was kept: a report uses it" ""
+            Expect.stringContains r.Err "visual v1" ""
+            Expect.isTrue ((load t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "kept"
+
         testCase "--json lists the usages; --force removes it anyway"
         <| fun () ->
             let t, _ = withReport ()

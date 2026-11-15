@@ -353,7 +353,16 @@ let runWith (connect: SqlConnect) (ctx: Ctx) (args: ParseResults<Args>) =
             | Ok mopts ->
                 let drop = args.Contains Args.Drop_Removed_Columns
 
-                Mutation.run ctx "schemacheck" mopts modelPath (SchemaCheckSource.update ctx connect source tables drop)
+                // A column a PBIR report next to the model uses is kept, as `remove` keeps it; with
+                // --save-to the reports keep their model, so they don't stop a copy.
+                Mutation.runWith ctx "schemacheck" mopts modelPath (fun modelSource db ->
+                    let check =
+                        match mopts.Target with
+                        | Mutation.SaveTo _ -> fun _ -> []
+                        | _ -> Staging.reportCheckFor modelSource
+
+                    SchemaCheckSource.update ctx connect source tables drop check db
+                    |> Result.map (fun effect -> effect, []))
         | Ok failOn, Ok ci ->
             match
                 Source.load ctx modelPath

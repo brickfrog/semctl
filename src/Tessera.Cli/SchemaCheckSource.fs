@@ -42,10 +42,19 @@ let check (connect: SqlConnect) (db: Database) (source: string) (tables: string 
             disposable |> Option.iter (fun d -> d.Dispose()))
 
 /// The --update edit: check, write what was found to stderr (stdout is the change set), update.
-let update (ctx: Ctx) (connect: SqlConnect) (source: string) (tables: string list) (dropRemoved: bool) (db: Database) =
+/// `reportCheck` keeps a column a PBIR report uses (as `remove` refuses it).
+let update
+    (ctx: Ctx)
+    (connect: SqlConnect)
+    (source: string)
+    (tables: string list)
+    (dropRemoved: bool)
+    (reportCheck: ObjectRef list -> string list)
+    (db: Database)
+    =
     check connect db source tables
     |> Result.bind (fun report ->
         for i in report.Issues do
             ctx.Err.WriteLine $"tess: schemacheck: {ObjectRef.format i.Ref}: {i.Message} [{i.Code}]"
 
-        SchemaCheck.update db report dropRemoved)
+        SchemaCheck.updateWith reportCheck db report dropRemoved)

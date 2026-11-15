@@ -3557,7 +3557,8 @@ set. The findings go to stderr.
 - A **changed type** is changed on the column itself; everything else about it (name, format string, description,
   folders, relationships, translations) stays.
 - A **removed source column** is only reported, unless `--drop-removed-columns`. Then it is removed as `tess remove`
-  would; a column other DAX still uses is kept, with a warning naming what uses it.
+  would; a column other DAX still uses, or a PBIR report next to the model uses, is kept, with a warning naming
+  what uses it.
 - Whatever an annotation makes the check ignore is left alone; skipped tables and query errors change nothing.
 
 `--update` doesn't take `--fail-on`, `--ci`, `--trx` or `--sarif`. `tess set <model> <table> --update-schema --source

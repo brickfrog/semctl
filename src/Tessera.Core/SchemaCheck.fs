@@ -492,8 +492,14 @@ let check (db: Database) (source: ISchemaSource) (tables: string list) : Result<
 /// that was reported added (named and sourced as the source names it, with its mapped type), change
 /// the data type of each column reported retyped (nothing else about it changes), and, only with
 /// `dropRemoved`, remove the columns whose source column is gone (through `remove`, so DAX that
-/// still uses one blocks it). Whatever the annotations made the check ignore is left alone.
-let update (db: Database) (report: Report) (dropRemoved: bool) : Result<Mutation.Effect, TessError> =
+/// still uses one blocks it, and so does a PBIR report that `reportCheck` says uses it). Whatever the
+/// annotations made the check ignore is left alone.
+let updateWith
+    (reportCheck: ObjectRef list -> string list)
+    (db: Database)
+    (report: Report)
+    (dropRemoved: bool)
+    : Result<Mutation.Effect, TessError> =
     let model = db.Model
     let warnings = ResizeArray<string>()
     let notes = ResizeArray<string>()
@@ -573,7 +579,9 @@ let update (db: Database) (report: Report) (dropRemoved: bool) : Result<Mutation
             (fun acc selector ->
                 acc
                 |> Result.bind (fun (effect: Mutation.Effect) ->
-                    match RemoveObject.remove db (RemoveObject.RemoveSpec.ofSelectors [ selector ]) with
+                    match
+                        RemoveObject.removeWith reportCheck db (RemoveObject.RemoveSpec.ofSelectors [ selector ])
+                    with
                     | Ok e ->
                         Ok {
                             effect with
@@ -591,6 +599,17 @@ let update (db: Database) (report: Report) (dropRemoved: bool) : Result<Mutation
                                         $"{selector} has no source column any more but was kept: {users} still use it."
                                     ]
                         }
+                    | Error(UsedByReport(_, usages)) ->
+                        let uses = String.concat "; " usages
+
+                        Ok {
+                            effect with
+                                Warnings =
+                                    effect.Warnings
+                                    @ [
+                                        $"{selector} has no source column any more but was kept: a report uses it ({uses})."
+                                    ]
+                        }
                     | Error e -> Error e))
             (Ok Mutation.Effect.none)
 
@@ -600,3 +619,7 @@ let update (db: Database) (report: Report) (dropRemoved: bool) : Result<Mutation
             Warnings = List.ofSeq warnings @ effect.Warnings
             Notes = List.ofSeq notes @ effect.Notes
     })
+
+/// `updateWith` without a report check.
+let update (db: Database) (report: Report) (dropRemoved: bool) : Result<Mutation.Effect, TessError> =
+    updateWith (fun _ -> []) db report dropRemoved

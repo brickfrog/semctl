@@ -80,11 +80,16 @@ let private updateSchema (ctx: Ctx) (args: ParseResults<Args>) model selector op
     | Ok opts, Some source ->
         let drop = args.Contains Args.Drop_Removed_Columns
 
-        Mutation.run ctx "set" opts model (fun db ->
+        Mutation.runWith ctx "set" opts model (fun modelSource db ->
+            let check =
+                match opts.Target with
+                | Mutation.SaveTo _ -> fun _ -> []
+                | _ -> Staging.reportCheckFor modelSource
+
             Selector.resolve (objects db) selector
             |> Result.bind (fun target ->
                 let update tables =
-                    SchemaCheckSource.update ctx (SchemaCheckSource.live ctx) source tables drop db
+                    SchemaCheckSource.update ctx (SchemaCheckSource.live ctx) source tables drop check db
 
                 match target.Ref.Kind, target.Ref.Path with
                 | ObjectKind.Table, [ table ] -> update [ table ]
@@ -96,7 +101,8 @@ let private updateSchema (ctx: Ctx) (args: ParseResults<Args>) model selector op
                             "schema",
                             "--update-schema takes a table, or `model` for every table"
                         )
-                    )))
+                    ))
+            |> Result.map (fun effect -> effect, []))
 
 let run (ctx: Ctx) (args: ParseResults<Args>) =
     let model, selector = args.GetResult Args.Target
