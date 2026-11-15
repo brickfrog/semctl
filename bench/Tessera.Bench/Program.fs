@@ -149,12 +149,15 @@ let child (model: string) (dir: string) (start: int) (filter: Regex) (check: boo
             let applied, checkedBefore, mismatched =
                 incremental.Applied, incremental.Checked, incremental.Mismatched
 
+            let gApplied, gChecked, gMismatched =
+                incremental.GroupApplied + incremental.GroupRows, incremental.GroupChecked, incremental.GroupMismatched
+
             let sw = Stopwatch.StartNew()
             let r = Engine.evaluateQuery prepared q.Dax
             let ms = sw.Elapsed.TotalMilliseconds
 
             Console.Out.WriteLine(
-                $"STATS\t{i}\t{incremental.Applied - applied}\t{incremental.Checked - checkedBefore}\t{incremental.Mismatched - mismatched}"
+                $"STATS\t{i}\t{incremental.Applied - applied}\t{incremental.Checked - checkedBefore}\t{incremental.Mismatched - mismatched}\t{incremental.GroupApplied + incremental.GroupRows - gApplied}\t{incremental.GroupChecked - gChecked}\t{incremental.GroupMismatched - gMismatched}"
             )
 
             let status, print =
@@ -194,6 +197,9 @@ let parent
     let mutable applied = 0L
     let mutable checkedCount = 0L
     let mutable mismatched = 0L
+    let mutable gApplied = 0L
+    let mutable gChecked = 0L
+    let mutable gMismatched = 0L
     let exe = Environment.ProcessPath
     let dll = typeof<Query>.Assembly.Location
 
@@ -266,6 +272,9 @@ let parent
                     applied <- applied + int64 f.[2]
                     checkedCount <- checkedCount + int64 f.[3]
                     mismatched <- mismatched + int64 f.[4]
+                    gApplied <- gApplied + int64 f.[5]
+                    gChecked <- gChecked + int64 f.[6]
+                    gMismatched <- gMismatched + int64 f.[7]
                 | "PREPARE" -> prepare <- float f.[1] :: prepare
                 | "PEAK" -> peak <- max peak (int64 f.[1])
                 | "DONE" ->
@@ -341,8 +350,13 @@ let parent
 
     // Of the queries that finished.
     eprintfn "incremental filter contexts: %d applied, %d checked, %d mismatched" applied checkedCount mismatched
+    eprintfn "aggregation by group: %d applied, %d checked, %d mismatched" gApplied gChecked gMismatched
 
-    let failed = if check && mismatched > 0L then 1 else 0
+    let failed =
+        if check && (mismatched > 0L || gMismatched > 0L) then
+            1
+        else
+            0
 
     match compare with
     | Some path ->

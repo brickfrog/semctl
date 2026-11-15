@@ -457,6 +457,30 @@ type IncrementalStats() =
     /// By table name, the results `Applied` counts, while `Check` is set on this one.
     member val AppliedTo = ConcurrentDictionary<string, int64>(StringComparer.Ordinal) with get
 
+    /// Values of `CALCULATE ( <aggregation> )` in a row context looked up in per-row buckets of
+    /// the fact table's rows (see "Aggregating by group" in the author's guide).
+    [<DefaultValue>]
+    val mutable GroupApplied: int64
+
+    /// Bucketed values recomputed row by row and compared (`Check`), row sets included.
+    [<DefaultValue>]
+    val mutable GroupChecked: int64
+
+    /// Bucketed values or row sets that differed from the row-by-row evaluation: must stay 0.
+    [<DefaultValue>]
+    val mutable GroupMismatched: int64
+
+    /// Rows of an iteration evaluated from their (empty) buckets and their columns, without the
+    /// evaluator (see "Aggregating by group").
+    [<DefaultValue>]
+    val mutable GroupRows: int64
+
+    /// Bucketed attempts that raised, after which the row was evaluated row by row.
+    [<DefaultValue>]
+    val mutable GroupErrors: int64
+
+    /// Whether aggregating by group is used at all (both this and `Global`'s must be set).
+    member val GroupEnabled = true with get, set
     /// Whether incremental contexts are used at all (both this and `Global`'s must be set).
     member val Enabled = true with get, set
     /// Recompute every incremental result in full, without caches, and compare (slow; for tests).
@@ -1361,6 +1385,10 @@ type FilterState() =
             bases <- Dictionary<obj array, obj>(ReferenceArrayComparer.Instance)
 
         bases
+
+    /// Buckets of a fact table's rows for aggregating by group (GroupAgg.fs), by the code of the
+    /// aggregation; they depend on the filters and relationships alone.
+    member val GroupAgg: obj = null with get, set
 
     /// The rows of contexts with these filters first and others added, worked out incrementally,
     /// by the table, the relationship, and the filters added (a `VisKey`, Caching.fs).

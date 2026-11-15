@@ -16,7 +16,8 @@ let main argv =
             rest
     | _ ->
         // TESSERA_CHECK_INCREMENTAL=1: every incremental filter context is recomputed in full and
-        // compared (slow); the run fails if any differed.
+        // compared, and every value aggregated by group evaluated row by row (slow); the run fails
+        // if any differed.
         let check = Environment.GetEnvironmentVariable "TESSERA_CHECK_INCREMENTAL" = "1"
         let stats = Tessera.DaxEngine.IncrementalStats.Global
 
@@ -33,6 +34,17 @@ let main argv =
                 stats.Mismatched
                 stats.Errors
 
-            if stats.Mismatched > 0L then 1 else code
+            eprintfn
+                "aggregation by group: %d values, %d rows from their buckets, %d checked, %d mismatched, %d fell back after an error"
+                stats.GroupApplied
+                stats.GroupRows
+                stats.GroupChecked
+                stats.GroupMismatched
+                stats.GroupErrors
+
+            if stats.Mismatched > 0L || stats.GroupMismatched > 0L then
+                1
+            else
+                code
         else
             code
