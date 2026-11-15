@@ -83,10 +83,58 @@ let private (|WatchedTestRun|_|) (args: ParseResults<TestCommand.Args>) =
     | Some(TestCommand.Run run) when run.Contains TestCommand.RunArgs.Watch -> Some run
     | _ -> None
 
+/// Commands whose arguments name no model of a session (`tess interactive` passes them as typed).
+let private modelessCommands =
+    set [ "init"; "completion"; "connect"; "profile"; "session"; "interactive"; "shell"; "mcp" ]
+
+/// For `tess interactive`: put the session's model into a command line where its command takes it,
+/// after the command and subcommand words (`bpa rules list` -> `bpa rules list <model>`). The line
+/// is left as it is for a command without a model, or when it names the model (or, for `format`, a
+/// .dax file) itself.
+let private insertModel (words: string list) (model: string) : string list =
+    let subcommands (p: ArgumentParser) = [
+        for sub in p.GetSubCommandParsers() do
+            match sub.ParentInfo with
+            | Some info -> info.CommandLineNames.Value, sub
+            | None -> ()
+    ]
+
+    let rec walk (p: ArgumentParser) (taken: string list) (rest: string list) =
+        match rest with
+        | w :: more ->
+            match subcommands p |> List.tryFind (fun (names, _) -> List.contains w names) with
+            | Some(_, sub) -> walk sub (taken @ [ w ]) more
+            | None -> p, taken, rest
+        | [] -> p, taken, rest
+
+    let p, taken, rest = walk parser.Value [] words
+    let takesModel = p.GetArgumentCases() |> List.exists (fun c -> c.IsMainCommand)
+
+    let full (p: string) =
+        try
+            System.IO.Path.GetFullPath(p).TrimEnd('/', '\\')
+        with _ ->
+            p
+
+    let namesModel =
+        rest
+        |> List.exists (fun a -> a = model || (not (a.StartsWith "-") && full a = full model))
+
+    let daxFile =
+        List.tryHead taken = Some "format"
+        && rest
+           |> List.exists (fun a -> a.EndsWith(".dax", System.StringComparison.OrdinalIgnoreCase))
+
+    match taken with
+    | [] -> words
+    | command :: _ when modelessCommands.Contains command -> words
+    | _ when not takesModel || namesModel || daxFile -> words
+    | _ -> taken @ [ model ] @ rest
+
 /// Run the CLI with these environment variables, making any server connections through
-/// `connector`, and (for `tess mcp`) reading from `input` (None: the process's stdin). Returns the
-/// process exit code.
-let runWithInput
+/// `connector`, and (for `tess mcp` and `tess interactive`) reading from `input` (None: the
+/// process's stdin). Returns the process exit code.
+let rec runWithInput
     (input: TextReader option)
     (connector: Tessera.Xmla.IXmlaConnector)
     (getEnv: string -> string option)
@@ -167,6 +215,14 @@ let runWithInput
                 | Some(Completion args) -> CompletionCommand.run parser.Value ctx args
                 | Some(Complete args) -> CompletionCommand.complete parser.Value ctx args
                 | Some(Mcp args) -> McpCommand.run ctx args input
+                | Some(Interactive args) ->
+                    let host: InteractiveCommand.Host = {
+                        // Each line runs as a command of its own, with this run's context.
+                        Dispatch = fun line -> runWithInput None connector getEnv out err line
+                        InsertModel = insertModel
+                    }
+
+                    InteractiveCommand.run ctx args input host (args.TryGetResult InteractiveCommand.Args.Model)
                 | _ -> UsageError(parser.Value.PrintUsage())
 
             match outcome with

@@ -366,7 +366,9 @@ module TessError =
                 else
                     $"{count} unsaved changes"
 
-            $"The session ended with {changes}, which were not saved. End the input with `save` "
+            let verb = if count = 1 then "was" else "were"
+
+            $"The session ended with {changes} that {verb} never saved. End the input with `save` "
             + "(or `exit --force` to discard them on purpose)."
 
     /// Close matches for what wasn't found ("did you mean"), for the JSON error's `suggestions`.
