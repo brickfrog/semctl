@@ -81,6 +81,16 @@ tess test run ./Sales.pbip --data ./fixture --json    # run the suites offline (
 The engine never returns a wrong answer: anything it doesn't implement exactly is an error with the code
 `not-supported`, naming what it refused. Treat that as "unknown", not as a failure of the model.
 
+DAX function packages from daxlib.org, installed as Tabular Editor 3 installs them (a source is always named):
+
+```sh
+tess pkg list ./Sales.pbip --json                                  # installed packages, changed functions
+tess pkg search svg --from ./daxlib --json                         # a local daxlib checkout or .daxpkg folder
+tess pkg install ./Sales.pbip DaxLib.SVG --from ./daxlib --json    # dry run; --save writes
+tess pkg update ./Sales.pbip --from daxlib --json                  # `daxlib` = online (daxlib.org); --offline refuses it
+tess pkg remove ./Sales.pbip DaxLib.SVG --save                     # refused while DAX calls its functions
+```
+
 ## Good habits
 
 - Run `validate` after an edit you saved, and `format --check` / `lint` before committing DAX.
