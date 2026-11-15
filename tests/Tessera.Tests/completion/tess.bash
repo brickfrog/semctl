@@ -4,7 +4,7 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query deploy data refresh test completion' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query deploy data refresh test completion mcp' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
@@ -70,6 +70,7 @@ _tess_options() {
         'test compare') _tess_r='--against --data --against-data --tolerance --tolerance-abs --types --filter --tag --fail-fast --fail-on --strict --ci --trx --junit --force --json -j --help -h' ;;
         'test list') _tess_r='--filter --tag --json -j --help -h' ;;
         'completion') _tess_r='--json -j --help -h' ;;
+        'mcp') _tess_r='--allow --data --server --save --audit-log --json -j --help -h' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -261,6 +262,10 @@ _tess_value() {
         'test compare|--junit') _tess_r='path' ;;
         'test list|--filter') _tess_r='text' ;;
         'test list|--tag') _tess_r='text' ;;
+        'mcp|--allow') _tess_r='text' ;;
+        'mcp|--data') _tess_r='dir' ;;
+        'mcp|--server') _tess_r='text' ;;
+        'mcp|--audit-log') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -353,6 +358,7 @@ _tess_positional() {
         'test list|0') _tess_r='path' ;;
         'test list|'*) _tess_r='path' ;;
         'completion|0') _tess_r='text' ;;
+        'mcp|0') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }

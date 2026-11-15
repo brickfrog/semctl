@@ -36,6 +36,7 @@
     <Compile Include="RenameCommandTests.fs" />
     <Compile Include="SetCommandTests.fs" />
     <Compile Include="WhereTests.fs" />
+    <Compile Include="McpTests.fs" />
     <Compile Include="AddCommandTests.fs" />
     <Compile Include="RemoveMoveCommandTests.fs" />
     <Compile Include="BpaCommandTests.fs" />

@@ -32,6 +32,7 @@ function __tess_children
             printf '%s\t%s\n' 'refresh' 'refresh a server model, or some tables or partitions: shows the TMSL script; --execute to run it'
             printf '%s\t%s\n' 'test' 'DAX tests for a model, from .tess-tests/*.test.yaml suites: run them offline over fixture data or on a server model (run), scaffold (init), record snapshots (snapshot), compare two models (compare)'
             printf '%s\t%s\n' 'completion' 'print a shell completion script for bash, zsh, fish or pwsh (see the README to install it)'
+            printf '%s\t%s\n' 'mcp' 'serve a model to an AI agent: an MCP server over stdio (tools by --allow; changes in memory unless --save)'
         case 'bpa'
             printf '%s\t%s\n' 'rules' 'list, show, add or remove rules, and ignore rules on objects: `tess bpa rules --help`'
         case 'bpa rules'
@@ -662,6 +663,16 @@ function __tess_options
             printf '%s\t%s\n' '-j' 'write machine-readable JSON to stdout'
             printf '%s\t%s\n' '--help' 'display this list of options'
             printf '%s\t%s\n' '-h' 'display this list of options'
+        case 'mcp'
+            printf '%s\t%s\n' '--allow' 'what the agent may do (repeatable or comma-separated): read (default: metadata, search, validate, lint, format), metadata-write (change the model in memory; implies read), data-read (DAX query rows, with --data or --server), bpa (Best Practice Analyzer)'
+            printf '%s\t%s\n' '--data' 'with --allow data-read: answer queries with the local engine over this fixture directory'
+            printf '%s\t%s\n' '--server' 'with --allow data-read: answer queries on this server model instead (xmla:<server>;<database>)'
+            printf '%s\t%s\n' '--save' 'offer a save_model tool, which writes the changes back to the model\'s files'
+            printf '%s\t%s\n' '--audit-log' 'append one JSON line per tool call to this file: the time, the tool, the objects named and the outcome'
+            printf '%s\t%s\n' '--json' 'write machine-readable JSON to stdout'
+            printf '%s\t%s\n' '-j' 'write machine-readable JSON to stdout'
+            printf '%s\t%s\n' '--help' 'display this list of options'
+            printf '%s\t%s\n' '-h' 'display this list of options'
     end
 end
 
@@ -1036,6 +1047,14 @@ function __tess_value
             echo 'text'
         case 'test list|--tag'
             echo 'text'
+        case 'mcp|--allow'
+            echo 'text'
+        case 'mcp|--data'
+            echo 'dir'
+        case 'mcp|--server'
+            echo 'text'
+        case 'mcp|--audit-log'
+            echo 'path'
     end
 end
 
@@ -1184,6 +1203,8 @@ function __tess_positional
             echo 'path'
         case 'completion|0'
             echo 'text'
+        case 'mcp|0'
+            echo 'path'
         case 'remove|''*'
             echo 'dyn'
         case 'bpa rules remove|''*'

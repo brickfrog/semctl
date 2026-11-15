@@ -84,8 +84,10 @@ let private (|WatchedTestRun|_|) (args: ParseResults<TestCommand.Args>) =
     | _ -> None
 
 /// Run the CLI with these environment variables, making any server connections through
-/// `connector`. Returns the process exit code.
-let runWithConnector
+/// `connector`, and (for `tess mcp`) reading from `input` (None: the process's stdin). Returns the
+/// process exit code.
+let runWithInput
+    (input: TextReader option)
     (connector: Tessera.Xmla.IXmlaConnector)
     (getEnv: string -> string option)
     (out: TextWriter)
@@ -94,8 +96,11 @@ let runWithConnector
     : int =
     // `tess __complete <words...>` reaches Argu as one argument, so no word is read as an option.
     let argv = CompletionCommand.packWords argv
+    // `tess mcp` owns stdout for its JSON-RPC frames: every message of its own goes to stderr.
+    let isMcp = argv |> Array.tryFind (fun a -> not (a.StartsWith "-")) = Some "mcp"
     // Decide JSON mode before parsing so usage errors can be reported as JSON too.
-    let jsonRequested = argv |> Array.exists (fun a -> a = "--json" || a = "-j")
+    let jsonRequested =
+        not isMcp && argv |> Array.exists (fun a -> a = "--json" || a = "-j")
 
     let usageErrorWith (message: string) (suggestions: string list) =
         if jsonRequested then
@@ -113,7 +118,7 @@ let runWithConnector
         let ctx = {
             Out = out
             Err = err
-            Json = results.Contains Json
+            Json = results.Contains Json && not isMcp
             GetEnv = getEnv
             Connector = connector
         }
@@ -160,6 +165,7 @@ let runWithConnector
                 | Some(Test args) -> TestCommand.run ctx args
                 | Some(Completion args) -> CompletionCommand.run parser.Value ctx args
                 | Some(Complete args) -> CompletionCommand.complete parser.Value ctx args
+                | Some(Mcp args) -> McpCommand.run ctx args input
                 | _ -> UsageError(parser.Value.PrintUsage())
 
             match outcome with
@@ -175,6 +181,9 @@ let runWithConnector
 
                 ExitCode.ofError e
     with
+    | :? ArguParseException as e when e.ErrorCode = ErrorCode.HelpText && isMcp ->
+        err.WriteLine(e.Message)
+        ExitCode.ok
     | :? ArguParseException as e when e.ErrorCode = ErrorCode.HelpText ->
         out.WriteLine(e.Message)
         ExitCode.ok
@@ -189,7 +198,20 @@ let runWithConnector
 
         ExitCode.internalError
 
+/// Run the CLI with these environment variables, making any server connections through
+/// `connector`. Returns the process exit code.
+let runWithConnector
+    (connector: Tessera.Xmla.IXmlaConnector)
+    (getEnv: string -> string option)
+    (out: TextWriter)
+    (err: TextWriter)
+    (argv: string array)
+    : int =
+    runWithInput None connector getEnv out err argv
+
 /// Run the CLI with these environment variables. Returns the process exit code.
+// Kept out of line: the offline tests check that the live connector is created only here.
+[<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
 let runWith (getEnv: string -> string option) (out: TextWriter) (err: TextWriter) (argv: string array) : int =
     runWithConnector (Tessera.Xmla.LiveConnector()) getEnv out err argv
 
