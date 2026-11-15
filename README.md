@@ -1919,7 +1919,7 @@ What each needs, for whoever picks it up:
 - **Sessions and profiles:** somewhere to keep an address and auth mode (never a secret) per shell, and a decision
   on where; then `Source.load` reads it when no model is given.
 - **Interactive sign-in:** needs the MSAL broker the single-file builds leave out (see `Tessera.Cli.fsproj`).
-#### `preview`
+### Previewing a table (`preview`)
 
 `tess preview <model> <table>` shows the first rows of a table, like Tabular Editor 3's table preview:
 
