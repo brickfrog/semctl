@@ -163,6 +163,76 @@ let private withData () =
     write (Path.Combine(data, "Date.csv")) "DateKey,Year,Month\n1,2024,Jan\n"
     t, data
 
+/// Copy a directory tree (a model to edit without touching the original).
+let rec private copyTree (from: string) (``to``: string) =
+    Directory.CreateDirectory ``to`` |> ignore
+
+    for f in Directory.GetFiles from do
+        File.Copy(f, Path.Combine(``to``, Path.GetFileName f))
+
+    for d in Directory.GetDirectories from do
+        if Path.GetFileName d <> ".git" then
+            copyTree d (Path.Combine(``to``, Path.GetFileName d))
+
+/// Every file under a folder, relative path -> bytes. A .platform file written for the first time
+/// gets a new random logicalId on every save, so that one value is blanked.
+let private filesOf (root: string) =
+    let bytes (f: string) =
+        if Path.GetFileName f = ".platform" then
+            Text.RegularExpressions.Regex.Replace(
+                File.ReadAllText f,
+                "\"logicalId\": \"[^\"]*\"",
+                "\"logicalId\": \"\""
+            )
+            |> Text.Encoding.UTF8.GetBytes
+        else
+            File.ReadAllBytes f
+
+    Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+    |> Array.map (fun f -> Path.GetRelativePath(root, f).Replace('\\', '/'), bytes f)
+    |> Array.sortBy fst
+    |> List.ofArray
+
+/// The same edit, saved by `tess set --save` in one copy and by save_model in another: the files
+/// must come out byte for byte the same (the session's model is a clone of the loaded one).
+let private sameAsSet (root: string) (modelIn: string -> string) (selector: string) (path: string) (value: string) =
+    use t = new TempDir()
+    let a = t.Combine "a"
+    let b = t.Combine "b"
+    copyTree root a
+    copyTree root b
+    let viaSet = tess [ "set"; modelIn a; selector; "-p"; $"{path}={value}"; "--save" ]
+    Expect.equal viaSet.Code 0 viaSet.Err
+
+    let s =
+        serve [ modelIn b; "--allow"; "metadata-write"; "--save" ] [
+            callTool
+                1
+                "apply_changes"
+                (dict [
+                    "operations",
+                    box [|
+                        box (
+                            dict [
+                                "op", box "set"
+                                "object", box selector
+                                "properties", box (dict [ path, value ])
+                            ]
+                        )
+                    |]
+                ])
+            callTool 2 "save_model" noArgs
+        ]
+
+    ok s 1 |> ignore
+    ok s 2 |> ignore
+    let expected = filesOf a
+    let actual = filesOf b
+    Expect.equal (actual |> List.map fst) (expected |> List.map fst) "the same files"
+
+    for (name, x), (_, y) in List.zip expected actual do
+        Expect.isTrue (x = y) $"{name}: byte-identical"
+
 [<Tests>]
 let tests =
     testList "tess mcp" [
@@ -599,6 +669,44 @@ let tests =
 
                 Expect.equal ((ok s 5).GetProperty("unsavedChanges").GetInt32()) 0 ""
 
+            testCase "save_model writes what `tess set --save` writes: PBIP, and .bim with a password"
+            <| fun () ->
+                use p = project ()
+                sameAsSet p.Path id "[Total]" "description" "Ünïcode ✓"
+
+                use bim = new TempDir()
+                let db = sampleDatabase ()
+
+                db.Model.DataSources.Add(
+                    new Microsoft.AnalysisServices.Tabular.ProviderDataSource(
+                        Name = "SQL",
+                        ConnectionString = "Provider=SQLOLEDB;Data Source=x;User ID=u;Password=s3cret",
+                        Password = "s3cret"
+                    )
+                )
+
+                let opts = {
+                    ModelIO.SaveOptions.defaults with
+                        IncludeSensitive = true
+                }
+
+                write (bim.Combine "Model.bim") (ModelIO.toBimText opts db)
+                sameAsSet bim.Path (fun d -> Path.Combine(d, "Model.bim")) "[Total]" "formatString" "0.00"
+                // The password survived the session's copy.
+                let saved = File.ReadAllText(bim.Combine "Model.bim")
+                Expect.stringContains saved "s3cret" "kept, as `set --save` keeps it"
+
+            testCase "save_model writes what `tess set --save` writes: the sample model (TESSERA_SAMPLE_MODEL)"
+            <| fun () ->
+                match Environment.GetEnvironmentVariable "TESSERA_SAMPLE_MODEL" with
+                | null
+                | "" -> skiptest "TESSERA_SAMPLE_MODEL is not set"
+                | sample ->
+                    let full = Path.GetFullPath sample
+                    let root = Path.GetDirectoryName(full.TrimEnd('/', '\\'))
+                    let name = Path.GetFileName(full.TrimEnd('/', '\\'))
+                    sameAsSet root (fun d -> Path.Combine(d, name)) "[Revenue]" "description" "changed by a test"
+
             testCase "save_model writes the files; refused while the session introduced errors, unless forced"
             <| fun () ->
                 use t = project ()
@@ -843,6 +951,7 @@ let tests =
             psi.RedirectStandardOutput <- true
             psi.RedirectStandardError <- true
             psi.StandardOutputEncoding <- Text.UTF8Encoding(false)
+            psi.StandardInputEncoding <- Text.UTF8Encoding(false)
             psi.UseShellExecute <- false
             use p = Process.Start psi
             let err = p.StandardError.ReadToEndAsync()
@@ -865,6 +974,7 @@ let tests =
                         2
                         "get_objects"
                         (dict [ "objects", box [| "Sales" |]; "properties", box [| "description" |] ])
+                    callTool 3 "format_dax" (dict [ "dax", "\"Ünïcode ✓\"" ])
                 ] do
                 p.StandardInput.Write(line + "\n")
 
@@ -875,7 +985,9 @@ let tests =
             Expect.isFalse (raw.Length >= 3 && raw.[0] = 0xEFuy && raw.[1] = 0xBBuy) "no BOM"
             let text = Text.Encoding.UTF8.GetString raw
             let frames = text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            Expect.equal frames.Length 3 text
+            Expect.equal frames.Length 4 text
+            // Non-ASCII both ways (Windows consoles default to another code page).
+            Expect.stringContains text "Ünïcode ✓" ""
 
             for f in frames do
                 use doc = JsonDocument.Parse f
