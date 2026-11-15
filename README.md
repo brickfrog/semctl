@@ -6,8 +6,17 @@
 `.bim`, TMDL folders, and Power BI Project (PBIP) folders, and is built in F# on Microsoft's own TOM library
 (`Microsoft.AnalysisServices`). It runs on Linux, macOS and Windows on .NET 10.
 
-Status: early. `init`, `convert`, `info`, `list`, `get`, `find`, `diff`, `deps`, `validate`, `rename`, `set`,
-`add`, `remove`, `move`, `bpa`, `lint`, `script`, `translations`, `perspective` and `format` work.
+Status: early, and pre-1.0 (behaviour can still change between minor versions). What's there:
+
+- **Model files:** `init`, `convert`, `info`, `list`, `get`, `find`, `diff`, `deps`, `validate`, `schemacheck`,
+  `vertipaq`.
+- **Editing** (dry run by default): `rename`, `set`, `add`, `remove`, `move`, `script` (DAX scripts), `csharp`
+  (C# scripts), `translations`, `perspective`, `pkg` (DAX packages), and `interactive` for staged edits.
+- **Quality:** `bpa`, `lint`, `format`, `test`.
+- **Data, offline:** `data` (fixture data), `query` and `preview` on tess's local DAX engine.
+- **Connected mode:** `connect`, `query`, `deploy`, `refresh`. So far these have been tested against a fake
+  server only.
+- **For agents:** `mcp` (an MCP server over stdio) and [SKILL.md](SKILL.md).
 
 ## Install
 
