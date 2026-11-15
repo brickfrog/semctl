@@ -926,6 +926,7 @@ tess bpa ./Sales.pbip --list-rules                 # what would run, and whether
 tess bpa ./Sales.pbip --path 'measure:Sales/*'     # only findings on matching objects
 tess bpa ./Sales.pbip --json                       # the findings envelope, plus ignored findings and rule errors
 tess bpa ./Sales.pbip --trx bpa.trx                # VSTest results, one test per rule (Azure DevOps etc.)
+tess bpa ./Sales.pbip --fix --save                 # apply the rules' fix expressions
 ```
 
 Text output is one finding per line, most severe first, then a summary:
@@ -1020,7 +1021,7 @@ A rule file is a JSON array of rules:
 
 Only `ID`, `Scope` and `Expression` are required. As in TE, property names are case-insensitive, and comments,
 trailing commas and extra fields such as `Source` are accepted. `Name` defaults to the ID, and `Severity`
-defaults to 1. `LearnMoreUrl` is read. `FixExpression` is read but not applied; applying fixes is future work. A rule whose
+defaults to 1. `LearnMoreUrl` is read. `FixExpression` is applied by [`--fix`](#fixing-findings---fix). A rule whose
 `CompatibilityLevel` is above the model's is skipped.
 
 `Scope` is a comma-separated list. It can also be TE's flags number.
@@ -1090,6 +1091,49 @@ filter belongs to its table permission.
 
 If an expression doesn't compile for one of its scopes, the rule is reported as unsupported, with the parser's
 error. A runtime error fails just that rule. Neither stops the run.
+
+#### Fixing findings (`--fix`)
+
+```
+tess bpa ./Sales.pbip --fix                        # show what the fix expressions would change (a dry run)
+tess bpa ./Sales.pbip -r BPARules.json --fix --save
+```
+
+`--fix` applies each finding's rule's `FixExpression` to the object it was found on. It is an
+[editing command](#editing-commands): a dry run unless `--save` or `--save-to`, with `--stat`, `--name-only`,
+`--force`, `--json` (the change set) and the save gate as for the others. It fixes the findings the rule switches,
+`--category`, `--min-severity` and `--path` select; findings ignored by annotations are left alone. `--fail-on`,
+`--ci`, `--trx`, `--sarif` and `--list-rules` report findings and are refused with `--fix` (exit 2), as are the
+editing switches without it.
+
+A fix expression is a C# statement about the object: Tabular Editor 2 runs `<object>.` + the expression + `;` as a
+script (its BPA window, `GetFixScript`). tess doesn't run C#. It applies the statements the published rule files
+use, with the side effects TE's object model gives them, and refuses everything else:
+
+| Fix expression | What tess does |
+|---|---|
+| `IsHidden = true`, `IsAvailableInMDX = false`, `IsKey = true` | sets the property (`isHidden`, `isAvailableInMdx`, `isKey`). `IsKey = true` also clears `IsKey` on the table's other columns |
+| `DataType = DataType.Decimal`, `SummarizeBy = AggregateFunction.None` | sets the enum property; the type must be the property's (`DataType`, `AggregateFunction`) |
+| `FormatString = "#,0"`, `Description = "..."`, `DisplayFolder = "..."` | sets the string (C#'s escapes apply: `"\u003B"` is `;`; `null` clears). A changed format string removes the object's `Format` annotation, as TE does |
+| `Delete()` | removes the object as `tess remove` does, with the relationships, levels, sort-by links, perspectives, security and translations that point at it. Unlike TE, it is refused while other DAX still refers to the object, instead of leaving that DAX broken. Like TE, it doesn't know what reports use |
+| `TranslatedDisplayFolders.Reset()` | sets every culture's display folder translation to the object's own display folder |
+
+Refused, with a warning naming the rule, the objects and why: anything else (`Name = ...`: use `tess rename`; values
+computed from the object, such as `string.Concat(it.Name...)`; other methods; other properties), an expression
+containing `{`, `}` or `;` (TE skips those too), a property the object doesn't have or can't set at its
+compatibility level, a value it doesn't take, a finding on an object tess can't edit by itself (a KPI, a table
+permission, a role member, a variation), and two rules setting one property of one object to different values
+(neither is applied; the same value is applied once). Findings of rules without a fix expression are counted in a
+warning.
+
+One run applies the fixes of one analysis. Fixes can make other rules fire (removing a column can leave another
+unused), and rules from different files can disagree (BPARules-standard's `DISABLE_ATTRIBUTE_HIERACHIES` and
+Microsoft's `SET_ISAVAILABLEINMDX_TO_TRUE_ON_NECESSARY_COLUMNS`), so run `bpa` again afterwards.
+
+Of the community files' fix expressions (TabularEditor/BestPracticeRules and microsoft/Analysis-Services), tess
+applies all but four: `AVOID_INVALID_NAME_CHARACTERS` and `AVOID_INVALID_DESCRIPTION_CHARACTERS` (computed values),
+`PARTITION_NAME_SHOULD_MATCH_TABLE_NAME_FOR_SINGLE_PARTITION_TABLES` (another object's property) and
+BPARules-standard-lax's `TranslatedDisplayFolder.Reset()` (a typo TE's script wouldn't compile either).
 
 #### Ignoring findings
 
@@ -1185,7 +1229,8 @@ analyzer. Known differences:
 - Rules that need data from a deployed model (e.g. a measure's `DataType`, or `Vertipaq_*` annotations that
   VertiPaq Analyzer writes) behave as they do in TE on a model loaded from files.
 - Object names in the output use tess references, e.g. `table:Sales`.
-- Only read-only members are available, so rules can't call TE's methods that change the model.
+- Rule expressions see only read-only members, so they can't call TE's methods that change the model. Fix
+  expressions are applied as [above](#fixing-findings---fix), not run as C#.
 
 ### Translations (`translations`)
 
