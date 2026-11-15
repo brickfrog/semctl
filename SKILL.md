@@ -12,7 +12,9 @@ option; the README has the details.
 ## Rules that matter to an agent
 
 - **Use `--json` (`-j`).** Every command writes one JSON document to stdout, errors included:
-  `{"error": {"code", "message"}}`, plus `"suggestions"` when tess has close matches ("did you mean"). Keys with
+  `{"error": {"code", "message"}}`, plus `"suggestions"` when tess has close matches ("did you mean"). The one
+  exception is `format` on loose DAX (`-`, `--expr`, a .dax file), which writes `{"success", "formatted",
+  "errors": [{"line", "column", "message"}]}` like `te util format-dax`, and exits 3 when the DAX can't be read. Keys with
   no value are left out, never `null` (`null` appears only where it is the value, such as a BLANK cell). Notes and
   warnings go to stderr. Output is plain text: no colour, no progress redrawn in place.
 - **Branch on the exit code, then read the JSON.**
@@ -20,7 +22,7 @@ option; the README has the details.
   | Code | Meaning |
   |---|---|
   | 0 | success |
-  | 1 | the "negative" result: `find` found nothing, `diff` found differences, `validate`/`bpa`/`lint` found issues at or above `--fail-on`, `test run` had a failure, `format --check` found unformatted DAX, or an edit's `--save` refused because it would introduce errors |
+  | 1 | the "negative" result: `find` found nothing, `diff` found differences, `validate`/`bpa`/`lint` found issues at or above `--fail-on`, `test run` had a failed or errored test or none reached a verdict, `format --check` found unformatted DAX, or an edit's `--save` refused because it would introduce errors |
   | 2 | usage error (bad arguments, an invalid name, an option the kind doesn't take) |
   | 3 | input error: model not found or not loadable, an object that doesn't exist or can't be created/removed/moved, malformed DAX |
   | 4 | output error: the destination isn't empty (use `--force`), a write failed |
@@ -73,7 +75,7 @@ tess query ./Sales.pbip --data ./fixture "EVALUATE SUMMARIZECOLUMNS ( 'Date'[Yea
 tess preview ./Sales.pbip Customer --data ./fixture --rows 5 --json
 tess query ./Sales.pbip --coverage --json             # which measures the engine can evaluate
 tess test init ./Sales.pbip                           # scaffold a .tess-tests/*.test.yaml suite
-tess test run ./Sales.pbip --json                     # run the suites (exit 1: a test failed)
+tess test run ./Sales.pbip --data ./fixture --json    # run the suites offline (exit 1: a test failed)
 ```
 
 The engine never returns a wrong answer: anything it doesn't implement exactly is an error with the code

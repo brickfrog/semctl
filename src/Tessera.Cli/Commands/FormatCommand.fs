@@ -81,32 +81,47 @@ let private exitOf =
     | Format.Syntax _ -> ExitCode.input
     | Format.Unsafe _ -> ExitCode.internalError
 
-/// A DAX file's text, and whether it starts with a UTF-8 byte order mark (kept on --save).
-let private readDaxFile (path: string) : Result<string * bool, TessError> =
+/// A DAX file's text, read as File.ReadAllText reads it (a UTF-8 or UTF-16 byte order mark picks the
+/// encoding; otherwise UTF-8), and the encoding --save writes it back in: the same one, with the
+/// same byte order mark. None if the file isn't valid text in that encoding, so a save can't keep it.
+let private readDaxFile (path: string) : Result<string * Text.Encoding option, TessError> =
     try
         let bytes = File.ReadAllBytes path
 
-        let bom =
-            bytes.Length >= 3
-            && bytes.[0] = 0xEFuy
-            && bytes.[1] = 0xBBuy
-            && bytes.[2] = 0xBFuy
+        let starts (prefix: byte list) =
+            bytes.Length >= prefix.Length
+            && List.forall2 (fun i b -> bytes.[i] = b) [ 0 .. prefix.Length - 1 ] prefix
 
-        let offset = if bom then 3 else 0
-        Ok(Text.UTF8Encoding(false, true).GetString(bytes, offset, bytes.Length - offset), bom)
+        let encoding, skip =
+            if starts [ 0xEFuy; 0xBBuy; 0xBFuy ] then
+                Text.UTF8Encoding(true, true) :> Text.Encoding, 3
+            elif starts [ 0xFFuy; 0xFEuy ] then
+                Text.UnicodeEncoding(false, true, true) :> Text.Encoding, 2
+            elif starts [ 0xFEuy; 0xFFuy ] then
+                Text.UnicodeEncoding(true, true, true) :> Text.Encoding, 2
+            else
+                Text.UTF8Encoding(false, true) :> Text.Encoding, 0
+
+        try
+            Ok(encoding.GetString(bytes, skip, bytes.Length - skip), Some encoding)
+        with :? Text.DecoderFallbackException ->
+            Ok(File.ReadAllText path, None)
     with
     | :? FileNotFoundException
     | :? DirectoryNotFoundException -> Error(PathNotFound(Path.GetFullPath path))
     | e -> Error(LoadFailed(path, e.Message))
 
-/// --save on a DAX file: write the formatted DAX back, with the file's byte order mark (line
-/// endings follow the input already). Nothing is written if nothing changed.
-let private saveDax (path: string) (bom: bool) (formatted: string) : Result<unit, TessError> =
-    try
-        File.WriteAllText(path, formatted, Text.UTF8Encoding(bom))
-        Ok()
-    with e ->
-        Error(SaveFailed(path, e.Message))
+/// --save on a DAX file: write the formatted DAX back in the file's encoding (line endings follow
+/// the input already). Nothing is written if nothing changed.
+let private saveDax (path: string) (encoding: Text.Encoding option) (formatted: string) : Result<unit, TessError> =
+    match encoding with
+    | None -> Error(LoadFailed(path, "not valid UTF-8 or UTF-16 text, so --save won't rewrite it"))
+    | Some encoding ->
+        try
+            File.WriteAllText(path, formatted, encoding)
+            Ok()
+        with e ->
+            Error(SaveFailed(path, e.Message))
 
 /// Format loose DAX: print it (or with --check, say whether it's formatted; with --save, write
 /// it back to its file).
@@ -114,7 +129,7 @@ let private loose
     (ctx: Ctx)
     (opts: Format.FormatOptions)
     (check: bool)
-    (save: (string * bool) option)
+    (save: (string * Text.Encoding option) option)
     (name: string)
     (dax: string)
     =
@@ -122,8 +137,8 @@ let private loose
 
     let saved =
         match result, save with
-        | Ok formatted, Some(path, bom) when formatted <> dax ->
-            Some(saveDax path bom formatted |> Result.map (fun () -> path))
+        | Ok formatted, Some(path, encoding) when formatted <> dax ->
+            Some(saveDax path encoding formatted |> Result.map (fun () -> path))
         | _ -> None
 
     match saved with
@@ -316,17 +331,17 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
     | _ when isLoose ->
         let input =
             match expr, targets with
-            | Some dax, _ -> Ok("--expr", dax, false)
-            | None, [ "-" ] -> Ok("<stdin>", Console.In.ReadToEnd(), false)
-            | None, path :: _ -> readDaxFile path |> Result.map (fun (dax, bom) -> path, dax, bom)
+            | Some dax, _ -> Ok("--expr", dax, None)
+            | None, [ "-" ] -> Ok("<stdin>", Console.In.ReadToEnd(), None)
+            | None, path :: _ -> readDaxFile path |> Result.map (fun (dax, encoding) -> path, dax, encoding)
             | None, [] -> Error(PathNotFound "-")
 
         match input with
         | Error e -> Failed e
-        | Ok(name, dax, bom) ->
+        | Ok(name, dax, encoding) ->
             let save =
                 if args.Contains Args.Save then
-                    daxFile |> Option.map (fun path -> path, bom)
+                    daxFile |> Option.map (fun path -> path, encoding)
                 else
                     None
 

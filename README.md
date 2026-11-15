@@ -1600,9 +1600,10 @@ Output and exit codes:
   `te util format-dax`. Each error has `line`, `column` (1-based) and `message`. DAX that can't be read
   (unbalanced brackets, an unterminated string, an operator without an operand, `VAR` without `RETURN`, ...) exits
   3 with its errors on stderr, nothing on stdout, and the input file left alone.
-- A DAX file with `--save`: the formatted DAX is written back to the file (keeping its line endings and any UTF-8
-  byte order mark), and a line on stderr says so. Nothing is written if the file is formatted already or can't be
-  read. `--json` adds `"saved": {"path"}` when it wrote. `--save` with `-` or `--expr`, or with `--check`, is a usage
+- A DAX file with `--save`: the formatted DAX is written back to the file, in its encoding (UTF-8, or UTF-16 when
+  it starts with that byte order mark), with its byte order mark and line endings, and a line on stderr says so.
+  Nothing is written if the file is formatted already or can't be read, and a file that isn't valid UTF-8 or
+  UTF-16 is refused (exit 3) rather than rewritten. `--json` adds `"saved": {"path"}` when it wrote. `--save` with `-` or `--expr`, or with `--check`, is a usage
   error; `--save-to`, `--force`, `--stat` and `--name-only` are for models.
 - A model is an [editing command](#editing-commands): a dry run unless `--save` or `--save-to`, the change shown
   as a diff (`--stat`, `--name-only`, `--json` as usual). Expressions that can't be read are left as they are,

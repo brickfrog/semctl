@@ -96,6 +96,40 @@ let looseTests =
             Expect.equal (j.GetProperty("saved").GetProperty("path").GetString()) (Path.GetFullPath path) ""
             Expect.equal (File.ReadAllBytes path) "SUM ( T[a] )"B ""
 
+        testCase "UTF-16 files are read as before, and --save writes them back in UTF-16"
+        <| fun () ->
+            use t = new TempDir()
+
+            for encoding, bom in
+                [
+                    System.Text.UnicodeEncoding(false, true), [| 0xFFuy; 0xFEuy |]
+                    System.Text.UnicodeEncoding(true, true), [| 0xFEuy; 0xFFuy |]
+                ] do
+                let path = t.Combine "w.dax"
+                File.WriteAllText(path, "sum(T[a])", encoding)
+                let r = tess [ "format"; path ]
+                Expect.equal r.Code ExitCode.ok r.Err
+                Expect.equal r.Out "SUM ( T[a] )\n" "read with its byte order mark"
+
+                let r = tess [ "format"; path; "--save" ]
+                Expect.equal r.Code ExitCode.ok r.Err
+                let bytes = File.ReadAllBytes path
+                Expect.equal bytes.[0..1] bom "the same byte order mark"
+                Expect.equal (encoding.GetString(bytes, 2, bytes.Length - 2)) "SUM ( T[a] )" "the same encoding"
+
+        testCase "a file that isn't UTF-8 is shown as before, but --save won't rewrite it"
+        <| fun () ->
+            use t = new TempDir()
+            let path = t.Combine "latin1.dax"
+            // "sum(T[a]) // café" in Latin-1: 0xE9 is not UTF-8.
+            let bytes = Array.append "sum(T[a]) // caf"B [| 0xE9uy |]
+            File.WriteAllBytes(path, bytes)
+            Expect.equal (tess [ "format"; path ]).Code ExitCode.ok "shown, as File.ReadAllText reads it"
+            let r = tess [ "format"; path; "--save" ]
+            Expect.equal r.Code ExitCode.input r.Err
+            Expect.stringContains r.Err "UTF-8" ""
+            Expect.equal (File.ReadAllBytes path) bytes "left alone"
+
         testCase "--save on malformed DAX: exit 3, the file is left alone"
         <| fun () ->
             use t = new TempDir()
