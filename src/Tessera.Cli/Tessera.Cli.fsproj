@@ -15,6 +15,7 @@
     <Compile Include="Output.fs" />
     <Compile Include="Common.fs" />
     <Compile Include="Source.fs" />
+    <Compile Include="Connections.fs" />
     <Compile Include="Findings.fs" />
     <Compile Include="Sarif.fs" />
     <Compile Include="Changes.fs" />
@@ -43,6 +44,8 @@
     <Compile Include="Commands/LintCommand.fs" />
     <Compile Include="Commands/FormatCommand.fs" />
     <Compile Include="Commands/ConnectCommand.fs" />
+    <Compile Include="Commands/ProfileCommand.fs" />
+    <Compile Include="Commands/SessionCommand.fs" />
     <Compile Include="Commands/QueryCommand.fs" />
     <Compile Include="Commands/PreviewCommand.fs" />
     <Compile Include="Commands/DeployCommand.fs" />

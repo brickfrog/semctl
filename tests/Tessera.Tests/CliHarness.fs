@@ -13,6 +13,14 @@ type Run = { Code: int; Out: string; Err: string }
 /// developer's TESS_BPA_RULES or ~/.config/tessera/bpa.json can't change results.
 let private configVariables =
     set [ "TESS_BPA_RULES"; "XDG_CONFIG_HOME"; "HOME"; "APPDATA" ]
+    // Profiles and sessions (tess connect): never the developer's own.
+    + set [
+        "TESS_CONFIG"
+        "TESS_STATE_DIR"
+        "TESS_SESSION"
+        "XDG_STATE_HOME"
+        "LOCALAPPDATA"
+    ]
     // A developer's real server credentials never reach a test either.
     + set Tessera.Xmla.Credentials.Var.all
 

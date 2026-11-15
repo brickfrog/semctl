@@ -59,6 +59,7 @@
     <Compile Include="ReportCommandTests.fs" />
     <Compile Include="ReportRemoveTests.fs" />
     <Compile Include="InteractiveTests.fs" />
+    <Compile Include="ConnectionsTests.fs" />
     <Compile Include="SampleReportTests.fs" />
     <Compile Include="RenameEdgeTests.fs" />
     <Compile Include="RenameEdgeCommandTests.fs" />

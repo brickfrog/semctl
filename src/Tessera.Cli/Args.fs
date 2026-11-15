@@ -28,6 +28,8 @@ type CliArgs =
     | [<CliPrefix(CliPrefix.None)>] Lint of ParseResults<LintCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Format of ParseResults<FormatCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Connect of ParseResults<ConnectCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Profile of ParseResults<ProfileCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Session of ParseResults<SessionCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Query of ParseResults<QueryCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Preview of ParseResults<PreviewCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Deploy of ParseResults<DeployCommand.Args>
@@ -66,6 +68,8 @@ type CliArgs =
             | Lint _ -> LintCommand.summary
             | Format _ -> FormatCommand.summary
             | Connect _ -> ConnectCommand.summary
+            | Profile _ -> ProfileCommand.summary
+            | Session _ -> SessionCommand.summary
             | Query _ -> QueryCommand.summary
             | Preview _ -> PreviewCommand.summary
             | Deploy _ -> DeployCommand.summary

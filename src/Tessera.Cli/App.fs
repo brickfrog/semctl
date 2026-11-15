@@ -169,100 +169,133 @@ let rec runWithInput
 
     let usageError (message: string) = usageErrorWith message []
 
-    try
-        let results = parser.Value.ParseCommandLine(argv, raiseOnUsage = true)
-
-        let ctx = {
-            Out = out
-            Err = err
-            Json = results.Contains Json && not isMcp
-            GetEnv = getEnv
-            Connector = connector
-        }
-
-        if results.Contains Version then
-            if ctx.Json then
-                writeJson out (versionJson (version ()))
-            else
-                out.WriteLine($"tess {version ()}")
-
-            ExitCode.ok
-        else
-            let outcome =
-                match results.TryGetSubCommand() with
-                | Some(Convert args) -> ConvertCommand.run ctx args
-                | Some(Info args) -> InfoCommand.run ctx args
-                | Some(List args) -> ListCommand.run ctx args
-                | Some(Get args) -> GetCommand.run ctx args
-                | Some(Find args) -> FindCommand.run ctx args
-                | Some(Diff args) -> DiffCommand.run ctx args
-                | Some(Deps args) -> DepsCommand.run ctx args
-                | Some(Init args) -> InitCommand.run ctx args
-                | Some(Validate args) when args.Contains ValidateCommand.Args.Watch -> WatchCommands.validate ctx args
-                | Some(Validate args) -> ValidateCommand.run ctx args
-                | Some(Rename args) -> RenameCommand.run ctx args
-                | Some(Remove args) -> RemoveCommand.run ctx args
-                | Some(Move args) -> MoveCommand.run ctx args
-                | Some(Bpa args) when args.Contains BpaCommand.Args.Watch -> WatchCommands.bpa ctx args
-                | Some(Bpa args) -> BpaCommand.run ctx args
-                | Some(Set args) -> SetCommand.run ctx args
-                | Some(Add args) -> AddCommand.run ctx args
-                | Some(Translations args) -> TranslationsCommand.run ctx args
-                | Some(Perspective args) -> PerspectiveCommand.run ctx args
-                | Some(Script args) -> ScriptCommand.run ctx args
-                | Some(Lint args) when args.Contains LintCommand.Args.Watch -> WatchCommands.lint ctx args
-                | Some(Lint args) -> LintCommand.run ctx args
-                | Some(Format args) -> FormatCommand.run ctx args
-                | Some(Connect args) -> ConnectCommand.run ctx args
-                | Some(Query args) -> QueryCommand.run ctx args
-                | Some(Preview args) -> PreviewCommand.run ctx args
-                | Some(Deploy args) -> DeployCommand.run ctx args
-                | Some(Data args) -> DataCommand.run ctx args
-                | Some(Refresh args) -> RefreshCommand.run ctx args
-                | Some(Test(WatchedTestRun run as args)) -> WatchCommands.testRun ctx args run
-                | Some(Test args) -> TestCommand.run ctx args
-                | Some(Completion args) -> CompletionCommand.run parser.Value ctx args
-                | Some(Complete args) -> CompletionCommand.complete parser.Value ctx args
-                | Some(Mcp args) -> McpCommand.run ctx args input
-                | Some(Interactive args) ->
-                    let host: InteractiveCommand.Host = {
-                        // Each line runs as a command of its own, with this run's context.
-                        Dispatch = fun line -> runWithInput None connector getEnv out err line
-                        InsertModel = insertModel
-                    }
-
-                    InteractiveCommand.run ctx args input host (args.TryGetResult InteractiveCommand.Args.Model)
-                | _ -> UsageError(parser.Value.PrintUsage())
-
-            match outcome with
-            | Done -> ExitCode.ok
-            | DoneWith code -> code
-            | UsageError message -> usageError message
-            | UsageErrorSuggest(message, suggestions) -> usageErrorWith message suggestions
-            | Failed e ->
-                if ctx.Json then
-                    writeJson out (tessErrorJson e)
-                else
-                    err.WriteLine($"tess: {TessError.message e}")
-
-                ExitCode.ofError e
-    with
-    | :? ArguParseException as e when e.ErrorCode = ErrorCode.HelpText && isMcp ->
-        err.WriteLine(e.Message)
-        ExitCode.ok
-    | :? ArguParseException as e when e.ErrorCode = ErrorCode.HelpText ->
-        out.WriteLine(e.Message)
-        ExitCode.ok
-    | :? ArguParseException as e ->
-        let suggestions = argumentSuggestions argv e.Message
-        usageErrorWith (withHint e.Message suggestions) suggestions
-    | e ->
+    // `active:` and `profile:<name>` model arguments (local state only), and their profiles' settings.
+    match Connections.prepare getEnv argv with
+    | Error e ->
         if jsonRequested then
-            writeJson out (errorJson "internal" e.Message)
+            writeJson out (tessErrorJson e)
         else
-            err.WriteLine($"tess: internal error: {e}")
+            err.WriteLine($"tess: {TessError.message e}")
 
-        ExitCode.internalError
+        ExitCode.ofError e
+    | Ok(argv, getEnv) ->
+
+        try
+            let results = parser.Value.ParseCommandLine(argv, raiseOnUsage = true)
+
+            let ctx = {
+                Out = out
+                Err = err
+                Json = results.Contains Json && not isMcp
+                GetEnv = getEnv
+                Connector = connector
+            }
+
+            if results.Contains Version then
+                if ctx.Json then
+                    writeJson out (versionJson (version ()))
+                else
+                    out.WriteLine($"tess {version ()}")
+
+                ExitCode.ok
+            else
+                let outcome =
+                    match results.TryGetSubCommand() with
+                    | Some(Convert args) -> ConvertCommand.run ctx args
+                    | Some(Info args) -> InfoCommand.run ctx args
+                    | Some(List args) -> ListCommand.run ctx args
+                    | Some(Get args) -> GetCommand.run ctx args
+                    | Some(Find args) -> FindCommand.run ctx args
+                    | Some(Diff args) -> DiffCommand.run ctx args
+                    | Some(Deps args) -> DepsCommand.run ctx args
+                    | Some(Init args) -> InitCommand.run ctx args
+                    | Some(Validate args) when args.Contains ValidateCommand.Args.Watch ->
+                        WatchCommands.validate ctx args
+                    | Some(Validate args) -> ValidateCommand.run ctx args
+                    | Some(Rename args) -> RenameCommand.run ctx args
+                    | Some(Remove args) -> RemoveCommand.run ctx args
+                    | Some(Move args) -> MoveCommand.run ctx args
+                    | Some(Bpa args) when args.Contains BpaCommand.Args.Watch -> WatchCommands.bpa ctx args
+                    | Some(Bpa args) -> BpaCommand.run ctx args
+                    | Some(Set args) -> SetCommand.run ctx args
+                    | Some(Add args) -> AddCommand.run ctx args
+                    | Some(Translations args) -> TranslationsCommand.run ctx args
+                    | Some(Perspective args) -> PerspectiveCommand.run ctx args
+                    | Some(Script args) -> ScriptCommand.run ctx args
+                    | Some(Lint args) when args.Contains LintCommand.Args.Watch -> WatchCommands.lint ctx args
+                    | Some(Lint args) -> LintCommand.run ctx args
+                    | Some(Format args) -> FormatCommand.run ctx args
+                    | Some(Connect args) -> ConnectCommand.run ctx args
+                    | Some(Profile args) -> ProfileCommand.run ctx args
+                    | Some(Session args) -> SessionCommand.run ctx args
+                    | Some(Query args) -> QueryCommand.run ctx args
+                    | Some(Preview args) -> PreviewCommand.run ctx args
+                    | Some(Deploy args) -> DeployCommand.run ctx args
+                    | Some(Data args) -> DataCommand.run ctx args
+                    | Some(Refresh args) -> RefreshCommand.run ctx args
+                    | Some(Test(WatchedTestRun run as args)) -> WatchCommands.testRun ctx args run
+                    | Some(Test args) -> TestCommand.run ctx args
+                    | Some(Completion args) -> CompletionCommand.run parser.Value ctx args
+                    | Some(Complete args) -> CompletionCommand.complete parser.Value ctx args
+                    | Some(Mcp args) -> McpCommand.run ctx args input
+                    | Some(Interactive args) ->
+                        let host: InteractiveCommand.Host = {
+                            // Each line runs as a command of its own, with this run's context.
+                            Dispatch = fun line -> runWithInput None connector getEnv out err line
+                            InsertModel = insertModel
+                        }
+
+                        // Without a model: the active connection, if it is local (a server is contacted
+                        // only when named: `tess interactive active:`).
+                        let model =
+                            match args.TryGetResult InteractiveCommand.Args.Model with
+                            | Some m -> Ok(Some m)
+                            | None ->
+                                match Connections.activeModel getEnv with
+                                | Ok a when XmlaAddress.isRemote a.Model ->
+                                    Error(
+                                        UsageError(
+                                            $"the active connection is a server ({a.Model}): start the session with "
+                                            + "`tess interactive active:` to connect to it"
+                                        )
+                                    )
+                                | Ok a -> Ok(Some a.Model)
+                                | Error _ -> Ok None
+
+                        match model with
+                        | Error outcome -> outcome
+                        | Ok model -> InteractiveCommand.run ctx args input host model
+                    | _ -> UsageError(parser.Value.PrintUsage())
+
+                match outcome with
+                | Done -> ExitCode.ok
+                | DoneWith code -> code
+                | UsageError message -> usageError message
+                | UsageErrorSuggest(message, suggestions) -> usageErrorWith message suggestions
+                | Failed e ->
+                    if ctx.Json then
+                        writeJson out (tessErrorJson e)
+                    else
+                        err.WriteLine($"tess: {TessError.message e}")
+
+                    ExitCode.ofError e
+        with
+        | :? ArguParseException as e when e.ErrorCode = ErrorCode.HelpText && isMcp ->
+            err.WriteLine(e.Message)
+            ExitCode.ok
+        | :? ArguParseException as e when e.ErrorCode = ErrorCode.HelpText ->
+            out.WriteLine(e.Message)
+            ExitCode.ok
+        | :? ArguParseException as e ->
+            let suggestions = argumentSuggestions argv e.Message
+            usageErrorWith (withHint e.Message suggestions) suggestions
+        | e ->
+            if jsonRequested then
+                writeJson out (errorJson "internal" e.Message)
+            else
+                err.WriteLine($"tess: internal error: {e}")
+
+            ExitCode.internalError
 
 /// Run the CLI with these environment variables, making any server connections through
 /// `connector`. Returns the process exit code.
