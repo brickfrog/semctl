@@ -237,7 +237,7 @@ let toDaxModel (version: string) (s: Stats) (db: Database) : DaxModel * string l
     let m = DaxModel(lib, version, "tess", version)
     let unknown = Collections.Generic.List<string>()
     let tom = db.Model
-    m.ModelName <- Dax.Metadata.DaxName(db.Name)
+    m.ModelName <- Dax.Metadata.DaxName(VertipaqFixture.modelName db)
     m.CompatibilityLevel <- db.CompatibilityLevel
     m.CompatibilityMode <- db.CompatibilityMode.ToString()
     m.ExtractionDate <- DateTime.UtcNow
@@ -332,7 +332,16 @@ let toDaxModel (version: string) (s: Stats) (db: Database) : DaxModel * string l
 
             match c with
             | :? CalculatedColumn as cc -> dc.ColumnExpression <- expr cc.Expression
+            | :? CalculatedTableColumn as ctc when not ctc.IsNameInferred ->
+                dc.IsNameInferred <- Nullable false
+                dc.SourceColumn <- Dax.Metadata.DaxName(ctc.SourceColumn)
             | _ -> ()
+
+            // A field parameter's grouping columns (VertiPaq Analyzer counts such a column differently).
+            if not (isNull c.RelatedColumnDetails) then
+                for g in c.RelatedColumnDetails.GroupByColumns do
+                    if not (isNull g.GroupingColumn) then
+                        dc.GroupByColumns.Add(Dax.Metadata.DaxName(g.GroupingColumn.Name))
 
             match sc with
             | Some sc ->

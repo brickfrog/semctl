@@ -551,6 +551,7 @@ let private starServer () =
                 [ s "Sales"; s "ProductKey (40)"; s "ProductKey"; d 120M; i 2L ]
                 [ s "Product"; s "ProductKey (10)"; s "ProductKey"; s "88"; i 1L ]
                 [ s "Sales"; s "Gone (41)"; s "Gone"; d 1M; i 1L ]
+                [ s "Sales"; s "RowNumber-2662979B (39)"; s "RowNumber-2662979B"; d 16M; i 2L ]
             ]
             VertipaqServer.cardinalityQuery,
             result [
@@ -562,6 +563,7 @@ let private starServer () =
                 [ s "Sales"; s "Sales"; s "ProductKey (40)"; i 0L; i 5L; d 40M ]
                 [ s "Sales"; s "Sales"; s "ProductKey (40)"; i 1L; i 2L; d 24M ]
                 [ s "Product"; s "Product"; s "ProductKey (10)"; i 0L; i 4L; d 16M ]
+                [ s "Sales"; s "Sales"; s "RowNumber-2662979B (39)"; i 0L; i 7L; d 8M ]
             ]
             VertipaqServer.hierarchiesQuery,
             result [
@@ -659,6 +661,16 @@ let serverTests =
                 |> Seq.find (fun x -> x.GetProperty("from").GetString() = "column:Sales/CustomerKey")
 
             Expect.isFalse (has other "invalidRows") "no answer for it: unknown"
+
+            let rowNumber = column "Sales" "RowNumber-2662979B"
+            Expect.equal (rowNumber.GetProperty("kind").GetString()) "rowNumber" "the server's RowNumber column"
+            Expect.isFalse (has rowNumber "cardinality") "not counted"
+            Expect.equal (rowNumber.GetProperty("size").GetInt64()) 24L "but sized: 16 + 8 + 0"
+
+            Expect.isFalse
+                (j.GetProperty("columns").EnumerateArray()
+                 |> Seq.exists (fun c -> c.GetProperty("column").GetString() = "Gone"))
+                "a DMV column the model doesn't have is skipped"
 
             let part =
                 j.GetProperty("partitions").EnumerateArray()

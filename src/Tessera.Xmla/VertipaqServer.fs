@@ -353,65 +353,83 @@ let collect (query: string -> Result<QueryResult list, TessError>) (address: str
             }
     ]
 
+    let columnStats (table: string) (name: string) (kind: string) (dataType: string) (hidden: bool) hint =
+        let k = key table name
+        let isRowNumber = kind = "rowNumber"
+
+        let get (d: Dictionary<string * string, 'v>) =
+            match d.TryGetValue k with
+            | true, v -> Some v
+            | _ -> None
+
+        let parts =
+            match get segments with
+            | Some parts -> [
+                for KeyValue(p, (r, s, n)) in parts ->
+                    {
+                        Partition = p
+                        Rows = r
+                        Segments = n
+                        DataSize = s
+                    }
+              ]
+            | None -> []
+
+        let known = columnId.ContainsKey k
+
+        {
+            Table = table
+            Column = name
+            Kind = kind
+            DataType = dataType
+            IsHidden = hidden
+            Cardinality =
+                if isRowNumber then
+                    None
+                else
+                    match get daxCardinality with
+                    | Some n -> Some n
+                    | None -> get dmvCardinality
+            DictionarySize =
+                if columnsRead && known then
+                    Some(defaultArg (get dictionary) 0L)
+                else
+                    None
+            DataSize =
+                if segmentsRead && known then
+                    Some(parts |> List.sumBy _.DataSize)
+                else
+                    None
+            HierarchySize =
+                if hierarchiesRead && known then
+                    Some(defaultArg (get hierarchy) 0L)
+                else
+                    None
+            Encoding = get encoding
+            EncodingHint = hint
+            Partitions = parts
+        }
+
     let columns = [
         for t in m.Tables do
-            for c in t.Columns ->
-                let k = key t.Name c.Name
-                // The RowNumber column's name on the server isn't the model's; it has one per table.
-                let isRowNumber = c.Type = ColumnType.RowNumber
+            for c in t.Columns do
+                columnStats
+                    t.Name
+                    c.Name
+                    (VertipaqFixture.columnKind c)
+                    (c.DataType.ToString())
+                    c.IsHidden
+                    (Some(c.EncodingHint.ToString()))
 
-                let get (d: Dictionary<string * string, 'v>) =
-                    match d.TryGetValue k with
-                    | true, v -> Some v
-                    | _ -> None
-
-                let parts =
-                    match get segments with
-                    | Some parts -> [
-                        for KeyValue(p, (r, s, n)) in parts ->
-                            {
-                                Partition = p
-                                Rows = r
-                                Segments = n
-                                DataSize = s
-                            }
-                      ]
-                    | None -> []
-
-                let known = columnId.ContainsKey k
-
-                {
-                    Table = t.Name
-                    Column = c.Name
-                    Kind = VertipaqFixture.columnKind c
-                    DataType = c.DataType.ToString()
-                    IsHidden = c.IsHidden
-                    Cardinality =
-                        if isRowNumber then
-                            None
-                        else
-                            match get daxCardinality with
-                            | Some n -> Some n
-                            | None -> get dmvCardinality
-                    DictionarySize =
-                        if columnsRead && known then
-                            Some(defaultArg (get dictionary) 0L)
-                        else
-                            None
-                    DataSize =
-                        if segmentsRead && known then
-                            Some(parts |> List.sumBy _.DataSize)
-                        else
-                            None
-                    HierarchySize =
-                        if hierarchiesRead && known then
-                            Some(defaultArg (get hierarchy) 0L)
-                        else
-                            None
-                    Encoding = get encoding
-                    EncodingHint = Some(c.EncodingHint.ToString())
-                    Partitions = parts
-                }
+            // Every table has a RowNumber column on the server that a model read as files doesn't
+            // show; VertiPaq Analyzer counts it in the table's size.
+            if not (t.Columns |> Seq.exists (fun c -> c.Type = ColumnType.RowNumber)) then
+                for KeyValue((table, _), id) in columnId do
+                    if eq table t.Name then
+                        match byDmv t.Name id with
+                        | Some name when name.StartsWith("RowNumber-", StringComparison.OrdinalIgnoreCase) ->
+                            columnStats t.Name name "rowNumber" "Int64" true None
+                        | _ -> ()
     ]
 
     // User hierarchies.

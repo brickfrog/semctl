@@ -45,7 +45,7 @@ talks only to the server you name.
 | FSharp.Core | © Microsoft Corporation (.NET Foundation) |
 | Argu | © 2019 Argu contributors (<https://github.com/fsprojects/Argu>) |
 | YamlDotNet | © Antoine Aubry and contributors (<https://github.com/aaubry/YamlDotNet>) |
-| Dax.Vpax, Dax.Metadata, Dax.ViewVpaExport (VertiPaq Analyzer), Dax.Vpax.Obfuscator, Dax.Vpax.Obfuscator.Common; the DMV and DAX queries of Dax.Model.Extractor, followed in `src/Tessera.Xmla/VertipaqServer.fs`; `tests/Tessera.Tests/vertipaq/Contoso.vpax` (test data, not shipped) | © 2019 SQLBI (<https://github.com/sql-bi/VertiPaq-Analyzer>, <https://github.com/sql-bi/Vpax-Obfuscator>) |
+| Dax.Vpax, Dax.Metadata, Dax.ViewVpaExport (VertiPaq Analyzer), Dax.Vpax.Obfuscator, Dax.Vpax.Obfuscator.Common, Dax.Tokenizer; the DMV and DAX queries of Dax.Model.Extractor, followed in `src/Tessera.Xmla/VertipaqServer.fs`; `tests/Tessera.Tests/vertipaq/Contoso.vpax` (test data, not shipped) | © 2019 SQLBI (<https://github.com/sql-bi/VertiPaq-Analyzer>, <https://github.com/sql-bi/Vpax-Obfuscator>) |
 | Newtonsoft.Json | © James Newton-King (<https://www.newtonsoft.com/json>) |
 | System.IO.Packaging | © Microsoft Corporation (.NET Foundation) |
 | The `Vertipaq_*` annotation names, from Michael Kovalsky's Tabular Editor scripts (`VertipaqAnnotations.cs`, `VpaxToTabularEditor.cs`) | © Michael Kovalsky (<https://github.com/m-kovalsky/Tabular>) |
