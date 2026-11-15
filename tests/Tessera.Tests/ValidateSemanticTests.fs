@@ -76,6 +76,27 @@ let tests =
                 Expect.stringContains issues.Head.Message "'en US' is not a valid culture name" ""
             }
 
+            test "malformed: decided by the characters, the same on every system" {
+                for name in
+                    [
+                        "en US"
+                        "en-"
+                        "-US"
+                        "en--US"
+                        "en.US"
+                        "en-US "
+                        "énglish"
+                        "toolongsubtag-US"
+                    ] do
+                    let db = sampleDatabase ()
+                    db.Model.Culture <- name
+
+                    Expect.equal
+                        (issuesOf "invalid-culture" db |> List.map (fun (_, s, _, _) -> s))
+                        [ Validate.Severity.Error ]
+                        name
+            }
+
             test "well-formed names are fine, in any case" {
                 let db = sampleDatabase ()
                 db.Model.Culture <- "EN-us"

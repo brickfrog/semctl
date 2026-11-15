@@ -317,6 +317,11 @@ let ruleTests =
                         "OR([Total] = 0, [Total] = 2)"
                         "OR([Total] = 1, [Total] > 2)"
                         "OR([Total] = 1)"
+                        // Unfinished DAX, as while editing: nothing, and no crash.
+                        "OR("
+                        "OR([Total] = 1,"
+                        "OR([Total] = 1, OR("
+                        "OR([Total] = 1, [Total] = 2"
                     ] do
                     Expect.isEmpty (found expr) expr
         ]

@@ -981,7 +981,7 @@ let private inRuleSpans (dax: string) (all: Token array) (code: Token array) (va
         // OR(a, b), each argument a comparison or another such OR call; the index after the `)`.
         let rec orCall (k: int) =
             let argument (k: int) =
-                if isKw "OR" code.[k] then
+                if k < n && isKw "OR" code.[k] then
                     orCall k
                 else
                     item k |> Option.map (fun (it, next) -> [ it ], next)

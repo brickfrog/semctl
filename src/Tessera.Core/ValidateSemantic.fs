@@ -59,27 +59,30 @@ let private knowsCultures =
          with _ ->
              false)
 
-/// None when the name is fine; else the severity and why. Only a name .NET can't parse at all is an
-/// error ('en US'): that is the same on every system. A well-formed name this system's culture
-/// data doesn't list may still be one a server knows (the lists differ by OS and ICU version), so
-/// it is a warning.
-let private cultureProblem (name: string) =
-    let malformed =
-        try
-            CultureInfo.GetCultureInfo name |> ignore
-            None
-        with :? CultureNotFoundException ->
-            Some(Severity.Error, $"'{name}' is not a valid culture name")
+/// Whether a name has the shape of a culture name at all: subtags of ASCII letters and digits (one
+/// to eight each), separated by `-` (or `_`, which .NET also reads). `en US` and `en-` don't.
+let private wellFormed (name: string) =
+    let subtags = name.Split([| '-'; '_' |])
 
-    match malformed with
-    | Some p -> Some p
-    | None when knowsCultures.Value ->
+    subtags
+    |> Array.forall (fun t -> t.Length >= 1 && t.Length <= 8 && t |> Seq.forall Char.IsAsciiLetterOrDigit)
+
+/// None when the name is fine; else the severity and why. A name that isn't shaped like a culture
+/// name ('en US') is an error, decided by its characters alone, so it is the same on every system.
+/// A well-formed name this system's culture data doesn't list may still be one a server knows (the
+/// lists differ by OS and ICU version, and there are none in .NET's invariant globalization mode),
+/// so it is a warning, and only where the system has culture data.
+let private cultureProblem (name: string) =
+    if not (wellFormed name) then
+        Some(Severity.Error, $"'{name}' is not a valid culture name")
+    elif knowsCultures.Value then
         try
             CultureInfo.GetCultureInfo(name, true) |> ignore
             None
         with :? CultureNotFoundException ->
             Some(Severity.Warning, $"'{name}' is not a culture this system knows (e.g. en-US, fr-FR)")
-    | None -> None
+    else
+        None
 
 let private invalidCultures (g: Deps.Graph) (db: Database) = [
     let culture = db.Model.Culture
