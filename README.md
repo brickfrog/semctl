@@ -247,7 +247,12 @@ The default compatibility level is 1702:
 - Power BI Desktop raises a model's level when a feature needs a higher one, but never lowers it
 
 Pass `--compatibility-level` for older engines. The minimum is 1520, the lowest level that supports
-`sourceQueryCulture`. `init` won't write over a non-empty destination without `--force`.
+`sourceQueryCulture`. `init` won't write over a non-empty destination without `--force` (exit 4).
+
+Re-running `init` is safe: if the destination already holds the model `init` would create (the same name,
+compatibility level, culture and properties, nothing else in it, and the format it would write), it writes nothing
+and exits 0, saying so. With `--json`: `{"created": false, "reason", "model", "output": {"format", "path"}}`. Any
+other model there is still refused.
 
 To open the model in Power BI Desktop, you also need a `.pbip` file and a `X.Report` folder that points at it.
 

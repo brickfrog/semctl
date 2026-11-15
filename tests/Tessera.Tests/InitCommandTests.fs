@@ -100,6 +100,73 @@ let tests =
             use doc = json info
             Expect.equal (doc.RootElement.GetProperty("counts").GetProperty("table").GetInt32()) 0 "replaced"
 
+        testCase "re-running init on the model it created: exit 0, a JSON reason, nothing written"
+        <| fun () ->
+            use t = new TempDir()
+
+            for path in
+                [
+                    t.Combine "Sales.SemanticModel"
+                    t.Combine "Sales.bim"
+                    t.Combine "Sales"
+                    t.Combine "te/database.json"
+                ] do
+                Expect.equal (tess [ "init"; path; "--culture"; "da-DK" ]).Code ExitCode.ok path
+
+                let stamps () =
+                    let root =
+                        if Directory.Exists path then
+                            path
+                        else
+                            Path.GetDirectoryName path
+
+                    [
+                        for f in Directory.GetFiles(root, "*", SearchOption.AllDirectories) ->
+                            f, File.GetLastWriteTimeUtc f, File.ReadAllBytes f
+                    ]
+
+                let before = stamps ()
+                let r = tess [ "init"; path; "--culture"; "da-DK"; "--json" ]
+                Expect.equal r.Code ExitCode.ok (path + r.Out + r.Err)
+                use doc = json r
+                let root = doc.RootElement
+                Expect.isFalse (root.GetProperty("created").GetBoolean()) path
+                Expect.stringContains (root.GetProperty("reason").GetString()) "already holds this model" path
+                Expect.equal (stamps ()) before $"{path}: nothing written"
+
+                let text = tess [ "init"; path; "--culture"; "da-DK" ]
+                Expect.equal text.Code ExitCode.ok text.Err
+                Expect.stringContains text.Out "Nothing to do" ""
+
+                // Another model at the destination is still refused.
+                for other in
+                    [
+                        [ "init"; path ]
+                        [ "init"; path; "--culture"; "da-DK"; "--name"; "Other" ]
+                        [ "init"; path; "--culture"; "da-DK"; "--compatibility-level"; "1601" ]
+                    ] do
+                    let r = tess (other @ [ "--json" ])
+                    Expect.equal r.Code ExitCode.output (String.concat " " other)
+                    Expect.equal (errorCode r) "destination-not-empty" ""
+
+                Expect.equal (stamps ()) before $"{path}: still nothing written"
+
+        testCase "a model with more in it, or in another format, is not the same model"
+        <| fun () ->
+            use t = new TempDir()
+            let path = t.Combine "Sales.bim"
+            Expect.equal (tess [ "init"; path ]).Code ExitCode.ok ""
+
+            let added =
+                tess [ "add"; path; "table:Numbers"; "-e"; "GENERATESERIES(1, 3)"; "--save" ]
+
+            Expect.equal added.Code ExitCode.ok added.Err
+            Expect.equal (tess [ "init"; path ]).Code ExitCode.output "a table was added"
+
+            let dir = t.Combine "Finance"
+            Expect.equal (tess [ "init"; dir ]).Code ExitCode.ok ""
+            Expect.equal (tess [ "init"; dir; "-f"; "database.json" ]).Code ExitCode.output "TMDL, not database.json"
+
         testCase "an empty existing folder is fine without --force"
         <| fun () ->
             use t = new TempDir()

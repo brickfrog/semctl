@@ -55,6 +55,51 @@ let initText (out: TextWriter) (opts: Scaffold.Options) (saved: ModelIO.SavedMod
     out.WriteLine($"Created {ModelIO.OutputFormat.token saved.Format}  {saved.Path}  ({files})")
     out.WriteLine($"  model {opts.Name}, compatibility level {opts.CompatibilityLevel}, culture {opts.Culture}")
 
+/// A database as TOM JSON with its name and ID left out, and the annotation the database.json
+/// layout adds to say how it splits the model: what makes two models the same model.
+let private canonical (db: Microsoft.AnalysisServices.Tabular.Database) =
+    let copy = ModelIO.clone db
+    copy.Name <- "Model"
+    copy.ID <- "Model"
+
+    match copy.Model.Annotations.Find FolderFormat.FolderOptions.annotationName with
+    | null -> ()
+    | a -> copy.Model.Annotations.Remove a |> ignore
+
+    ModelIO.toBimText ModelIO.SaveOptions.defaults copy
+
+/// The destination already holds the model `init` would create, in the format it would write:
+/// re-running `init` has nothing to do. Anything else there is left to the usual refusal.
+let private alreadyThere (format: ModelIO.OutputFormat) (opts: Scaffold.Options) (path: string) =
+    match ModelIO.loadPath path, Scaffold.create opts with
+    | Ok(src, existing), Ok fresh ->
+        let sameFormat =
+            match format, src.Format with
+            | ModelIO.BimFile, Bim -> src.SemanticModelFolder.IsNone
+            | ModelIO.TmdlFolder, Tmdl -> src.SemanticModelFolder.IsNone
+            | ModelIO.PbipFolder, Tmdl -> src.SemanticModelFolder.IsSome
+            | ModelIO.DatabaseJsonFolder, DatabaseJson -> true
+            | _ -> false
+
+        if sameFormat && canonical existing = canonical fresh then
+            Some src
+        else
+            None
+    | _ -> None
+
+let private unchangedJson (opts: Scaffold.Options) (format: ModelIO.OutputFormat) (src: ModelSource) =
+    obj [
+        "created", bool false
+        "reason", str "the destination already holds this model, as init would write it; nothing was written"
+        "model",
+        obj [
+            "name", str opts.Name
+            "compatibilityLevel", num opts.CompatibilityLevel
+            "culture", str opts.Culture
+        ]
+        "output", obj [ "format", str (ModelIO.OutputFormat.token format); "path", str src.Path ]
+    ]
+
 let run (ctx: Ctx) (args: ParseResults<Args>) =
     let path = args.GetResult Args.Destination
     let defaults = Scaffold.defaults path
@@ -104,6 +149,16 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
         }
 
         match Scaffold.init format opts (args.Contains Args.Force) path with
+        | Error(DestinationNotEmpty _ as e) ->
+            match alreadyThere format opts path with
+            | Some src ->
+                if ctx.Json then
+                    writeJson ctx.Out (unchangedJson opts format src)
+                else
+                    ctx.Out.WriteLine($"Nothing to do: {src.Path} already holds this model.")
+
+                Done
+            | None -> Failed e
         | Error e -> Failed e
         | Ok saved ->
             if ctx.Json then
