@@ -110,9 +110,61 @@ each; the matrix needs about 48 million such row contexts, and incremental conte
 the fact table's size (an index lookup) but not free: a transition, CALCULATE and SUM cost a few microseconds
 whatever they read. What is left is the second option below.
 
+## Aggregating by group (wave 7, perf/engine-groupagg)
+
+The "variant spaceparts needs" below, at the CALCULATE: in a row context of a model table T, `CALCULATE ( <agg> )`
+with no filter argument (SUM, MIN, MAX, AVERAGE, COUNT, COUNTA of one column, COUNTROWS of a table) and a measure
+that is one such aggregation take their value from buckets of the fact table's rows, made once per iteration. Two
+more steps were needed to reach the target, both exact by construction (see "Aggregating by group" in the author's
+guide, Engine/Types.fs): an iterator's expression made only of literals, operators, T's columns and such CALCULATEs
+is evaluated, in rows whose buckets are all empty, from those values with the evaluator's own operators
+(Engine/Operators.fs, shared with Eval.fs); and SUMX leaves out the rows that are BLANK for every value of the column
+the expression reads (BLANK is no step of `Aggregate.sum`).
+
+Answers. `--compare` against a build of eab6792 (this branch's base): **0 changed answers** at 200
+rows (all 354 queries) and at 2,000 rows (every query that finished both times: all but the 16 that timed out at 60 s
+before). For those 16 the before run was redone with a 900 s timeout but stopped part-way (~15 min per query); its
+times are below, but it wrote no answers, so those 16 have no before answer to compare with. Check mode (every value
+by group, its fact rows, and every row taken from its buckets, evaluated row by row and compared): the 200-row
+benchmark, all queries (14,761,849 checked, plus 22,420,672 incremental contexts) and the whole test suite
+(1,321,936 checked), 0 differences.
+
+Timings were taken on a shared machine (other sessions' builds and tests ran meanwhile, load 8-12 on 24 cores); the
+2,000-row station matrix ran 16.5-20.9 s over five runs.
+
+| | before (eab6792) | after |
+|---|---:|---:|
+| 200 rows: station-matrix/20 | 0.36 s | 0.12 s |
+| 200 rows: the 344 total/by queries, sum | 79.9 s | 14.8 s |
+| 2,000 rows: station-matrix/2 | 0.46 s | 0.13 s |
+| 2,000 rows: station-matrix/20 | 1.97 s | 0.14 s |
+| 2,000 rows: **station-matrix/all** | **179.4 s** | **17.3-19.2 s** |
+| 2,000 rows: allselected-shape/all | 93.0 s | 12.2 s |
+| 2,000 rows: share-of-selection | 1.60 s | 0.03 s |
+| 2,000 rows: rankx-customers | 0.12 s | 0.008 s |
+| 2,000 rows: total/by queries that finished both times (330), sum | 31.4 s | 3.0 s |
+| 2,000 rows: total/CF - Bar Chart X Min, Max | 81.8 s, 91.0 s | 1.5 s, 1.6 s |
+| 2,000 rows: by Date[Calendar Year]/CF - Bar Chart X Min, Max | 94.6 s, 88.8 s | 1.9 s, 1.9 s |
+| 2,000 rows: by Brand, Customer[Account Type], Invoice Document Type, Product[Type]: CF - Bar Chart X Min / Max | 812-895 s each (one > 900 s) | 14.6-18.2 s each |
+| 2,000 rows: by Budget Rate[Currency System]/CF - Bar Chart X Min, Max, by Product[Type]/... Max | not measured (run stopped) | 15.0-18.2 s |
+| 2,000 rows: queries that time out at 60 s | 16 | 0 |
+| 2,000 rows: peak working set | 149 MB | 328 MB |
+
+**The target, the Station matrix at 2,000 rows under 20 s, is met** (17.3 s in the full run, 16.5-20.9 s in
+single runs on the loaded machine). The 20,000-row subset was not rerun.
+
+Where the time goes now (station-matrix/all, 2,000 rows, a thread-time profile): about 45% is the
+`MINX ( ALLSELECTED ( Region[Station] ), [Gross Margin % vs PY pp] )` loop itself, 2,000 x 2,000 measure references
+that each make a context transition and look their value up in the query's measure cache (the transition about
+28%, the cache's key and lookup about 16%, `FindId` of each station about 12%); about 17% is the CALCULATEs with a
+filter on 'Date'[Date] in that measure, which are not done by group; the iterations over 'Budget Rate' left are a
+few percent. The next step would be a cheaper key for a measure referenced in a row context (the filters the
+transition keeps are the same object for every row), not more grouping.
+
 ## What is left: aggregating by group
 
-The first option of the redesign below is done (wave 6). The second is not, and the brief limited it to the exact
+Done in wave 7 (above), as the variant at the CALCULATE. What follows is the proposal as it stood. The first option of
+the redesign below is done (wave 6). The second was not, and the brief limited it to the exact
 shape `SUMX ( T, CALCULATE ( SUM ( F[x] ) ) )`. No measure of spaceparts has that shape: `[Revenue]` is
 `SUMX ( 'Budget Rate', CALCULATE ( SUM ( ... ) ) / 'Budget Rate'[Rate] )` and `[Gross Profit]` the difference of
 two such CALCULATEs over the rate, so the exact shape alone would show no number here; it was left for a planned

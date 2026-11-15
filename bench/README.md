@@ -15,8 +15,9 @@ Each query runs in a child process (one prepared model per child), so a query th
 is killed and the rest still run. The clock is fixed (2026-08-21 12:00) so TODAY gives the same answer every run.
 Each result is fingerprinted (a hash of its JSON, or of its error), and `--compare` reports every query whose
 answer differs from an earlier run's: speed must never buy a different answer. `--check` runs the engine in its
-incremental check mode (every filter context whose rows are worked out incrementally is recomputed in full and
-compared; slow): the run reports how many were checked and fails if any differed.
+check mode (every filter context whose rows are worked out incrementally is recomputed in full and compared, and
+every value aggregated by group, and every row evaluated from its buckets, is evaluated row by row and compared;
+slow): the run reports how many were checked and fails if any differed.
 
 The queries:
 
