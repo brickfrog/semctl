@@ -81,6 +81,27 @@ tess test run ./Sales.pbip --data ./fixture --json    # run the suites offline (
 The engine never returns a wrong answer: anything it doesn't implement exactly is an error with the code
 `not-supported`, naming what it refused. Treat that as "unknown", not as a failure of the model.
 
+A session holds one model in memory and stages edits until `save` (the same staged model `tess mcp` serves).
+Pipe a script into it: it stops at the first failing command with that command's exit code, and input that ends
+with unsaved edits fails with exit 1 (`unsaved-changes`), so end with `save` or `exit --force`:
+
+```sh
+printf 'rename [Revenue] "Net Revenue"\nvalidate --fail-on error\nstatus --json\nsave\n' | tess interactive ./Sales.pbip
+```
+
+Inside it, commands take no model (`get [Margin] --json`); `--dry-run` shows an edit without staging it; `undo`,
+`revert`, `diff` and `status` work on what is staged; `-` (stdin) is refused. Words group with `"..."` (a doubled
+`""` is a literal quote); `[Total]` and `'Sales'[Total]` stay whole.
+
+`remove` (and `bpa --fix` Delete(), `mcp` remove) refuses to delete what a PBIR report next to the model uses:
+exit 3, error code `used-by-report`, the visuals in `usages`. Change the report, or pass `--force` knowingly.
+
+Profiles and the active connection are local state, never secrets: `tess connect <model or server>` makes it this
+terminal's active connection, named `active:` as a model argument; `tess profile set <name> --model <path>` (or
+`--server ... --database ...`) names one, used as `profile:<name>` or with `tess connect --profile <name>`. Set
+`TESS_SESSION=<name>` when your commands don't run from one terminal (an agent's shell may start a new one each
+time), and `TESS_STATE_DIR` / `TESS_CONFIG` to keep the state somewhere of your own.
+
 ## Good habits
 
 - Run `validate` after an edit you saved, and `format --check` / `lint` before committing DAX.
