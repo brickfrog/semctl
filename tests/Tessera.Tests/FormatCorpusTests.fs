@@ -108,6 +108,46 @@ let tests =
             for c in cases () do
                 runCase c
 
+        testCase "a call after a closing bracket starts a row, unless comments come first"
+        <| fun () ->
+            let opts = {
+                FormatOptions.defaults with
+                    Width = 40
+            }
+
+            let fmt dax =
+                match format opts dax with
+                | Ok s -> s
+                | Error e -> failtestf "%s" (FormatError.message e)
+
+            Expect.equal
+                (fmt "calculate(sum(Sales[Amount]),all(Sales[Region]))+calculate(sum(Sales[Cost]))")
+                (String.concat "\n" [
+                    "CALCULATE ("
+                    "    SUM ( Sales[Amount] ),"
+                    "    ALL ( Sales[Region] )"
+                    ")"
+                    "    + CALCULATE ( SUM ( Sales[Cost] ) )"
+                ])
+                "the call starts a row after its operator"
+
+            let withComment =
+                fmt "calculate(sum(Sales[Amount]),all(Sales[Region]))+\n// the cost\ncalculate(sum(Sales[Cost]))"
+
+            Expect.equal
+                withComment
+                (String.concat "\n" [
+                    "CALCULATE ("
+                    "    SUM ( Sales[Amount] ),"
+                    "    ALL ( Sales[Region] )"
+                    ") +"
+                    "    // the cost"
+                    "    CALCULATE ( SUM ( Sales[Cost] ) )"
+                ])
+                "the operator stays after the bracket, above the comment"
+
+            Expect.equal (fmt withComment) withComment "settles"
+
         // https://github.com/TabularEditor/TabularEditor/issues/638: a formatter removed the line
         // break at the start of a measure; Tabular Editor's fix was to "retain any line breaks at
         // the start of the original expression".

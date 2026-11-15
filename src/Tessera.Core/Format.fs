@@ -1202,7 +1202,9 @@ let private layout (opts: FormatOptions) (nl: string) (tree: Tree) (tail: Commen
                 // closing bracket so does an operand that starts with one: "A function call in an
                 // expression splitted in more rows has to be always in a new row, preceded by an
                 // operator" (SQLBI's rules, whose example has `) > 42 + ...` but then puts
-                // `- CALCULATE ( 4 )` on a new row after a multi-line CALCULATE).
+                // `- CALCULATE ( 4 )` on a new row after a multi-line CALCULATE). An operand with
+                // comments on the lines before it follows the bracket, so its operator isn't left
+                // alone on a line above the comments.
                 let cont = (if startsLine then indent else o.LineIndent) + 4
                 let fill = rest |> List.forall (fun (op, _) -> level op >= 6)
                 render o c first 0
@@ -1221,7 +1223,11 @@ let private layout (opts: FormatOptions) (nl: string) (tree: Tree) (tail: Commen
                             | Some w -> o.Col + 1 + opWidth + 1 + w + tailWidth <= width
                             | None -> false)
 
-                    if not o.Pending && ((closesLine o && not (startsWithCall x)) || packs ()) then
+                    if
+                        not o.Pending
+                        && ((closesLine o && not (startsWithCall x && (firstTok x).Leading.IsEmpty))
+                            || packs ())
+                    then
                         o.Space()
                     else
                         o.Newline cont

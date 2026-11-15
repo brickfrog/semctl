@@ -1543,7 +1543,8 @@ The style:
   one indent in. Arithmetic and `&` keep as many operands on a line as fit, but an operand containing a function
   call starts a line of its own. `&&`, `||` and comparisons put each operand on a line. After a multi-line
   operand, the next operator follows its closing bracket: `) / 'Budget Rate'[Rate]`, unless the operand after it
-  starts with a function call, which starts a row of its own, as in SQLBI's example (`- CALCULATE ( 4 )`).
+  starts with a function call, which starts a row of its own, as in SQLBI's example (`- CALCULATE ( 4 )`). An operand
+  with comments on the lines before it still follows the bracket, so its operator isn't left alone on a line.
 - **VAR/RETURN:** a `VAR`'s value stays on the `VAR` line if it fits, otherwise it goes on the next line,
   indented. `RETURN` is on a line of its own, with its expression indented below it.
 - **Queries:** `DEFINE`, `EVALUATE`, `ORDER BY` and `START AT` start lines. Definitions are indented under
