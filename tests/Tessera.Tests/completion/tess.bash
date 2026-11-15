@@ -4,7 +4,7 @@
 
 _tess_children() {
     case $1 in
-        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query deploy data refresh test completion' ;;
+        '') _tess_r='convert info list get find diff deps init validate rename remove move bpa set add translations perspective script lint format connect query deploy data refresh test completion mcp' ;;
         'bpa') _tess_r='rules' ;;
         'bpa rules') _tess_r='list show add remove ignore unignore' ;;
         'translations') _tess_r='export import cultures' ;;
@@ -22,7 +22,7 @@ _tess_options() {
         'convert') _tess_r='--format -f --serialization --force --eol --indent-spaces --include-sensitive --json -j --help -h' ;;
         'info') _tess_r='--json -j --help -h' ;;
         'list') _tess_r='--kind -k --table -t --name -n --json -j --help -h' ;;
-        'get') _tess_r='--property -p --children --properties --all --json -j --help -h' ;;
+        'get') _tess_r='--property -p --children --properties --all --where --json -j --help -h' ;;
         'find') _tess_r='--regex -E --case-sensitive -s --kind -k --table -t --in --json -j --help -h' ;;
         'diff') _tess_r='--ignore --stat --name-only --json -j --help -h' ;;
         'deps') _tess_r='--depth -d --depends-on --referenced-by --unused --include-visible --kind -k --table -t --fail-on-unused --json -j --help -h' ;;
@@ -70,6 +70,7 @@ _tess_options() {
         'test compare') _tess_r='--against --data --against-data --tolerance --tolerance-abs --types --filter --tag --fail-fast --fail-on --strict --ci --trx --junit --force --json -j --help -h' ;;
         'test list') _tess_r='--filter --tag --json -j --help -h' ;;
         'completion') _tess_r='--json -j --help -h' ;;
+        'mcp') _tess_r='--allow --data --server --save --audit-log --json -j --help -h' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -90,6 +91,7 @@ _tess_value() {
         'list|-n') _tess_r='text' ;;
         'get|--property') _tess_r='text' ;;
         'get|-p') _tess_r='text' ;;
+        'get|--where') _tess_r='text' ;;
         'find|--kind') _tess_r='choice model table column measure hierarchy level partition calcitem calendar relationship role perspective culture expression function datasource' ;;
         'find|-k') _tess_r='choice model table column measure hierarchy level partition calcitem calendar relationship role perspective culture expression function datasource' ;;
         'find|--table') _tess_r='dyn' ;;
@@ -260,6 +262,10 @@ _tess_value() {
         'test compare|--junit') _tess_r='path' ;;
         'test list|--filter') _tess_r='text' ;;
         'test list|--tag') _tess_r='text' ;;
+        'mcp|--allow') _tess_r='text' ;;
+        'mcp|--data') _tess_r='dir' ;;
+        'mcp|--server') _tess_r='text' ;;
+        'mcp|--audit-log') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }
@@ -352,6 +358,7 @@ _tess_positional() {
         'test list|0') _tess_r='path' ;;
         'test list|'*) _tess_r='path' ;;
         'completion|0') _tess_r='text' ;;
+        'mcp|0') _tess_r='path' ;;
         *) _tess_r='' ;;
     esac
 }

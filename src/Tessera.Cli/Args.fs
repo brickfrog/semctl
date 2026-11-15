@@ -34,6 +34,7 @@ type CliArgs =
     | [<CliPrefix(CliPrefix.None)>] Refresh of ParseResults<RefreshCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Test of ParseResults<TestCommand.Args>
     | [<CliPrefix(CliPrefix.None)>] Completion of ParseResults<CompletionCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Mcp of ParseResults<McpCommand.Args>
     | [<Hidden; CliPrefix(CliPrefix.None); CustomCommandLine("__complete")>] Complete of
         ParseResults<CompletionCommand.CompleteArgs>
 
@@ -69,4 +70,5 @@ type CliArgs =
             | Refresh _ -> RefreshCommand.summary
             | Test _ -> TestCommand.summary
             | Completion _ -> CompletionCommand.summary
+            | Mcp _ -> McpCommand.summary
             | Complete _ -> "candidates for the completion scripts."

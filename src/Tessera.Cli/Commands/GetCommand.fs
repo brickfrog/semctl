@@ -19,6 +19,7 @@ type Args =
     | Children
     | Properties
     | All
+    | Where of condition: string
 
     interface IArgParserTemplate with
         member this.Usage =
@@ -31,6 +32,10 @@ type Args =
             | Children -> "include child objects (a table's columns, measures, ...)."
             | Properties -> "list the properties `set` can write: path, type, value, and allowed values (enums)."
             | All -> "with --properties: also list read-only properties."
+            | Where _ ->
+                "list the objects inside the object (the model: all; a table: its columns, measures, ...) whose "
+                + "property matches: <path>=<pattern> or <path>!=<pattern>, * and ? wildcards, case-insensitive "
+                + "(repeatable: all must hold). `objectKind` is the object's kind. With -p, print those properties."
 
 let getJson (e: ObjectEntry) (objectJson: string) =
     obj (refFields e @ [ "object", JsonNode.Parse objectJson ])
@@ -55,7 +60,7 @@ let catalogJson (descriptors: SetProperty.Descriptor list) =
             // "value" is null for a property with no value: null is the value there, so it stays.
             objWithNulls [
                 "property", str d.Path
-                "type", str (SetProperty.PropertyType.token d.Type)
+                "type", str (PropertyCatalog.PropertyType.token d.Type)
                 "writable", bool d.Writable
                 "value", valueJson d.Value
                 if not d.Allowed.IsEmpty then
@@ -98,7 +103,7 @@ let catalogText (out: TextWriter) (all: bool) (descriptors: SetProperty.Descript
         for d in descriptors ->
             [
                 d.Path
-                SetProperty.PropertyType.token d.Type
+                PropertyCatalog.PropertyType.token d.Type
                 if all then
                     (if d.Writable then "writable" else "read-only")
                 valueText d.Value
@@ -199,15 +204,79 @@ let private show (ctx: Ctx) (args: ParseResults<Args>) =
 
                 Done
 
+/// `--where`: the objects inside the target that meet every condition, listed like `list` (or, with
+/// -p, their properties).
+let private runWhere (ctx: Ctx) (args: ParseResults<Args>) (conditions: Where.Condition list) =
+    let modelPath, selector = args.GetResult Args.Target
+    let wanted = args.GetResults Args.Property
+
+    let result =
+        Source.load ctx modelPath
+        |> Result.bind (fun (_, db) ->
+            Inventory.Selector.resolve (Inventory.objects db) selector
+            |> Result.bind (fun container -> Where.filter db container conditions)
+            |> Result.map (fun found -> db, found))
+
+    match result with
+    | Error e -> Failed e
+    | Ok(db, found) ->
+        match wanted with
+        | [] ->
+            if ctx.Json then
+                writeJson ctx.Out (ListCommand.listJson found)
+            else
+                ListCommand.listText ctx.Out found
+
+            Done
+        | paths ->
+            // Each object's own leaves at those paths; an object without one just has fewer.
+            let rows = [
+                for e in found ->
+                    let props = Serialize.properties db e
+                    e, paths |> List.collect (fun p -> Serialize.select p props)
+            ]
+
+            if ctx.Json then
+                writeJson ctx.Out (arr [ for e, leaves in rows -> propertiesJson e leaves ])
+            else
+                for e, leaves in rows do
+                    for leaf, value in leaves do
+                        let firstLine = value.Replace("\r\n", "\n").Split('\n').[0]
+                        let more = if firstLine.Length < value.Length then " ..." else ""
+                        ctx.Out.WriteLine($"{ObjectRef.format e.Ref}  {leaf}: {firstLine}{more}")
+
+            Done
+
 let run (ctx: Ctx) (args: ParseResults<Args>) =
     let modelPath, selector = args.GetResult Args.Target
 
-    if args.Contains Args.Properties then
-        if args.Contains Args.Property || args.Contains Args.Children then
-            UsageError "--properties can't be combined with --property or --children"
+    let conditions =
+        args.GetResults Args.Where
+        |> List.map Where.Condition.parse
+        |> List.fold
+            (fun acc c ->
+                match acc, c with
+                | Ok xs, Ok x -> Ok(xs @ [ x ])
+                | Error e, _
+                | _, Error e -> Error e)
+            (Ok [])
+
+    match conditions with
+    | Error message -> UsageError message
+    | Ok(_ :: _) when
+        args.Contains Args.Properties
+        || args.Contains Args.Children
+        || args.Contains Args.All
+        ->
+        UsageError "--where lists objects: it can't be combined with --properties, --all or --children"
+    | Ok(_ :: _ as conditions) -> runWhere ctx args conditions
+    | Ok [] ->
+        if args.Contains Args.Properties then
+            if args.Contains Args.Property || args.Contains Args.Children then
+                UsageError "--properties can't be combined with --property or --children"
+            else
+                runProperties ctx modelPath selector (args.Contains Args.All)
+        elif args.Contains Args.All then
+            UsageError "--all only goes with --properties"
         else
-            runProperties ctx modelPath selector (args.Contains Args.All)
-    elif args.Contains Args.All then
-        UsageError "--all only goes with --properties"
-    else
-        show ctx args
+            show ctx args

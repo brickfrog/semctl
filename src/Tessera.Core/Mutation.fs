@@ -82,3 +82,28 @@ let apply (db: Database) (edit: Database -> Result<Effect, TessError>) : Result<
             IntroducedErrors = errors db |> List.filter (fun i -> not (known.Contains(key i)))
             Effect = effect
         })
+
+/// The errors an edit is judged by (the save gate's): errors of the rules an edit can break.
+let gatedErrors (db: Database) = errors db
+
+/// `apply`, also returning the gated errors present before the edit that are gone after it
+/// ("resolved"). Issues of renamed objects are matched under their old names, as in `apply`.
+let applyResolving
+    (db: Database)
+    (edit: Database -> Result<Effect, TessError>)
+    : Result<Applied * Validate.Issue list, TessError> =
+    let before = errors db
+
+    apply db edit
+    |> Result.map (fun applied ->
+        let oldRefOf =
+            applied.Changes
+            |> List.choose (fun c -> c.MovedFrom |> Option.map (fun old -> c.Ref, old))
+            |> Map.ofList
+
+        let after =
+            errors db
+            |> List.map (fun i -> i.Rule, Map.tryFind i.Ref oldRefOf |> Option.defaultValue i.Ref, i.Message)
+            |> Set.ofList
+
+        applied, before |> List.filter (fun i -> not (after.Contains(i.Rule, i.Ref, i.Message))))

@@ -334,6 +334,42 @@ Each entry has:
 `annotations.<name>` and `extendedProperties.<name>` stand for new items of any name. Existing ones are listed
 by name. Text output shows the first line of long values; `--json` has them in full.
 
+Both `get --properties` and `set` read one property catalog (`Tessera.PropertyCatalog`), built once per TOM type
+by reflection and cached: each path's type, whether `set` writes it at the model's compatibility level and mode,
+and the enum members that level allows. An object's list is that table plus its current values (and the
+annotations it has). A value outside an enum's members is refused with the members and the closest one:
+`expected one of: default, none, sum, ... (did you mean 'sum'?)`.
+
+#### Filtering objects (`get --where`)
+
+`tess get <model> <container> --where <path>=<pattern>` lists the objects inside a container whose property
+matches a wildcard: `*` is any run of characters (line breaks included), `?` one character, and the rest is
+literal. Matching is case-insensitive and covers the whole value. `<path>!=<pattern>` keeps the objects that
+don't match. `--where` is repeatable, and every condition must hold.
+
+```sh
+tess get ./Sales.pbip model --where objectKind=measure --where 'expression=*CALCULATE*'
+tess get ./Sales.pbip Sales --where isHidden=true
+tess get ./Sales.pbip model --where objectKind=measure --where description= -p expression   # undocumented measures
+tess get ./Sales.pbip model --where annotations.Owner!=finance --where objectKind=table
+```
+
+- **Container:** the objects whose TOM parent chain reaches it. For the model that is every object; for a table
+  its columns, measures, hierarchies, levels, partitions, calculation items and calendars; for a hierarchy its
+  levels. The container itself is not listed.
+- **Paths** are the ones `get --properties` and `get -p` use, matched case-insensitively. `objectKind` is the object's
+  kind (`measure`, `column`, ...).
+- **Values** are read as `get --properties` shows them, so TOM's defaults have values: `isHidden=false` finds the
+  visible objects even though TOM's JSON leaves `isHidden` out. Values that are not in the catalog, such as
+  translations, come from the paths `get -p` prints. A property that holds nothing (an unset description, an
+  annotation the object doesn't have) reads as empty, so `description=` finds objects without one.
+- **Objects without the property** (a relationship has no `isHidden`) match neither `=` nor `!=`.
+- **Output** is the same as `list`'s, text or `--json`. With `-p <path>`, tess prints those properties of each
+  match instead (`ref  path: value`, the first line of long values; `--json`: `[{ref, kind, properties}]`).
+- Finding nothing is not an error: no output, exit code 0. A path that no object inside the container has is
+  `unknown-property` (exit code 2) with close matches. `--where` can't be combined with `--properties` or
+  `--children`.
+
 `find --in` takes path wildcards. A wildcard matches if it matches the whole path or just the last segment, so
 `--in expression` covers both `expression` and `source.expression`. `find` searches every property except
 lineage tags, and prints `ref  property[:line]  text`, one hit per matching line.
@@ -3216,6 +3252,84 @@ upgrading tess.
 
 Object names with spaces and symbols are quoted or escaped for the shell. Completing an object loads the model,
 so it takes about as long as `tess list` on it (under a second for a typical model).
+
+### AI agents (`mcp`)
+
+`tess mcp <model>` serves one model to an AI agent (Claude Code, VS Code, Cursor, Codex, ...) as a
+[Model Context Protocol](https://modelcontextprotocol.io) server over stdio: the agent's client starts tess, and
+they talk JSON-RPC 2.0 over its stdin and stdout (MCP 2025-06-18; clients asking for 2025-03-26 or 2024-11-05 get
+that version). There is no HTTP transport: tess opens no port and makes no network call of its own.
+
+```sh
+claude mcp add tess -- tess mcp ./Sales.pbip                                   # read only
+claude mcp add tess -- tess mcp ./Sales.pbip --allow metadata-write --save    # may change and save it
+claude mcp add tess -- tess mcp ./Sales.pbip --allow data-read --data ./fixtures --audit-log ./tess-mcp.jsonl
+```
+
+```json
+{ "mcpServers": { "tess": { "command": "tess", "args": ["mcp", "./Sales.pbip", "--allow", "read,bpa"] } } }
+```
+
+**Permissions.** `--allow` (repeatable or comma-separated) decides which tools exist. A tool outside the grants is
+never registered: it isn't listed, and calling it fails exactly like calling a tool that doesn't exist.
+
+| Grant | Tools |
+|---|---|
+| `read` (the default) | `model_overview`, `list_objects`, `search_model`, `get_objects`, `list_properties`, `get_dependencies`, `validate_model`, `lint_dax`, `format_dax`, `get_full_model` |
+| `metadata-write` (implies `read`) | `apply_changes`; with `--save`, also `save_model` |
+| `data-read` | `run_query`, over a fixture with the local engine (`--data <dir>`) or on a server model you name (`--server xmla:<server>;<database>`) |
+| `bpa` | `list_bpa_rules`, `run_bpa` |
+
+**`data-read` hands model rows to whatever client launched the server**, and through it to the agent's AI
+provider. It is off unless you grant it, and it needs `--data` or `--server` to say where rows come from. The
+other grants send metadata only: names, expressions, descriptions, annotations, findings.
+
+**The tools**, from cheap to detailed (the server's instructions tell the agent to go in this order):
+- `model_overview`: the model's level and object counts, every table with its column, measure, hierarchy and
+  partition counts, every relationship.
+- `list_objects` (a container, kinds, a name wildcard, [`--where`](#filtering-objects-get---where) conditions) and
+  `search_model` (`find`): refs to pass on. At most 500 per call, and the result says when it was cut.
+- `get_objects` (TOM JSON, TMDL, or chosen property paths such as `expression`), `list_properties` (`get
+  --properties`), `get_dependencies` (`deps`).
+- `validate_model`, `lint_dax`, `format_dax` (formats text or an object's expression; changes nothing),
+  `list_bpa_rules`, `run_bpa`: the same JSON as the commands' `--json`. BPA rules come from the built-in set, the
+  model's annotations and your rule files; `run_bpa` never fetches a URL.
+- `get_full_model`: the whole model as TMDL. Its description warns the agent that it costs a great many tokens.
+- `run_query`: 100 rows per result by default, at most 500 (`maxRows`); a result cut short is marked `truncated`
+  with a note. On a server the limit is applied while reading.
+
+**Changes.** `apply_changes` takes a batch of operations and applies them all or none: if one fails, the model is
+left exactly as it was and the error names the operation (`operation`: its index).
+
+| `op` | Arguments | Like |
+|---|---|---|
+| `set` | `object`, `properties` (`{"<path>": value or null}`), `unset` | `tess set` |
+| `rename` | `object`, `newName` | `tess rename` (fixes the DAX that refers to it) |
+| `add` | `kind` (`measure`, `calculatedColumn`, `dataColumn`, `calculatedTable`, `relationship`), `table`, `name`, `expression`, `dataType`, `sourceColumn`, `from`, `to`, `active`, `description`, `displayFolder`, `formatString`, `hidden` | `tess add` |
+| `remove` | `objects`, `cascade` | `tess remove` |
+| `move` | `measure`, `table`, `displayFolder` | `tess move` |
+| `script` | `dax`: `DEFINE MEASURE`/`COLUMN`/`TABLE` blocks, created or updated | `tess script apply` |
+
+The result is the editing commands' JSON: `changes[]`, `introducedErrors` (errors the batch introduced),
+`resolvedErrors` (errors it fixed), `errorsIntroducedSinceLoad`, notes, warnings and `unsavedChanges`. Changes stay
+in memory for the session. Only with `--save` is there a `save_model` tool, which writes the model back where it
+was loaded from (the same format and line endings, as `--save` does). It refuses while the session's changes have
+introduced errors that weren't there when the model was loaded, unless called with `force: true`. A model loaded
+from a server is never saved (`tess deploy` deploys files). There is no tool for raw TMSL or XMLA.
+
+**The audit log.** `--audit-log <file>` appends one JSON line per tool call: `time` (UTC), `tool`, `objects` (the
+object names in the arguments), `outcome` (`ok`, `error`, `unknown-tool`) and, for an error, `errorCode` (never
+the message, which can quote a value). A first line (`event: start`) records the model, the grants and the tools
+offered. Property values, DAX, query text and query results are never written.
+
+**stdout is the protocol.** It carries JSON-RPC frames only, one per line, UTF-8 without a BOM. tess's own
+messages (the start-up line, option errors even with `--json`, `--help`, sign-in prompts for `--server`) go to
+stderr. tess serves until its input ends.
+
+**Not done:** resources, prompts, sampling, progress notifications and cancellation (requests are answered one
+at a time, in order); `rename` through `apply_changes` doesn't update PBIR report files (it warns: use `tess
+rename`); `add` covers five kinds (the rest through a `script` operation, or `tess add`); there is no undo
+within a session other than not saving. Errors keep their CLI wording, which may mention a `tess` command.
 
 ### JSON and exit codes
 
