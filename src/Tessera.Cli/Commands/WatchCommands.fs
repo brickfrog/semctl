@@ -30,6 +30,8 @@ let lint (ctx: Ctx) (args: ParseResults<LintCommand.Args>) =
 let bpa (ctx: Ctx) (args: ParseResults<BpaCommand.Args>) =
     match args.TryGetResult BpaCommand.Args.Rules_Cmd, args.GetResults BpaCommand.Args.Model with
     | Some _, _ -> UsageError "--watch is for `tess bpa <model>`, not `tess bpa rules`"
+    | None, _ when args.Contains BpaCommand.Args.Save || args.Contains BpaCommand.Args.Save_To ->
+        UsageError "--watch doesn't combine with --save or --save-to: each run would change the files it watches"
     | None, [ model ] ->
         let rules =
             parseList (args.GetResults BpaCommand.Args.Rules)
