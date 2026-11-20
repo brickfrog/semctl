@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE REMOVEFILTERS ( 'Product' )",
   "expected": {
+    "code": "dax-invalid",
     "error": "REMOVEFILTERS can only be used to clear filters as a CALCULATE modifier; it does not return a table"
   },
   "source": [

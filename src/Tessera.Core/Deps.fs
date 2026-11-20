@@ -191,11 +191,9 @@ type private Index(entries: ObjectEntry list) =
             | true, e -> Some e
             | _ -> None
 
-/// Names an expression defines for itself: VAR names, UDF parameters, and string literals (which
-/// name columns made by ADDCOLUMNS, SELECTCOLUMNS, SUMMARIZE...). These shadow model objects.
+/// VAR names and function parameters that can stand for a table.
 let private locals (isFunction: bool) (tokens: Token array) =
     let names = HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    let columns = HashSet<string>(StringComparer.OrdinalIgnoreCase)
 
     let lambda =
         tokens
@@ -219,10 +217,132 @@ let private locals (isFunction: bool) (tokens: Token array) =
             && lambda |> Option.exists (fun l -> i < l)
             ->
             names.Add t.Text |> ignore
-        | TokenKind.String, _ -> columns.Add t.Text |> ignore
         | _ -> ()
 
-    names, columns
+    names
+
+/// Track virtual column names through table expressions and VAR bindings. Record occurrences,
+/// not names: a projected column is visible in an iterator over that table, even when another
+/// branch of the same expression reads a model measure with the same spelling.
+let private localColumnOffsets isFunction (dax: string) =
+    let offsets = HashSet<int>()
+
+    let rec visit (vars: Map<string, Set<string>>) (row: Set<string>) (expr: DaxAst.Expr) =
+        let visitHere = visit vars row
+
+        match expr.Kind with
+        | DaxAst.Bracketed name ->
+            if row.Contains(name.ToUpperInvariant()) then
+                offsets.Add expr.Span.Start |> ignore
+
+            Set.empty
+        | DaxAst.Identifier name -> Map.tryFind (name.ToUpperInvariant()) vars |> Option.defaultValue Set.empty
+        | DaxAst.Paren inner -> visitHere inner
+        | DaxAst.VarBlock(decls, body) ->
+            let mutable scope = vars
+
+            for decl in decls do
+                scope <- scope.Add(decl.Name.Name.ToUpperInvariant(), visit scope row decl.Value)
+
+            visit scope row body
+        | DaxAst.Call(name, args) ->
+            let fn = name.Name.ToUpperInvariant()
+
+            let projection input (args: DaxAst.Expr list) =
+                let mutable output = Set.empty
+
+                let rec pairs (rest: DaxAst.Expr list) =
+                    match rest with
+                    | { Kind = DaxAst.StringLiteral alias } :: value :: tail ->
+                        visit vars (Set.union row input) value |> ignore
+                        output <- output.Add(alias.ToUpperInvariant())
+                        pairs tail
+                    | arg :: tail ->
+                        visit vars (Set.union row input) arg |> ignore
+                        // A grouping column or an unnamed SELECTCOLUMNS projection keeps its name.
+                        match arg.Kind with
+                        | DaxAst.Bracketed n when input.Contains(n.ToUpperInvariant()) ->
+                            output <- output.Add(n.ToUpperInvariant())
+                        | _ -> ()
+
+                        pairs tail
+                    | [] -> ()
+
+                pairs args
+                output
+
+            match fn, args with
+            | ("ROW" | "DATATABLE" | "SUMMARIZECOLUMNS"), _ -> projection Set.empty args
+            | ("ADDCOLUMNS" | "SELECTCOLUMNS" | "SUMMARIZE" | "GROUPBY"), source :: rest ->
+                let input = visitHere source
+                let output = projection input rest
+                if fn = "ADDCOLUMNS" then Set.union input output else output
+            | ("FILTER" | "SUMX" | "AVERAGEX" | "COUNTX" | "COUNTAX" | "MINX" | "MAXX" | "PRODUCTX" | "MEDIANX" | "RANKX" | "GEOMEANX" | "PERCENTILEX.INC" | "PERCENTILEX.EXC" | "STDEVX.S" | "STDEVX.P" | "VARX.S" | "VARX.P"),
+              source :: value :: rest ->
+                let input = visitHere source
+                visit vars (Set.union row input) value |> ignore
+                rest |> List.iter (visitHere >> ignore)
+                if fn = "FILTER" then input else Set.empty
+            | "CONCATENATEX", source :: value :: rest ->
+                let inRow = visit vars (Set.union row (visitHere source))
+                inRow value |> ignore
+                // Delimiter, then pairs of order expression and direction.
+                rest
+                |> List.iteri (fun i arg -> (if i % 2 = 1 then inRow else visitHere) arg |> ignore)
+
+                Set.empty
+            | "TOPN", count :: source :: order ->
+                visitHere count |> ignore
+                let input = visitHere source
+
+                order
+                |> List.iteri (fun i arg ->
+                    (if i % 2 = 0 then
+                         visit vars (Set.union row input)
+                     else
+                         visitHere)
+                        arg
+                    |> ignore)
+
+                input
+            | ("GENERATE" | "GENERATEALL"), [ outer; inner ] ->
+                let input = visitHere outer
+                Set.union input (visit vars (Set.union row input) inner)
+            | ("UNION" | "INTERSECT" | "EXCEPT" | "CALCULATETABLE" | "DISTINCT"), source :: rest ->
+                let input = visitHere source
+                rest |> List.iter (visitHere >> ignore)
+                input
+            | ("CROSSJOIN" | "NATURALINNERJOIN" | "NATURALLEFTOUTERJOIN"), _ ->
+                args |> List.map visitHere |> Set.unionMany
+            | _ ->
+                args |> List.iter (visitHere >> ignore)
+                Set.empty
+        | _ ->
+            DaxAst.children expr |> List.iter (visitHere >> ignore)
+            Set.empty
+
+    let parse read =
+        match read DaxParser.ParseOptions.defaults dax with
+        | Error _ when dax.Contains(';') ->
+            read
+                {
+                    DaxParser.ParseOptions.Semicolons = true
+                }
+                dax
+        | result -> result
+
+    if isFunction then
+        parse DaxParser.parseFunctionWith
+        |> Result.iter (fun f ->
+            for p in f.Parameters do
+                p.Default |> Option.iter (visit Map.empty Set.empty >> ignore)
+
+            visit Map.empty Set.empty f.Body |> ignore)
+    else
+        parse DaxParser.parseExpressionWith
+        |> Result.iter (visit Map.empty Set.empty >> ignore)
+
+    offsets
 
 /// Keywords an expression can follow: in `RETURN [Total]` or `NOT [Flag]`, the keyword is not a table.
 let private operandKeywords =
@@ -234,7 +354,15 @@ let private nameOfFunctions =
 
 let private resolveSource (index: Index) (s: DaxSource) : Reference list =
     let tokens = tokenize s.Dax |> significant |> Array.ofList
-    let names, localColumns = locals (s.Owner.Ref.Kind = ObjectKind.Function) tokens
+    let isFunction = s.Owner.Ref.Kind = ObjectKind.Function
+    let names = locals isFunction tokens
+
+    let localColumns =
+        lazy
+            (if s.Dax.Contains '"' then
+                 localColumnOffsets isFunction s.Dax
+             else
+                 HashSet<int>())
 
     let reference (target: Target) (first: Token) (last: Token) =
         let length = last.Start + last.Length - first.Start
@@ -311,7 +439,7 @@ let private resolveSource (index: Index) (s: DaxSource) : Reference list =
                 && tokens.[i - 2].Kind = TokenKind.Identifier
                 && nameOfFunctions.Contains tokens.[i - 2].Text
 
-            if modelArgument || (not (localColumns.Contains t.Text) && not produced) then
+            if modelArgument || (not (localColumns.Value.Contains t.Start) && not produced) then
                 let inContext =
                     s.ContextTable |> Option.bind (fun table -> index.Member table.Name t.Text)
 

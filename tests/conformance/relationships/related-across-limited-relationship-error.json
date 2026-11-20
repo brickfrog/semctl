@@ -3,6 +3,7 @@
   "model": "c-weak",
   "query": "EVALUATE ADDCOLUMNS ( Target, \"Color\", RELATED ( Product[Color] ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "Target[Category] -> Product[Category] has many-to-many cardinality, so it is a limited relationship: RELATED cannot fetch Product[Color]"
   },
   "source": [

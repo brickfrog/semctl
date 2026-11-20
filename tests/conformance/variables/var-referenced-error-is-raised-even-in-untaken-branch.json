@@ -6,6 +6,8 @@
     "EVALUATE SUMMARIZECOLUMNS ( Product[Color], \"Test\", [Test] )"
   ],
   "expected": {
+    "message": "evaluated",
+    "code": "dax-error",
     "error": "Err is referenced, so ERROR ( \"evaluated\" ) is evaluated when the variable is, whatever the condition"
   },
   "source": {

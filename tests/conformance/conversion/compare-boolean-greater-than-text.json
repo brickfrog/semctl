@@ -3,6 +3,8 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", IF ( FALSE () > \"true\", \"Expression is true\", \"Expression is false\" ) )",
   "expected": {
+    "code": "dax-error",
+    "message": "comparing values of type",
     "error": "comparison operations do not support comparing values of type True/False with values of type Text"
   },
   "source": [

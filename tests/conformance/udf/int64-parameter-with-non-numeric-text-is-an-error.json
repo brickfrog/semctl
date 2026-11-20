@@ -6,6 +6,7 @@
     "EVALUATE { CastToInt ( \"abc\" ) }"
   ],
   "expected": {
+    "code": "dax-error",
     "error": "\"abc\" cannot be converted to an integer"
   },
   "source": {

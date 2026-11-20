@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", VALUE ( \"\" ) )",
   "expected": {
+    "code": "dax-error",
     "error": "an empty string cannot be converted to a number by VALUE"
   },
   "source": [

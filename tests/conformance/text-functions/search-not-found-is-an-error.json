@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", SEARCH ( \"z\", \"abc\" ) )",
   "expected": {
+    "code": "dax-error",
     "error": "SEARCH did not find the text and no NotFoundValue was given"
   },
   "source": {

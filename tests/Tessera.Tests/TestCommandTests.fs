@@ -122,6 +122,41 @@ let private remote = $"xmla:{workspace};Test"
 [<Tests>]
 let tests' =
     testList "CLI test" [
+        testCase "zero tolerance distinguishes adjacent large integers" (fun () ->
+            let t, path = setup ()
+            use _ = t
+
+            tests
+                t
+                """  - name: large integer
+    query: EVALUATE ROW ( "Value", 9007199254740992 )
+    expect: { value: 9007199254740993, tolerance_abs: 0 }
+"""
+            |> ignore
+
+            Expect.equal (outcomes (tess [ "test"; "run"; path; "--json" ])) [ "large integer", "failed" ] "")
+
+        testCase "rename changes the saved reference and preserves its matching string literal" (fun () ->
+            let t, path =
+                setupWith {
+                    star with
+                        Measures = star.Measures @ [ "Sales", "Label", """IF([Amount] > 0, "Amount", "Other")""" ]
+                }
+
+            use _ = t
+            let renamed = tess [ "rename"; path; "[Amount]"; "Revenue"; "--save" ]
+            Expect.equal renamed.Code ExitCode.ok renamed.Err
+
+            tests
+                t
+                """  - name: renamed label
+    measure: Label
+    expect: Amount
+"""
+            |> ignore
+
+            Expect.equal (outcomes (tess [ "test"; "run"; path; "--json" ])) [ "renamed label", "passed" ] "")
+
         testCase "an end-to-end example: every kind of test on a fixture model" (fun () ->
             let t, path = setup ()
             use _ = t
@@ -1250,6 +1285,21 @@ tests:
 
             Expect.equal (outcomes types |> List.map snd |> List.take 3) [ "failed"; "passed"; "failed" ] "--types"
             Expect.isTrue (differences types "orders" |> List.exists (fun d -> d.Contains "(type only)")) "type only"
+
+            let typedWithTolerance =
+                tess [
+                    "test"
+                    "compare"
+                    path
+                    "--against"
+                    other
+                    "--types"
+                    "--tolerance-abs"
+                    "0"
+                    "--json"
+                ]
+
+            Expect.contains (outcomes typedWithTolerance) ("orders", "failed") "tolerance preserves type checks"
 
             let loose =
                 tess [ "test"; "compare"; path; "--against"; other; "--tolerance"; "0.001" ]

@@ -408,6 +408,38 @@ let compareTests =
             Expect.isEmpty (diff loose (one 100.0) (one 100.5)) ""
             Expect.isNonEmpty (diff loose (one 100.0) (one 102.0)) ""
 
+        testCase "unordered tolerance allows reassignment, including an initially exact pair"
+        <| fun () ->
+            let one xs =
+                result [ col "[v]" QueryType.Double ] [ for x in xs -> [ d x ] ]
+
+            let options = {
+                CompareOptions.exact with
+                    AbsoluteTolerance = 1.0
+            }
+
+            for actual in [ [ 0.5; 1.9 ]; [ 1.0; 1.9 ] ] do
+                for order in [ actual; List.rev actual ] do
+                    Expect.isEmpty (diff options (one [ 1.; 0. ]) (one order)) "a full matching exists"
+
+            let xs = [ for k in 1..2001 -> 10. * float k ]
+            Expect.isEmpty (diff options (one xs) (one (xs |> List.map ((+) 0.5)))) "2001 distinct approximate matches"
+
+        testCase "an exhausted unordered search reports an inconclusive result"
+        <| fun () ->
+            let values n =
+                result [ col "[v]" QueryType.Double ] (List.replicate 1500 [ d n ])
+
+            Expect.equal (diff unordered (values 1.) (values 5.)) [ ResultDifference.PairingLimit ] ""
+
+        testCase "relative tolerance cannot overflow into a spurious match"
+        <| fun () ->
+            let values n =
+                result [ col "[v]" QueryType.Double ] [ [ d n ] ]
+
+            let options = { ordered with RelativeTolerance = 1.5 }
+            Expect.isNonEmpty (diff options (values Double.MaxValue) (values -Double.MaxValue)) ""
+
         testCase "unordered rows that are equal only within the tolerance still pair up"
         <| fun () ->
             let expected =

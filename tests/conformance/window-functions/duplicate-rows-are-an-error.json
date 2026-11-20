@@ -3,6 +3,8 @@
   "model": "sales",
   "query": "EVALUATE OFFSET ( 1, UNION ( VALUES ( 'Product'[Color] ), VALUES ( 'Product'[Color] ) ), ORDERBY ( 'Product'[Color], ASC ) )",
   "expected": {
+    "code": "dax-error",
+    "message": "duplicate rows",
     "error": "every color is in the relation twice, and the two rows are equal in every column"
   },
   "source": {

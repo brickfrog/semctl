@@ -3,6 +3,7 @@
   "model": "g-calendars",
   "query": "EVALUATE ROW ( \"x\", TOTALWTD ( [Total], 'Date'[Date] ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "week functions need a calendar"
   },
   "source": [

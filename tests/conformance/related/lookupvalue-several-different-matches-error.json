@@ -3,6 +3,8 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", LOOKUPVALUE ( Product[Product], Product[Color], \"Red\" ) )",
   "expected": {
+    "code": "dax-error",
+    "message": "multiple values",
     "error": "Product[Color] = Red matches Bike and Helmet, two different values of Product[Product]: a table of multiple values was provided where a single value was expected"
   },
   "source": [

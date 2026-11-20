@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", MROUND ( 5, -2 ) )",
   "expected": {
+    "code": "dax-error",
     "error": "MROUND needs the number and the multiple to have the same sign"
   },
   "source": {

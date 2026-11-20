@@ -183,27 +183,6 @@ let private compareOptions (tolerance: SuiteTolerance) (ordered: bool) : Compare
                 Ordered = ordered
         }
 
-/// Whole and fixed decimal numbers as doubles. `QueryResult.compare` gives only doubles a
-/// tolerance; a suite's tolerance is for every number.
-let private loosen (r: QueryResult) : QueryResult =
-    let value =
-        function
-        | QueryValue.Int64 i -> QueryValue.Double(double i)
-        | QueryValue.Decimal d -> QueryValue.Double(double d)
-        | v -> v
-
-    {
-        r with
-            Columns =
-                r.Columns
-                |> List.map (fun c ->
-                    match c.Type with
-                    | QueryType.Int64
-                    | QueryType.Decimal -> { c with Type = QueryType.Double }
-                    | _ -> c)
-            Rows = r.Rows |> List.map (Array.map value)
-    }
-
 /// A value written in a suite as the result value it stands for, given the type of the column it
 /// is compared with: text is a date for a date column; the rest is what it is.
 let private expectedValue (actual: QueryType option) (v: SuiteValue) : QueryValue =
@@ -235,14 +214,19 @@ let private compareResults
     (expected: QueryResult)
     (actual: QueryResult)
     : string list =
-    let expected, actual =
-        if tolerance.IsSet then
-            loosen expected, loosen actual
-        else
-            expected, actual
+    let options = compareOptions tolerance ordered
 
-    QueryResult.compare (compareOptions tolerance ordered) expected actual
-    |> differences (types && not tolerance.IsSet)
+    let options =
+        if types then
+            options
+        else
+            {
+                options with
+                    IgnoreTypesOf = expected.Columns |> List.map _.Name |> Set.ofList
+            }
+
+    QueryResult.compareNumbers tolerance.IsSet options expected actual
+    |> differences types
 
 let private asNumber (v: QueryValue) : double option =
     match v with
@@ -902,7 +886,7 @@ let private judge (snapshots: Map<string, QueryResult>) (t: TestCase) (dax: stri
                     "no snapshot is recorded for this test (record it with `tess test snapshot <model> --save`)",
                     []
                 )
-            | Some expected -> failed (compareResults t.Tolerance ordered true expected actual)
+            | Some expected -> failed (compareResults t.Tolerance ordered (not t.Tolerance.IsSet) expected actual)
         | _ ->
             let ordered = defaultArg t.Expect.Ordered (hasOrderBy dax)
 

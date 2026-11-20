@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE CROSSJOIN ( { 1, 2 }, { 3 } )",
   "expected": {
+    "code": "dax-invalid",
     "error": "both tables have a column named Value, and CROSSJOIN needs all column names to differ"
   },
   "source": [

@@ -3,6 +3,8 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", IF.EAGER ( [Order Count] > 0, 1, ERROR ( \"untaken branch\" ) ) )",
   "expected": {
+    "message": "untaken branch",
+    "code": "dax-error",
     "error": "IF.EAGER evaluates the else branch although the condition is TRUE, and it raises an error"
   },
   "source": [

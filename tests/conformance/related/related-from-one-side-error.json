@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE ADDCOLUMNS ( Product, \"Amount\", RELATED ( Sales[Amount] ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "Product is on the one side of its relationship with Sales: RELATED ( Sales[Amount] ) has no single related row to read"
   },
   "source": [

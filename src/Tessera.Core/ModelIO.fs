@@ -442,7 +442,7 @@ let private filesUnder (dir: string) =
     |> List.ofArray
 
 /// Write bytes unless the file already holds exactly them (so a no-op save changes nothing on disk).
-let private writeIfChanged (path: string) (bytes: byte array) =
+let private writeIfChanged journal (path: string) (bytes: byte array) =
     let unchanged =
         File.Exists path
         && Array.length bytes = int (FileInfo(path).Length)
@@ -452,13 +452,13 @@ let private writeIfChanged (path: string) (bytes: byte array) =
         match Path.GetDirectoryName path with
         | null
         | "" -> ()
-        | dir -> Directory.CreateDirectory dir |> ignore
+        | dir -> SaveJournal.createDirectory journal dir
 
-        File.WriteAllBytes(path, bytes)
+        SaveJournal.write journal path bytes
 
-let private saveBim (opts: SaveOptions) (db: Database) (path: string) =
+let private saveBim journal (opts: SaveOptions) (db: Database) (path: string) =
     catchIo path (fun () ->
-        writeIfChanged path (utf8NoBom.GetBytes(toBimText opts db + Eol.text opts.Eol))
+        writeIfChanged journal path (utf8NoBom.GetBytes(toBimText opts db + Eol.text opts.Eol))
 
         {
             Format = BimFile
@@ -495,14 +495,14 @@ let private relativeFiles (dir: string) =
 /// first, by exact case (so a case-only rename on a case-insensitive file system doesn't delete the
 /// file it just wrote), with the folders they leave empty; then whatever changed is written. Files
 /// the save doesn't own are left alone.
-let private writeFolder (dir: string) (isManaged: string -> bool) (files: (string * byte array) list) =
+let private writeFolder journal (dir: string) (isManaged: string -> bool) (files: (string * byte array) list) =
     catchIo dir (fun () ->
         let local (relative: string) =
             Path.Combine(dir, relative.Replace('/', Path.DirectorySeparatorChar))
 
         for stale in staleFiles isManaged (relativeFiles dir) (List.map fst files) do
             let path = local stale
-            File.Delete path
+            SaveJournal.deleteFile journal path
 
             // Folders the deletion left empty go too, up to (not including) the root.
             let root = Path.GetFullPath dir
@@ -512,13 +512,13 @@ let private writeFolder (dir: string) (isManaged: string -> bool) (files: (strin
                   && folder.Length > root.TrimEnd(Path.DirectorySeparatorChar).Length
                   && Directory.Exists folder
                   && Seq.isEmpty (Directory.EnumerateFileSystemEntries folder) do
-                Directory.Delete folder
+                SaveJournal.deleteDirectory journal folder
                 folder <- Path.GetDirectoryName folder
 
-        Directory.CreateDirectory dir |> ignore
+        SaveJournal.createDirectory journal dir
 
         for relative, bytes in files do
-            writeIfChanged (local relative) bytes)
+            writeIfChanged journal (local relative) bytes)
 
 /// The TMDL files for a database, as (relative path, bytes), in TOM's document order: exactly what
 /// TOM's folder serializer writes, with file names made portable. TOM writes `tables/CON.tmdl`
@@ -573,15 +573,15 @@ let tmdlFiles (opts: SaveOptions) (db: Database) : (string * byte array) list =
         (if folder = "" then file else folder + "/" + file), bytes)
 
 /// Write TMDL into a folder (see writeFolder: stale .tmdl files removed, other files left alone).
-let private writeTmdl (opts: SaveOptions) (db: Database) (dir: string) =
+let private writeTmdl journal (opts: SaveOptions) (db: Database) (dir: string) =
     try
         Ok(tmdlFiles opts db)
     with e ->
         Error(SaveFailed(dir, e.Message))
-    |> Result.bind (writeFolder dir isTmdlFile)
+    |> Result.bind (writeFolder journal dir isTmdlFile)
 
-let private saveTmdl opts db dir =
-    writeTmdl opts db dir
+let private saveTmdl journal opts db dir =
+    writeTmdl journal opts db dir
     |> Result.map (fun () -> {
         Format = TmdlFolder
         Path = dir
@@ -642,14 +642,14 @@ let databaseJsonFiles (opts: SaveOptions) (db: Database) : Result<FolderFormat.F
 
             FolderFormat.split folder (Eol.text opts.Eol) (serializeNamed target options)))
 
-let private saveDatabaseJson (opts: SaveOptions) (db: Database) (dir: string) =
+let private saveDatabaseJson journal (opts: SaveOptions) (db: Database) (dir: string) =
     (try
         databaseJsonFiles opts db
      with e ->
          Error e.Message)
     |> Result.mapError (fun e -> SaveFailed(dir, e))
     |> Result.bind (fun files ->
-        writeFolder dir FolderFormat.isManagedFile [ for f in files -> f.Path, utf8NoBom.GetBytes f.Text ])
+        writeFolder journal dir FolderFormat.isManagedFile [ for f in files -> f.Path, utf8NoBom.GetBytes f.Text ])
     |> Result.map (fun () -> {
         Format = DatabaseJsonFolder
         Path = dir
@@ -710,17 +710,17 @@ let pbipTarget (item: Pbip.Item option) (db: Database) (destination: string) : R
 /// Write a PBIP semantic model folder (TMDL in definition/), merging into what's there: missing
 /// support files are added and existing ones kept (see Pbip.ensureSupportFilesFor). A model.bim
 /// there is replaced by the TMDL (a folder with both is ambiguous to Power BI).
-let private savePbip (opts: SaveOptions) (item: Pbip.Item) (db: Database) (dir: string) =
+let private savePbip journal (opts: SaveOptions) (item: Pbip.Item) (db: Database) (dir: string) =
     let definition = Path.Combine(dir, Pbip.definitionFolderName)
     let staleBim = Path.Combine(dir, Pbip.modelBimFileName)
 
-    catchIo dir (fun () -> Directory.CreateDirectory dir |> ignore)
-    |> Result.bind (fun () -> writeTmdl opts db definition)
+    catchIo dir (fun () -> SaveJournal.createDirectory journal dir)
+    |> Result.bind (fun () -> writeTmdl journal opts db definition)
     |> Result.bind (fun () ->
         catchIo staleBim (fun () ->
             if File.Exists staleBim then
-                File.Delete staleBim))
-    |> Result.bind (fun () -> Pbip.ensureSupportFilesFor dir (Some item) (Eol.text opts.Eol) Guid.NewGuid)
+                SaveJournal.deleteFile journal staleBim))
+    |> Result.bind (fun () -> Pbip.ensureSupportFilesWith journal dir (Some item) (Eol.text opts.Eol) Guid.NewGuid)
     |> Result.map (fun () -> {
         Format = PbipFolder
         Path = dir
@@ -735,7 +735,8 @@ let sourceItem (source: ModelSource) =
 /// Write a model. Refuses to touch a non-empty destination unless force is set. For PBIP, `item`
 /// names a new semantic model folder and its .platform (see pbipTarget); pass the source's
 /// (sourceItem) to carry its displayName and description over.
-let saveItem
+let private saveItemWith
+    journal
     (item: Pbip.Item option)
     (format: OutputFormat)
     (opts: SaveOptions)
@@ -775,16 +776,19 @@ let saveItem
             Error(SaveFailed(destination, "destination is a folder, but the output format writes a .bim file"))
         else
             match format with
-            | BimFile -> saveBim opts db destination
-            | TmdlFolder -> saveTmdl opts db destination
+            | BimFile -> saveBim journal opts db destination
+            | TmdlFolder -> saveTmdl journal opts db destination
             | PbipFolder ->
                 let platformItem: Pbip.Item = {
                     DisplayName = displayName
                     Description = item |> Option.bind (fun i -> i.Description)
                 }
 
-                savePbip opts platformItem db destination
-            | DatabaseJsonFolder -> saveDatabaseJson opts db destination
+                savePbip journal opts platformItem db destination
+            | DatabaseJsonFolder -> saveDatabaseJson journal opts db destination
+
+let saveItem item format opts force db destination =
+    saveItemWith None item format opts force db destination
 
 /// saveItem with no source item.
 let save (format: OutputFormat) (opts: SaveOptions) (force: bool) (db: Database) (destination: string) =
@@ -802,7 +806,7 @@ let inPlace (source: ModelSource) =
 
 /// Save a model back where it came from: same format and line endings, restricted information kept
 /// (it's the user's own model, not an export).
-let saveBack (source: ModelSource) (db: Database) =
+let internal saveBackWith journal (source: ModelSource) (db: Database) =
     let format, destination = inPlace source
 
     let opts = {
@@ -811,7 +815,10 @@ let saveBack (source: ModelSource) (db: Database) =
             IncludeSensitive = true
     }
 
-    save format opts true db destination
+    saveItemWith journal None format opts true db destination
+
+let saveBack (source: ModelSource) db =
+    SaveJournal.run source.Path (fun journal -> saveBackWith (Some journal) source db)
 
 /// Save a model somewhere else, like `convert` (format inferred from the path, restricted information
 /// stripped, a non-empty destination only with force).

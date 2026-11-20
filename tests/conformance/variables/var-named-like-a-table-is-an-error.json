@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", VAR Sales = 1 RETURN Sales + 1 )",
   "expected": {
+    "code": "dax-invalid",
     "error": "Sales is the name of a table, so it cannot be a variable name"
   },
   "source": [

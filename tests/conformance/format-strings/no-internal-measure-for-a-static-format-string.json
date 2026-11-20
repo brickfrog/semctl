@@ -3,6 +3,7 @@
   "model": "g-formatstrings",
   "query": "EVALUATE ROW ( \"Fs\", 'Sales'[_Static FormatString] )",
   "expected": {
+    "code": "dax-invalid",
     "error": "[Static] has a static format string, so there is no measure _Static FormatString"
   },
   "source": {

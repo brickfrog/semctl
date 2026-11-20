@@ -1,6 +1,7 @@
 namespace Tessera
 
 open System
+open System.Numerics
 open System.Globalization
 open System.Text
 open System.Text.Json.Nodes
@@ -342,6 +343,8 @@ type ResultDifference =
     | UnexpectedRow of actualRow: int * values: QueryValue array
     /// The actual result was cut short by a row limit: what is missing can't be told.
     | Truncated
+    /// Unordered approximate matching exceeded its comparison budget.
+    | PairingLimit
 
 module ResultDifference =
 
@@ -380,6 +383,7 @@ module ResultDifference =
             $"row {row}, {column}: {typed actual}, expected {typed expected} (type only)"
         | ResultDifference.MissingRow(row, values) -> $"expected row {row} is missing: {showRow values}"
         | ResultDifference.UnexpectedRow(row, values) -> $"row {row} was not expected: {showRow values}"
+        | ResultDifference.PairingLimit -> "unordered row comparison inconclusive: pairing work limit exceeded"
         | ResultDifference.Truncated -> "the result was cut short by a row limit"
 
 /// The outcome of `QueryResult.compare`: no differences means the results are the same.
@@ -648,28 +652,83 @@ module QueryResult =
             a = b
         else
             let d = abs (a - b)
-            d <= o.AbsoluteTolerance || d <= o.RelativeTolerance * max (abs a) (abs b)
+            let scale = max (abs a) (abs b)
 
-    let private compareCell (o: CompareOptions) (expected: QueryValue) (actual: QueryValue) : Cell =
+            d <= o.AbsoluteTolerance
+            || (if Double.IsInfinity d then
+                    abs (a / scale - b / scale) <= o.RelativeTolerance
+                else
+                    d <= o.RelativeTolerance * scale)
+
+    // Exact rational representations for comparisons involving an int64 or fixed decimal.
+    // Rounding both operands to double first would identify neighboring integers above 2^53.
+    let private doubleFraction (d: double) =
+        let bits = BitConverter.DoubleToInt64Bits d
+        let exponent = int ((bits >>> 52) &&& 0x7ffL)
+
+        let mantissa =
+            (bits &&& 0xfffffffffffffL) + (if exponent = 0 then 0L else 1L <<< 52)
+
+        let n = bigint (if bits < 0L then -mantissa else mantissa)
+        let shift = max exponent 1 - 1075
+        if shift >= 0 then n <<< shift, 1I else n, 1I <<< -shift
+
+    let private fraction =
+        function
+        | QueryValue.Int64 i -> bigint i, 1I
+        | QueryValue.Decimal d ->
+            let bits = Decimal.GetBits d
+
+            let n =
+                (bigint (uint32 bits.[2]) <<< 64)
+                + (bigint (uint32 bits.[1]) <<< 32)
+                + bigint (uint32 bits.[0])
+
+            (if d < 0m then -n else n), BigInteger.Pow(10I, (bits.[3] >>> 16) &&& 0xff)
+        | QueryValue.Double d -> doubleFraction d
+        | _ -> invalidOp "expected a number"
+
+    let private numericEqual (o: CompareOptions) a b =
+        match a, b with
+        | QueryValue.Double d, _
+        | _, QueryValue.Double d when not (Double.IsFinite d) -> false
+        | _ ->
+            let x, dx = fraction a
+            let y, dy = fraction b
+            let left, right = x * dy, y * dx
+            let distance = abs (left - right)
+
+            let within tolerance scale =
+                tolerance > 0.0
+                && (Double.IsPositiveInfinity tolerance
+                    || (let n, den = doubleFraction tolerance
+                        distance * den <= n * scale))
+
+            distance.IsZero
+            || within o.AbsoluteTolerance (dx * dy)
+            || within o.RelativeTolerance (max (abs left) (abs right))
+
+    let private compareCell allNumbers (o: CompareOptions) (expected: QueryValue) (actual: QueryValue) : Cell =
         let ofBool b = if b then Same else Differs
         let typeOnly b = if b then TypeDiffers else Differs
 
         match expected, actual with
         | QueryValue.Blank, QueryValue.Blank -> Same
         | QueryValue.String a, QueryValue.String b -> ofBool (String.Equals(a, b, StringComparison.Ordinal))
-        | QueryValue.Int64 a, QueryValue.Int64 b -> ofBool (a = b)
-        | QueryValue.Decimal a, QueryValue.Decimal b -> ofBool (a = b)
+        | QueryValue.Int64 a, QueryValue.Int64 b -> ofBool (a = b || (allNumbers && numericEqual o expected actual))
+        | QueryValue.Decimal a, QueryValue.Decimal b -> ofBool (a = b || (allNumbers && numericEqual o expected actual))
         | QueryValue.Double a, QueryValue.Double b -> ofBool (doublesEqual o a b)
         | QueryValue.DateTime a, QueryValue.DateTime b -> ofBool (a = b)
         | QueryValue.Boolean a, QueryValue.Boolean b -> ofBool (a = b)
         | QueryValue.Binary a, QueryValue.Binary b -> ofBool (a.AsSpan().SequenceEqual(b.AsSpan()))
         // The same number in two number types.
         | QueryValue.Int64 a, QueryValue.Decimal b
-        | QueryValue.Decimal b, QueryValue.Int64 a -> typeOnly (decimal a = b)
-        | QueryValue.Double d, QueryValue.Int64 i
-        | QueryValue.Int64 i, QueryValue.Double d -> typeOnly (doublesEqual o d (double i))
-        | QueryValue.Double d, QueryValue.Decimal m
-        | QueryValue.Decimal m, QueryValue.Double d -> typeOnly (doublesEqual o d (double m))
+        | QueryValue.Decimal b, QueryValue.Int64 a ->
+            typeOnly (decimal a = b || (allNumbers && numericEqual o expected actual))
+        | QueryValue.Double _, QueryValue.Int64 _
+        | QueryValue.Int64 _, QueryValue.Double _ -> typeOnly (numericEqual o expected actual)
+        | QueryValue.Double _, QueryValue.Decimal _
+        | QueryValue.Decimal _, QueryValue.Double _ -> typeOnly (numericEqual o expected actual)
         | _ -> Differs
 
     /// A row's exact spelling, types included: equal keys are equal rows.
@@ -689,9 +748,52 @@ module QueryResult =
 
         sb.ToString()
 
-    /// Leftover rows beyond this many (expected x actual) are reported as missing and unexpected
-    /// without looking for near matches, which is quadratic.
-    let private pairingLimit = 4_000_000L
+    // Find augmenting paths starting from unmatched rows. A previous match (including an
+    // exact one) can move: tolerance makes equality non-transitive. Stop with an explicit
+    // inconclusive verdict if deciding the matching would exceed the work budget.
+    let private matchRows (left: int[]) (right: int[]) (score: int -> int -> struct (int * int)) =
+        let seen = Array.zeroCreate right.Length
+        let parent = Array.zeroCreate right.Length
+        let queue = Collections.Generic.Queue<int>()
+        let mutable generation = 0
+        let mutable remaining = 4_000_000
+
+        let augment allowTypeDifference root =
+            generation <- generation + 1
+            queue.Clear()
+            queue.Enqueue root
+            let mutable free = -1
+
+            while free < 0 && queue.Count > 0 && remaining > 0 do
+                let e = queue.Dequeue()
+                let mutable a = 0
+
+                while a < right.Length && free < 0 && remaining > 0 do
+                    remaining <- remaining - 1
+
+                    if seen.[a] <> generation then
+                        let struct (different, types) = score e a
+
+                        if different = 0 && (types = 0 || allowTypeDifference) then
+                            seen.[a] <- generation
+                            parent.[a] <- e
+                            if right.[a] < 0 then free <- a else queue.Enqueue right.[a]
+
+                    a <- a + 1
+
+            while free >= 0 do
+                let e = parent.[free]
+                right.[free] <- e
+                let previous = left.[e]
+                left.[e] <- free
+                free <- previous
+
+        for allowTypeDifference in [ false; true ] do
+            for e in 0 .. left.Length - 1 do
+                if left.[e] < 0 && remaining > 0 then
+                    augment allowTypeDifference e
+
+        remaining > 0 || left |> Array.forall (fun a -> a >= 0)
 
     /// Compare an actual result with the expected one.
     ///
@@ -706,7 +808,12 @@ module QueryResult =
     ///   BLANK only equals BLANK (never 0 or ""). The same number in two number types is a
     ///   `ValueType` difference, and a column declared with another type a `ColumnType` one: both
     ///   are differences of type, kept apart from differences of value (`Comparison.ValuesMatch`).
-    let compare (options: CompareOptions) (expected: QueryResult) (actual: QueryResult) : Comparison =
+    let internal compareNumbers
+        allNumbers
+        (options: CompareOptions)
+        (expected: QueryResult)
+        (actual: QueryResult)
+        : Comparison =
         let differences = ResizeArray<ResultDifference>()
         let actualColumns = Array.ofList actual.Columns
         let used = Array.create actualColumns.Length false
@@ -778,7 +885,7 @@ module QueryResult =
             differences.Add(ResultDifference.RowCount(expectedRows.Length, actualRows.Length))
 
         let cell (column: int) (e: QueryValue) (a: QueryValue) =
-            match compareCell options e a with
+            match compareCell allNumbers options e a with
             | TypeDiffers when not checkTypes.[column] -> Same
             | c -> c
 
@@ -828,23 +935,39 @@ module QueryResult =
                     q.Enqueue i
                     byKey.[key] <- q)
 
-            let actualTaken = Array.create actualRows.Length false
-            let expectedLeft = ResizeArray<int>()
+            let left = Array.create expectedRows.Length -1
+            let right = Array.create actualRows.Length -1
 
             expectedRows
             |> Array.iteri (fun i row ->
                 match byKey.TryGetValue(rowKey row) with
-                | true, q when q.Count > 0 -> actualTaken.[q.Dequeue()] <- true
-                | _ -> expectedLeft.Add i)
+                | true, q when q.Count > 0 ->
+                    let j = q.Dequeue()
+                    left.[i] <- j
+                    right.[j] <- i
+                | _ -> ())
 
+            let decided =
+                matchRows left right (fun e a -> score expectedRows.[e] actualRows.[a])
+
+            let expectedLeft = ResizeArray<int>()
             let actualLeft = ResizeArray<int>()
 
-            for i in 0 .. actualRows.Length - 1 do
-                if not actualTaken.[i] then
-                    actualLeft.Add i
+            if not decided then
+                differences.Add ResultDifference.PairingLimit
+            else
+                for i in 0 .. left.Length - 1 do
+                    if left.[i] >= 0 then
+                        reportPair i left.[i]
+                    else
+                        expectedLeft.Add i
 
-            if int64 expectedLeft.Count * int64 actualLeft.Count <= pairingLimit then
-                // 2. Equal within the tolerance; 3. equal but for number types; 4. the closest row.
+                for i in 0 .. right.Length - 1 do
+                    if right.[i] < 0 then
+                        actualLeft.Add i
+
+            // Only the diagnostics for proven differences use a greedy closest-row pairing.
+            if int64 expectedLeft.Count * int64 actualLeft.Count <= 4_000_000L then
                 let take (accept: struct (int * int) -> bool) (best: bool) =
                     let remaining = ResizeArray<int>()
 
@@ -869,8 +992,6 @@ module QueryResult =
                     expectedLeft.Clear()
                     expectedLeft.AddRange remaining
 
-                take (fun struct (differ, types) -> differ = 0 && types = 0) false
-                take (fun struct (differ, _) -> differ = 0) false
                 // A row that shares nothing with any other is missing, not "changed in every value".
                 take (fun struct (differ, _) -> names.Length > 0 && differ < names.Length) true
 
@@ -886,6 +1007,9 @@ module QueryResult =
                 differences.Add(ResultDifference.UnexpectedRow(ar, actualRows.[ar]))
 
         { Differences = List.ofSeq differences }
+
+    let compare options expected actual =
+        compareNumbers false options expected actual
 
     /// Compare the results of a whole query, one `Comparison` per expected result. A missing or
     /// extra result set is a `RowCount`-free mismatch of its own: `Error` says how many there were.

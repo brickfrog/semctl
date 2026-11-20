@@ -3279,6 +3279,7 @@ sides fail. A difference reads "*against's value*, expected *the model's value*"
 replace the tests' tolerances; a value that differs in type only (a whole number 1, a decimal 1.0) is not a
 difference unless `--types` is given. The other options, the JSON (`"command": "test compare"`, with `"against"`)
 and the exit codes are those of `run`; a test either side's local engine refuses is `unsupported`.
+An unordered comparison that exceeds the row-matching work limit reports an inconclusive comparison and fails the test.
 
 #### Differences from `te test`
 
@@ -4055,7 +4056,7 @@ The result is the editing commands' JSON: `changes[]`, `introducedErrors` (error
 `resolvedErrors` (errors it fixed), `errorsIntroducedSinceLoad`, notes, warnings and `unsavedChanges`. Changes stay
 in memory for the session. Only with `--save` is there a `save_model` tool, which writes the model back where it
 was loaded from (the same format and line endings, as `--save` does), then the report files its renames rewrote
-(`reportFiles` in the results; a report file changed on disk since is not overwritten). It refuses while the session's changes have
+(`reportFiles` in the results). In-place saves check the report originals before writing and roll back file edits if a later write fails. It refuses while the session's changes have
 introduced errors that weren't there when the model was loaded, unless called with `force: true`. A model loaded
 from a server is never saved (`tess deploy` deploys files). There is no tool for raw TMSL or XMLA.
 

@@ -230,8 +230,7 @@ module StagedModel =
         else
             let files = fileEdits m
 
-            ModelIO.saveBack m.Source m.Db
-            |> Result.bind (fun saved -> Report.write files |> Result.map (fun () -> saved))
+            Report.saveBack m.Source m.Db files
             |> Result.map (fun saved ->
                 reset m
 

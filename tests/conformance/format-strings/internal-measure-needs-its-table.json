@@ -3,6 +3,7 @@
   "model": "g-formatstrings",
   "query": "EVALUATE ROW ( \"Fs\", [_Sales Amount FormatString] )",
   "expected": {
+    "code": "dax-invalid",
     "error": "an unqualified reference to the internal measure is not resolved"
   },
   "source": {

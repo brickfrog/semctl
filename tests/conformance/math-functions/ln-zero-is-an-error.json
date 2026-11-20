@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", LN ( 0 ) )",
   "expected": {
+    "code": "dax-error",
     "error": "LN of zero"
   },
   "source": {

@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE UNION ( { 1, 2 }, { ( 1, 2 ) } )",
   "expected": {
+    "code": "dax-invalid",
     "error": "the tables have one and two columns; UNION needs the same number"
   },
   "source": [

@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", MOD ( 5, 0 ) )",
   "expected": {
+    "code": "dax-error",
     "error": "MOD by zero"
   },
   "source": {

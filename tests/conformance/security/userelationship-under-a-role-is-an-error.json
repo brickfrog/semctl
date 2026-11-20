@@ -8,6 +8,7 @@
     ]
   },
   "expected": {
+    "code": "dax-invalid",
     "error": "USERELATIONSHIP can't be used where row-level security is defined for the table"
   },
   "source": [

@@ -92,6 +92,36 @@ let tests =
                 ]
                 ""
 
+        testCase "an alias shadows the measure only in its iterator row context"
+        <| fun () ->
+            let db = sampleDatabase ()
+
+            let dax =
+                """VAR t = ROW("Total", [Total]) RETURN RANKX(t, [Total], [Total]) + [Total]"""
+
+            db.Model.Tables.["Sales"].Measures.Add(new Measure(Name = "Rank", Expression = dax))
+            let hits = dependsOn (build db) (refOf "measure:Sales/Rank")
+
+            Expect.equal
+                (hits |> List.choose _.Start)
+                [
+                    dax.IndexOf("[Total]")
+                    dax.LastIndexOf("[Total])")
+                    dax.LastIndexOf("[Total]")
+                ]
+                ""
+
+        testCase "unnamed projections retain virtual columns in both DAX separator dialects"
+        <| fun () ->
+            let expression =
+                """SUMX(SELECTCOLUMNS(DATATABLE("X", INTEGER, {{1}}), [X]), [X]) + [Total]"""
+
+            for dax in [ expression; expression.Replace(',', ';') ] do
+                let db = sampleDatabase ()
+                db.Model.Tables.["Sales"].Measures.Add(new Measure(Name = "Projected", Expression = dax))
+                let hits = dependsOn (build db) (refOf "measure:Sales/Projected")
+                Expect.equal (targets hits) [ "measure:Sales/Total", "expression" ] dax
+
         testCase "comments are ignored"
         <| fun () -> Expect.isEmpty (deps "measure:Sales/Commented") ""
 

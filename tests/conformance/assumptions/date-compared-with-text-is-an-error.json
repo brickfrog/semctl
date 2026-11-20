@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", DATE ( 2024, 1, 31 ) = \"2024-01-31\" )",
   "expected": {
+    "code": "dax-error",
     "error": "comparison of a Date/time value with a Text value is not supported"
   },
   "source": [

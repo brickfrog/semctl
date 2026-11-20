@@ -468,9 +468,11 @@ let toJson (report: Report) : JsonNode =
                             o.["expected"] <-
                                 match r.Case.Expected with
                                 | Expected.Results results -> QueryResult.listToJson results
-                                | Expected.Error reason ->
+                                | Expected.Error(reason, code, message) ->
                                     let e = JsonObject()
                                     e.["error"] <- text reason
+                                    code |> Option.iter (fun c -> e.["code"] <- text c)
+                                    message |> Option.iter (fun m -> e.["message"] <- text m)
                                     e
 
                             o.["actual"] <- (r.Actual |> Option.map QueryResult.listToJson |> Option.toObj)

@@ -3,6 +3,7 @@
   "model": "g-calendars",
   "query": "EVALUATE DATESYTD ( Gregorian, \"6-30\" )",
   "expected": {
+    "code": "dax-invalid",
     "error": "YearEndDate with a calendar"
   },
   "source": {

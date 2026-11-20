@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", SQRT ( -1 ) )",
   "expected": {
+    "code": "dax-error",
     "error": "SQRT of a negative number"
   },
   "source": {

@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", ATANH ( 1 ) )",
   "expected": {
+    "code": "dax-error",
     "error": "ATANH of 1"
   },
   "source": {

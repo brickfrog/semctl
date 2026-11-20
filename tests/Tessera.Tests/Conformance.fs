@@ -801,7 +801,7 @@ type Expected =
     /// One result per EVALUATE.
     | Results of QueryResult list
     /// The query must fail; the text says why (it is not matched against the engine's message).
-    | Error of reason: string
+    | Error of reason: string * localCode: string option * message: string option
 
 /// Who a case's query runs as (`"as"`): members of these roles, with this CUSTOMDATA. On a
 /// server they are the connection's Roles= and CustomData=.
@@ -981,8 +981,16 @@ let private parseCase (models: Map<string, JsonNode>) (id: string) (file: string
         match o.["expected"] with
         | n when kindOf n = JsonValueKind.Object ->
             let e = n.AsObject()
-            known "\"expected\"" e [ "error" ]
-            Expected.Error(reqString "\"expected\"" e "error")
+            known "\"expected\"" e [ "error"; "code"; "message" ]
+            let code = optString "expected" e "code"
+
+            if
+                code
+                |> Option.exists (fun c -> not (List.contains c [ "dax-invalid"; "dax-error"; "dax-syntax" ]))
+            then
+                bad "expected.code must be a DAX query error code"
+
+            Expected.Error(reqString "expected" e "error", code, optString "expected" e "message")
         | n when kindOf n = JsonValueKind.Array ->
             // A column with no "type" doesn't assert one: read its values as a variant's.
             let results = n.DeepClone()
@@ -1409,9 +1417,27 @@ let compareOptions (config: RunConfig) (c: Case) : CompareOptions = {
 let judge (config: RunConfig) (c: Case) (answer: Result<QueryResult list, TessError>) : Outcome =
     match answer, c.Expected with
     | Error e, _ when config.IsNotSupported e -> Outcome.NotSupported(TessError.message e)
-    | Error _, Expected.Error _ -> Outcome.Pass
+    | Error e, Expected.Error(reason, code, message) ->
+        let categoryMatches =
+            match e with
+            | QueryFailed _ -> true // XMLA supplies a single code for query failures.
+            | DaxInvalid _
+            | DaxEvaluation _ -> code.IsNone || code = Some(TessError.code e)
+            | DaxSyntax _ -> code = Some(TessError.code e)
+            | _ -> false
+
+        let actual = TessError.message e
+
+        if
+            categoryMatches
+            && message
+               |> Option.forall (fun (m: string) -> actual.Contains(m, StringComparison.OrdinalIgnoreCase))
+        then
+            Outcome.Pass
+        else
+            Outcome.Error $"expected {reason}; received {TessError.code e}: {actual}"
     | Error e, Expected.Results _ -> Outcome.Error(TessError.message e)
-    | Ok actual, Expected.Error reason -> Outcome.Fail(Mismatch.ExpectedError(reason, actual))
+    | Ok actual, Expected.Error(reason, _, _) -> Outcome.Fail(Mismatch.ExpectedError(reason, actual))
     | Ok actual, Expected.Results expected ->
         match QueryResult.compareAll (compareOptions config c) expected actual with
         | Error _ -> Outcome.Fail(Mismatch.ResultCount(expected.Length, actual.Length))

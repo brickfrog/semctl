@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE ALL ()",
   "expected": {
+    "code": "dax-invalid",
     "error": "ALL () with no arguments can only be used as a CALCULATE or CALCULATETABLE modifier; it does not return a table"
   },
   "source": [

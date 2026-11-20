@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", \"abc\" + 1 )",
   "expected": {
+    "code": "dax-error",
     "error": "the text \"abc\" cannot be converted to a number for the addition"
   },
   "source": [

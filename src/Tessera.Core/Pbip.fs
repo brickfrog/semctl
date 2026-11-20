@@ -149,8 +149,8 @@ let displayNameOf (semanticModelDir: string) =
 let jsonText (node: JsonNode) (eol: string) =
     FolderFormat.JsonText.write eol node + eol
 
-let private writeJson (path: string) (node: JsonNode) eol =
-    File.WriteAllText(path, jsonText node eol, utf8NoBom)
+let private writeJson journal (path: string) (node: JsonNode) eol =
+    SaveJournal.write journal path (utf8NoBom.GetBytes(jsonText node eol))
 
 let private newPbism () =
     JsonObject(
@@ -217,7 +217,8 @@ let pbismText (eol: string) = jsonText (newPbism ()) eol
 /// logicalId). The one change to an existing file: a definition.pbism whose version predates TMDL
 /// is bumped (Power BI can't open the TMDL otherwise), keeping its other settings. A new .platform
 /// describes `item` (by default, the folder's name).
-let ensureSupportFilesFor
+let internal ensureSupportFilesWith
+    journal
     (semanticModelDir: string)
     (item: Item option)
     (eol: string)
@@ -229,7 +230,7 @@ let ensureSupportFilesFor
     try
         let pbismResult =
             if not (File.Exists pbism) then
-                writeJson pbism (newPbism ()) eol
+                writeJson journal pbism (newPbism ()) eol
                 Ok()
             else
                 match readJson pbism with
@@ -243,7 +244,7 @@ let ensureSupportFilesFor
                     match json with
                     | :? JsonObject as o when tooOld ->
                         o.["version"] <- JsonValue.Create pbismVersion
-                        writeJson pbism o eol
+                        writeJson journal pbism o eol
                     | _ -> ()
 
                     Ok()
@@ -258,10 +259,13 @@ let ensureSupportFilesFor
                         Description = None
                     }
 
-                writeJson platform (newPlatform item (newId ())) eol)
+                writeJson journal platform (newPlatform item (newId ())) eol)
     with
     | :? IOException
     | :? UnauthorizedAccessException as e -> Error(SaveFailed(semanticModelDir, e.Message))
+
+let ensureSupportFilesFor dir item eol newId =
+    ensureSupportFilesWith None dir item eol newId
 
 /// ensureSupportFilesFor a TMDL definition, naming a new .platform's item after the folder.
 let ensureSupportFiles (semanticModelDir: string) (eol: string) (newId: unit -> Guid) : Result<unit, TessError> =

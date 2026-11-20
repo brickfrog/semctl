@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE FILTER ( Product, Product[Price] > EARLIER ( Product[Price] ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "there is only one row context on Product (the one FILTER opens), so EARLIER has no earlier row context to read"
   },
   "source": {

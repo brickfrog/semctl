@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", CALCULATE ( [Sales Amount], CROSSFILTER ( Sales[Quantity], Product[ProductKey], BOTH ) ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "Sales[Quantity] and Product[ProductKey] are not the end points of a relationship: CROSSFILTER returns an error"
   },
   "source": [

@@ -217,9 +217,7 @@ and runWith
                 | None ->
                     match opts.Target with
                     | DryRun -> Ok None
-                    | InPlace ->
-                        ModelIO.saveBack source db
-                        |> Result.bind (fun s -> Report.write files |> Result.map (fun () -> Some s))
+                    | InPlace -> Report.saveBack source db files |> Result.map Some
                     | SaveTo path -> ModelIO.saveTo source opts.Force db path |> Result.map Some
 
             let filesWritten =

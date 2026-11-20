@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", CONVERT ( 1E20, INTEGER ) )",
   "expected": {
+    "code": "dax-error",
     "error": "1E20 is too large for a 64-bit integer"
   },
   "source": {

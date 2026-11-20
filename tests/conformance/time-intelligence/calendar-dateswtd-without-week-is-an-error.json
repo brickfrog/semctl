@@ -3,6 +3,7 @@
   "model": "g-calendars",
   "query": "EVALUATE DATESWTD ( Gregorian )",
   "expected": {
+    "code": "dax-invalid",
     "error": "Gregorian tags no week"
   },
   "source": {

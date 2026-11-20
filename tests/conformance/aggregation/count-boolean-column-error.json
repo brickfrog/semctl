@@ -3,6 +3,8 @@
   "model": "d-values",
   "query": "EVALUATE ROW ( \"r\", COUNT ( V[Flag] ) )",
   "expected": {
+    "code": "dax-error",
+    "message": "Boolean",
     "error": "COUNT does not support a Boolean column; COUNTA does"
   },
   "source": [

@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", VAR a = SUMX ( T, VAR b = T[n] RETURN b * 2 ) RETURN a + b )",
   "expected": {
+    "code": "dax-invalid",
     "error": "b is defined in the nested VAR/RETURN inside SUMX and does not exist in the outer RETURN"
   },
   "source": {

@@ -6,6 +6,8 @@
     "EVALUATE SUMMARIZECOLUMNS ( Product[Color], \"Measure\", [Checked Color] ) ORDER BY Product[Color]"
   ],
   "expected": {
+    "message": "red color encountered",
+    "code": "dax-error",
     "error": "the measure raises \"red color encountered\" for the Red row"
   },
   "source": {

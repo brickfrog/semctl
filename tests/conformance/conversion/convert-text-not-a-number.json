@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", CONVERT ( \"abc\", INTEGER ) )",
   "expected": {
+    "code": "dax-error",
     "error": "\"abc\" cannot be converted to an integer"
   },
   "source": {

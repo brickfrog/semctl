@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", VAR a = b + 1 VAR b = 2 RETURN a )",
   "expected": {
+    "code": "dax-invalid",
     "error": "b is not defined yet when a is defined"
   },
   "source": [

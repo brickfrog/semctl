@@ -195,17 +195,31 @@ let private filesOf (root: string) =
 
 /// The same edit, saved by `tess set --save` in one copy and by save_model in another: the files
 /// must come out byte for byte the same (the session's model is a clone of the loaded one).
-let private sameAsSet (root: string) (modelIn: string -> string) (selector: string) (path: string) (value: string) =
+let private sameAsSet (model: string) (selector: string) (path: string) (value: string) =
     use t = new TempDir()
     let a = t.Combine "a"
     let b = t.Combine "b"
-    copyTree root a
-    copyTree root b
-    let viaSet = tess [ "set"; modelIn a; selector; "-p"; $"{path}={value}"; "--save" ]
+
+    let copyModel destination =
+        Directory.CreateDirectory destination |> ignore
+
+        let copy =
+            Path.Combine(destination, Path.GetFileName(Path.TrimEndingDirectorySeparator model))
+
+        if File.Exists model then
+            File.Copy(model, copy)
+        else
+            copyTree model copy
+
+        copy
+
+    let cliModel = copyModel a
+    let sessionModel = copyModel b
+    let viaSet = tess [ "set"; cliModel; selector; "-p"; $"{path}={value}"; "--save" ]
     Expect.equal viaSet.Code 0 viaSet.Err
 
     let s =
-        serve [ modelIn b; "--allow"; "metadata-write"; "--save" ] [
+        serve [ sessionModel; "--allow"; "metadata-write"; "--save" ] [
             callTool
                 1
                 "apply_changes"
@@ -232,6 +246,8 @@ let private sameAsSet (root: string) (modelIn: string -> string) (selector: stri
 
     for (name, x), (_, y) in List.zip expected actual do
         Expect.isTrue (x = y) $"{name}: byte-identical"
+
+    actual
 
 [<Tests>]
 let tests =
@@ -727,7 +743,7 @@ let tests =
             testCase "save_model writes what `tess set --save` writes: PBIP, and .bim with a password"
             <| fun () ->
                 use p = project ()
-                sameAsSet p.Path id "[Total]" "description" "Ünïcode ✓"
+                sameAsSet p.Path "[Total]" "description" "Ünïcode ✓" |> ignore
 
                 use bim = new TempDir()
                 let db = sampleDatabase ()
@@ -746,9 +762,14 @@ let tests =
                 }
 
                 write (bim.Combine "Model.bim") (ModelIO.toBimText opts db)
-                sameAsSet bim.Path (fun d -> Path.Combine(d, "Model.bim")) "[Total]" "formatString" "0.00"
-                // The password survived the session's copy.
-                let saved = File.ReadAllText(bim.Combine "Model.bim")
+                let savedFiles = sameAsSet (bim.Combine "Model.bim") "[Total]" "formatString" "0.00"
+
+                let saved =
+                    savedFiles
+                    |> List.find (fst >> (=) "Model.bim")
+                    |> snd
+                    |> Text.Encoding.UTF8.GetString
+
                 Expect.stringContains saved "s3cret" "kept, as `set --save` keeps it"
 
             testCase "save_model writes what `tess set --save` writes: the sample model (TESSERA_SAMPLE_MODEL)"
@@ -757,10 +778,11 @@ let tests =
                 | null
                 | "" -> skiptest "TESSERA_SAMPLE_MODEL is not set"
                 | sample ->
-                    let full = Path.GetFullPath sample
-                    let root = Path.GetDirectoryName(full.TrimEnd('/', '\\'))
-                    let name = Path.GetFileName(full.TrimEnd('/', '\\'))
-                    sameAsSet root (fun d -> Path.Combine(d, name)) "[Revenue]" "description" "changed by a test"
+                    match ModelSource.resolve sample with
+                    | Error e -> failtest (TessError.message e)
+                    | Ok source ->
+                        let model = defaultArg source.SemanticModelFolder source.Path
+                        sameAsSet model "[Revenue]" "description" "changed by a test" |> ignore
 
             testCase "save_model writes the files; refused while the session introduced errors, unless forced"
             <| fun () ->

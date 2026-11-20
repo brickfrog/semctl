@@ -117,6 +117,35 @@ let tests =
             Expect.isError (Report.write edits) ""
             Expect.equal (File.ReadAllText file) (ReportTests.visual + " ") ""
 
+        testCase "a conflicting report prevents the model save and a late failure restores it"
+        <| fun () ->
+            let t, file = withReport ()
+            use _ = t
+
+            let source, db =
+                ModelIO.loadPath t.Path
+                |> function
+                    | Ok pair -> pair
+                    | Error e -> failtest (TessError.message e)
+
+            db.Model.Tables.["Sales"].Measures.["Total"].Name <- "Changed"
+
+            let edits, _ =
+                Report.plan [ t.Combine "Sales.Report" ] (Report.RenameMeasure("Sales", "Total", "Changed"))
+
+            let checkOriginalModel () =
+                Expect.isTrue ((load t.Path).Model.Tables.["Sales"].Measures.Contains "Total") ""
+
+            File.AppendAllText(file, " ")
+            Expect.isError (Report.saveBack source db edits) "report conflict"
+            checkOriginalModel ()
+            File.WriteAllText(file, ReportTests.visual)
+            // The second check now encounters the first write to the same destination.
+            Expect.isError (Report.saveBack source db (edits @ edits)) "failure after model and report writes"
+            checkOriginalModel ()
+            Expect.equal (File.ReadAllText file) ReportTests.visual "restored report"
+            Expect.isOk (Report.saveBack source db edits) "retry"
+
         testCase "move rewrites the measure's own entity and warns about shared aliases"
         <| fun () ->
             let t, file = withReport ()

@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", CALCULATE ( [Sales Amount], Customer[Country] = \"US\" && [Sales Amount] > 100 ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "A measure reference (an implicit CALCULATE) has been used in a True/False expression that is used as a table filter expression. This is not allowed."
   },
   "source": [

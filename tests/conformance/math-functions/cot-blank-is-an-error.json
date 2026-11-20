@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", COT ( BLANK () ) )",
   "expected": {
+    "code": "dax-error",
     "error": "COT of BLANK"
   },
   "source": {

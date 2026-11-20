@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", DATE ( 2008, 1, 0 ) )",
   "expected": {
+    "code": "dax-error",
     "error": "DATE with day 0"
   },
   "source": [

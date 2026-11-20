@@ -6,6 +6,7 @@
     "EVALUATE { CountDown ( 2 ) }"
   ],
   "expected": {
+    "code": "dax-invalid",
     "error": "CountDown calls itself, and recursion is not supported"
   },
   "source": {

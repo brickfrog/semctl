@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", FLOOR ( 2.5, -2 ) )",
   "expected": {
+    "code": "dax-error",
     "error": "FLOOR needs the number and the significance to have the same sign"
   },
   "source": [

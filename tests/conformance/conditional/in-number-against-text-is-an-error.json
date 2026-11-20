@@ -3,6 +3,7 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", 1 IN { \"1\" } )",
   "expected": {
+    "code": "dax-error",
     "error": "the number 1 cannot be compared with the text column of the table"
   },
   "source": {

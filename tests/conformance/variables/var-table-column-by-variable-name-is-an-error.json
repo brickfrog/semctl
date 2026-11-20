@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", VAR Expensive = FILTER ( Product, Product[Price] >= 50 ) RETURN SUMX ( Expensive, Expensive[Price] ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "Expensive is a variable, not a table of the model: Expensive[Price] cannot be resolved"
   },
   "source": [

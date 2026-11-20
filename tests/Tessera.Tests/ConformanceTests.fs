@@ -687,20 +687,33 @@ let harnessTests =
             | Outcome.Error message -> Expect.stringContains message "kaboom" ""
             | other -> failtestf "%A" other
 
-        testCase "a case that expects an error passes on any error, and fails on a result"
+        testCase "a negative case checks the query error category and requested message"
         <| fun () ->
             let c =
                 single (
                     (caseText "")
                         .Replace(
                             """[ { "columns": [ { "name": "[r]", "type": "int64" } ], "rows": [ [1] ] } ]""",
-                            """{ "error": "text can't be compared with a number" }"""
+                            """{ "error": "text can't be compared with a number", "code": "dax-invalid", "message": "comparison" }"""
                         )
                 )
 
-            Expect.equal c.Expected (Expected.Error "text can't be compared with a number") ""
+            Expect.equal
+                c.Expected
+                (Expected.Error("text can't be compared with a number", Some "dax-invalid", Some "comparison"))
+                ""
+
             Expect.isEmpty (validate c) ""
-            Expect.equal (run (failing (QueryFailed "whatever the engine says")) c) Outcome.Pass ""
+            Expect.equal (run (failing (DaxInvalid("invalid comparison", ""))) c) Outcome.Pass ""
+            Expect.equal (run (failing (QueryFailed "invalid comparison")) c) Outcome.Pass ""
+
+            for e in
+                [
+                    QueryFailed "unrelated"
+                    DaxEvaluation("comparison", "")
+                    InvalidFixture("data", "comparison")
+                ] do
+                Expect.notEqual (run (failing e) c) Outcome.Pass "unrelated failure"
 
             match run (answering [ int64Result "[r]" 1L ]) c with
             | Outcome.Fail(Mismatch.ExpectedError _ as mismatch) ->

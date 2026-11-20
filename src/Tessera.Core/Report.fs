@@ -388,19 +388,33 @@ let displayOf (reportDir: string) (file: string) = display reportDir file
 
 let private utf8 (withBom: bool) = UTF8Encoding(withBom)
 
-/// Write planned edits, refusing files changed since they were planned.
-let write (edits: FileEdit list) : Result<unit, TessError> =
-    try
+let private checkOriginal (e: FileEdit) current =
+    let body = if hasBom current then current.[3..] else current
+
+    if hasBom current <> e.Bom || Encoding.UTF8.GetString body <> e.Before then
+        failwith $"{e.Display} changed since the edit was planned"
+
+let private commit path (edits: FileEdit list) saveModel =
+    SaveJournal.run path (fun journal ->
         for e in edits do
-            let current = File.ReadAllBytes e.Path
-            let body = if hasBom current then current.[3..] else current
+            checkOriginal e (File.ReadAllBytes e.Path)
 
-            if Encoding.UTF8.GetString body <> e.Before then
-                failwith $"{e.Display} changed since the edit was planned"
+        saveModel journal
+        |> Result.map (fun saved ->
+            for e in edits do
+                let encoding = utf8 e.Bom
 
-        for e in edits do
-            File.WriteAllText(e.Path, e.After, utf8 e.Bom)
+                SaveJournal.writeChecked
+                    journal
+                    e.Path
+                    (Some(checkOriginal e))
+                    (Array.append (encoding.GetPreamble()) (encoding.GetBytes e.After))
 
-        Ok()
-    with e ->
-        Error(SaveFailed(String.concat ", " (edits |> List.map (fun e -> e.Path)), e.Message))
+            saved))
+
+let write edits =
+    commit (String.concat ", " [ for e in edits -> e.Path ]) edits (fun _ -> Ok())
+
+/// Save the model and its report edits as one rollback unit.
+let saveBack (source: ModelSource) db edits =
+    commit source.Path edits (fun journal -> ModelIO.saveBackWith (Some journal) source db)

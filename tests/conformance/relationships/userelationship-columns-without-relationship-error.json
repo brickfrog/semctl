@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", CALCULATE ( [Sales Amount], USERELATIONSHIP ( Sales[Quantity], Product[ProductKey] ) ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "Sales[Quantity] and Product[ProductKey] are not the end points of a relationship: USERELATIONSHIP returns an error"
   },
   "source": [

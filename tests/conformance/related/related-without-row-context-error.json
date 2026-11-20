@@ -3,6 +3,7 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", RELATED ( Product[Color] ) )",
   "expected": {
+    "code": "dax-invalid",
     "error": "RELATED needs a row context on a table related to Product; ROW provides none"
   },
   "source": [

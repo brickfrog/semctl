@@ -6,6 +6,7 @@
     "EVALUATE ROW ( \"r\", [SalesAmount] )"
   ],
   "expected": {
+    "code": "dax-invalid",
     "error": "A single value for column Amount in table Sales cannot be determined: a column reference needs a row context and a measure has none"
   },
   "source": {

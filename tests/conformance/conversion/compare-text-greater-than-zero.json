@@ -3,6 +3,8 @@
   "model": "scalar",
   "query": "EVALUATE ROW ( \"r\", \"1\" > 0 )",
   "expected": {
+    "code": "dax-error",
+    "message": "comparing values of type",
     "error": "comparison operations do not support comparing values of type Text with values of type Integer"
   },
   "source": [

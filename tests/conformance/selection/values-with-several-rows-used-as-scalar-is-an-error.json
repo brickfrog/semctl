@@ -3,6 +3,8 @@
   "model": "sales",
   "query": "EVALUATE ROW ( \"r\", VALUES ( Product[Color] ) )",
   "expected": {
+    "code": "dax-error",
+    "message": "multiple values",
     "error": "VALUES ( Product[Color] ) has three rows and cannot be converted to a single value"
   },
   "source": [
