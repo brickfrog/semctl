@@ -44,7 +44,7 @@ well-formed, the metadata is complete). Files are JSON; comments and trailing co
 | `title` | one line: the fact the case settles. One fact per case, since one error fails a whole query. |
 | `model` | the name of a shared model, or `{ "base": "<name>", ...changes }` (below). |
 | `query` | a DAX query: a string, or an array of lines. `DEFINE MEASURE` / `VAR` / `TABLE` / `COLUMN` / `FUNCTION` go here. |
-| `expected` | an array with one result per `EVALUATE`, in the [`tess query` JSON shape](../../README.md#query) (`rowCount` and `truncated` may be left out); or an error expectation with `error` (reason), optional local DAX `code`, and optional case-insensitive `message` fragment. XMLA exposes one query error code, so portable message fragments can narrow its verdict. |
+| `expected` | an array with one result per `EVALUATE`, in the [`tess query` JSON shape](../../docs/xmla.md#query) (`rowCount` and `truncated` may be left out); or an error expectation with `error` (reason), optional local DAX `code`, and optional case-insensitive `message` fragment. XMLA exposes one query error code, so portable message fragments can narrow its verdict. |
 | `ordered` | `true` when the query's `ORDER BY` fixes the order of every row and that order is part of the expectation. Default `false`: rows are compared as a multiset. |
 | `tolerance` | relative tolerance for doubles, if the default (1e-9) isn't right. |
 | `source` | `{ "url", "quote"?, "supports" }`, or an array of them. `quote` is a line or two of the page, word for word; `supports` says what in the page justifies the expectation. |

@@ -7,7 +7,7 @@ description: Drive tess (tessera), an offline CLI for Power BI / Analysis Servic
 
 tess reads and edits semantic models on disk: a PBIP project or `X.SemanticModel` folder, a TMDL folder, a
 `.bim` file or a Tabular Editor `database.json` folder. Run `tess --help` and `tess <command> --help` for every
-option; the README has the details.
+option. See the [command reference](https://github.com/brickfrog/tessera/tree/master/docs) for details.
 
 ## Rules that matter to an agent
 

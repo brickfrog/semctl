@@ -153,7 +153,7 @@ A scripting command must keep these rules:
    script is always an explicit act of the user.
 2. **A script runs in-process, with the user's rights.** It can do anything the user can: read and write files,
    start processes, open network connections. tess doesn't sandbox it, and .NET offers no in-process sandbox
-   since Code Access Security was removed. The README says so plainly: treat a script like any program you run.
+   since Code Access Security was removed. The scripting guide says so plainly: treat a script like any program you run.
 3. **tess's no-network guarantee covers tess, not the code a script brings.** tess adds no network access for
    scripts, and the offline tests keep checking tess's own assemblies. A script's own `HttpClient` is the
    script's business.
@@ -186,8 +186,7 @@ fallback for C#, should the in-binary approach fail on Windows or macOS.
 
 The recommendation's C# path is built as `tess csharp <model> <script.csx>`. The command name is provisional,
 and `script` is taken by DAX scripts. It lives in its own project, `src/Tessera.Scripting`, and its own command
-file, so it can be dropped by removing one project reference and one command. See the README section
-"C# scripts (`csharp`)". The F# variant and the Scripting-API variant were spike code only, and were not kept.
+file, so it can be dropped by removing one project reference and one command. See the [C# scripting guide](dax-tools.md#c-scripts-csharp). The F# variant and the Scripting-API variant were spike code only, and were not kept.
 
 ## Open
 
