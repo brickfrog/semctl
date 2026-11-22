@@ -34,7 +34,7 @@ let deleteFile journal path =
         let previous = File.ReadAllBytes path
 
         let options =
-            FileStreamOptions(Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None)
+            FileStreamOptions(Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.Read)
 
         if not (OperatingSystem.IsWindows()) then
             options.UnixCreateMode <- File.GetUnixFileMode path
@@ -53,7 +53,7 @@ let writeChecked (entries: Journal) path (validate: (byte[] -> unit) option) (by
             path,
             (if existed then FileMode.Open else FileMode.CreateNew),
             FileAccess.ReadWrite,
-            FileShare.None
+            FileShare.Read
         )
 
     let previous = Array.zeroCreate<byte>(int stream.Length)
@@ -73,7 +73,12 @@ let writeChecked (entries: Journal) path (validate: (byte[] -> unit) option) (by
         stream.Flush()
     with _ ->
         stream.Dispose()
-        restore ()
+
+        try
+            restore ()
+        with restoreEx ->
+            entries.Add(fun () -> failwith $"{path}: {restoreEx.Message}")
+
         reraise ()
 
     entries.Add(fun () ->

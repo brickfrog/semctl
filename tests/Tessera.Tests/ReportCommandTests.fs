@@ -146,6 +146,65 @@ let tests =
             Expect.equal (File.ReadAllText file) ReportTests.visual "restored report"
             Expect.isOk (Report.saveBack source db edits) "retry"
 
+        testCase "saveBack succeeds while another reader holds model and report files open with FileShare.ReadWrite"
+        <| fun () ->
+            let t, file = withReport ()
+            use _ = t
+
+            let source, db =
+                ModelIO.loadPath t.Path
+                |> function
+                    | Ok pair -> pair
+                    | Error e -> failtest (TessError.message e)
+
+            let measureFile = Path.Combine(source.Path, "tables", "Sales.tmdl")
+
+            use _modelReader =
+                new FileStream(measureFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite ||| FileShare.Delete)
+
+            use _reportReader =
+                new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite ||| FileShare.Delete)
+
+            db.Model.Tables.["Sales"].Measures.["Total"].Name <- "Changed"
+
+            let edits, _ =
+                Report.plan [ t.Combine "Sales.Report" ] (Report.RenameMeasure("Sales", "Total", "Changed"))
+
+            Expect.isOk (Report.saveBack source db edits) "cooperative readers must not block saving"
+            Expect.isTrue ((load t.Path).Model.Tables.["Sales"].Measures.Contains "Changed") ""
+            Expect.stringContains (File.ReadAllText file) "\"Property\": \"Changed\"" ""
+
+        testCase "rolling back a failed save restores deleted model files and removes newly created ones"
+        <| fun () ->
+            let t, file = withReport ()
+            use _ = t
+
+            let source, db =
+                ModelIO.loadPath t.Path
+                |> function
+                    | Ok pair -> pair
+                    | Error e -> failtest (TessError.message e)
+
+            let oldTable = Path.Combine(source.Path, "tables", "Sales.tmdl")
+            let newTable = Path.Combine(source.Path, "tables", "Orders.tmdl")
+            let originalSalesBytes = File.ReadAllBytes oldTable
+
+            db.Model.Tables.["Sales"].Name <- "Orders"
+
+            let edits, _ =
+                Report.plan [ t.Combine "Sales.Report" ] (Report.RenameTable("Sales", "Orders"))
+
+            Expect.isError (Report.saveBack source db (edits @ edits)) "failure after model and report writes"
+            Expect.isTrue (File.Exists oldTable) "deleted table file restored"
+            Expect.equal (File.ReadAllBytes oldTable) originalSalesBytes "restored table file bytes"
+            Expect.isFalse (File.Exists newTable) "created table file removed"
+            Expect.equal (File.ReadAllText file) ReportTests.visual "restored report"
+
+            Expect.isOk (Report.saveBack source db edits) "retry after rollback"
+            Expect.isFalse (File.Exists oldTable) "old table file deleted on retry"
+            Expect.isTrue (File.Exists newTable) "new table file written on retry"
+            Expect.stringContains (File.ReadAllText file) "\"Entity\": \"Orders\"" ""
+
         testCase "move rewrites the measure's own entity and warns about shared aliases"
         <| fun () ->
             let t, file = withReport ()

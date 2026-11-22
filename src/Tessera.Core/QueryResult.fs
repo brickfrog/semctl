@@ -663,15 +663,18 @@ module QueryResult =
     // Exact rational representations for comparisons involving an int64 or fixed decimal.
     // Rounding both operands to double first would identify neighboring integers above 2^53.
     let private doubleFraction (d: double) =
-        let bits = BitConverter.DoubleToInt64Bits d
-        let exponent = int ((bits >>> 52) &&& 0x7ffL)
+        if d = 0.0 then
+            0I, 1I
+        else
+            let bits = BitConverter.DoubleToInt64Bits d
+            let exponent = int ((bits >>> 52) &&& 0x7ffL)
 
-        let mantissa =
-            (bits &&& 0xfffffffffffffL) + (if exponent = 0 then 0L else 1L <<< 52)
+            let mantissa =
+                (bits &&& 0xfffffffffffffL) + (if exponent = 0 then 0L else 1L <<< 52)
 
-        let n = bigint (if bits < 0L then -mantissa else mantissa)
-        let shift = max exponent 1 - 1075
-        if shift >= 0 then n <<< shift, 1I else n, 1I <<< -shift
+            let n = bigint (if bits < 0L then -mantissa else mantissa)
+            let shift = max exponent 1 - 1075
+            if shift >= 0 then n <<< shift, 1I else n, 1I <<< -shift
 
     let private fraction =
         function
@@ -752,48 +755,66 @@ module QueryResult =
     // exact one) can move: tolerance makes equality non-transitive. Stop with an explicit
     // inconclusive verdict if deciding the matching would exceed the work budget.
     let private matchRows (left: int[]) (right: int[]) (score: int -> int -> struct (int * int)) =
-        let seen = Array.zeroCreate right.Length
-        let parent = Array.zeroCreate right.Length
-        let queue = Collections.Generic.Queue<int>()
-        let mutable generation = 0
-        let mutable remaining = 4_000_000
+        let mutable freeRight =
+            right |> Array.fold (fun n x -> if x < 0 then n + 1 else n) 0
 
-        let augment allowTypeDifference root =
-            generation <- generation + 1
-            queue.Clear()
-            queue.Enqueue root
-            let mutable free = -1
+        if freeRight = 0 then
+            true
+        else
+            let seen = Array.zeroCreate right.Length
+            let parent = Array.zeroCreate right.Length
+            let queue = Collections.Generic.Queue<int>()
+            let mutable generation = 0
+            let mutable remaining = 4_000_000
+            let mutable sawTypeDifference = false
 
-            while free < 0 && queue.Count > 0 && remaining > 0 do
-                let e = queue.Dequeue()
-                let mutable a = 0
+            let augment allowTypeDifference root =
+                generation <- generation + 1
+                queue.Clear()
+                queue.Enqueue root
+                let mutable free = -1
 
-                while a < right.Length && free < 0 && remaining > 0 do
-                    remaining <- remaining - 1
+                while free < 0 && queue.Count > 0 && remaining > 0 do
+                    let e = queue.Dequeue()
+                    let mutable a = 0
 
-                    if seen.[a] <> generation then
-                        let struct (different, types) = score e a
+                    while a < right.Length && free < 0 && remaining > 0 do
+                        remaining <- remaining - 1
 
-                        if different = 0 && (types = 0 || allowTypeDifference) then
-                            seen.[a] <- generation
-                            parent.[a] <- e
-                            if right.[a] < 0 then free <- a else queue.Enqueue right.[a]
+                        if seen.[a] <> generation then
+                            let struct (different, types) = score e a
 
-                    a <- a + 1
+                            if different = 0 then
+                                if types > 0 then
+                                    sawTypeDifference <- true
 
-            while free >= 0 do
-                let e = parent.[free]
-                right.[free] <- e
-                let previous = left.[e]
-                left.[e] <- free
-                free <- previous
+                                if types = 0 || allowTypeDifference then
+                                    seen.[a] <- generation
+                                    parent.[a] <- e
+                                    if right.[a] < 0 then free <- a else queue.Enqueue right.[a]
 
-        for allowTypeDifference in [ false; true ] do
+                        a <- a + 1
+
+                if free >= 0 then
+                    freeRight <- freeRight - 1
+
+                while free >= 0 do
+                    let e = parent.[free]
+                    right.[free] <- e
+                    let previous = left.[e]
+                    left.[e] <- free
+                    free <- previous
+
             for e in 0 .. left.Length - 1 do
-                if left.[e] < 0 && remaining > 0 then
-                    augment allowTypeDifference e
+                if left.[e] < 0 && freeRight > 0 && remaining > 0 then
+                    augment false e
 
-        remaining > 0 || left |> Array.forall (fun a -> a >= 0)
+            if sawTypeDifference && freeRight > 0 && remaining > 0 then
+                for e in 0 .. left.Length - 1 do
+                    if left.[e] < 0 && freeRight > 0 && remaining > 0 then
+                        augment true e
+
+            remaining > 0 || freeRight = 0 || left |> Array.forall (fun a -> a >= 0)
 
     /// Compare an actual result with the expected one.
     ///
@@ -947,8 +968,52 @@ module QueryResult =
                     right.[j] <- i
                 | _ -> ())
 
+            let needsMatching () =
+                let hasTolerance =
+                    options.AbsoluteTolerance > 0.0 || options.RelativeTolerance > 0.0
+
+                let mask (v: QueryValue) =
+                    match v with
+                    | QueryValue.Int64 _ -> 1
+                    | QueryValue.Decimal _ -> 2
+                    | QueryValue.Double _ -> 4
+                    | _ -> 0
+
+                let mutable needed = false
+                let mutable c = 0
+
+                while not needed && c < pairs.Length do
+                    let mutable eMask = 0
+                    let mutable aMask = 0
+
+                    for i in 0 .. expectedRows.Length - 1 do
+                        if left.[i] < 0 then
+                            eMask <- eMask ||| mask expectedRows.[i].[c]
+
+                    for i in 0 .. actualRows.Length - 1 do
+                        if right.[i] < 0 then
+                            aMask <- aMask ||| mask actualRows.[i].[c]
+
+                    if eMask <> 0 && aMask <> 0 then
+                        let crossType =
+                            (eMask &&& (~~~aMask)) <> 0
+                            || (aMask &&& (~~~eMask)) <> 0
+                            || (eMask &&& (eMask - 1)) <> 0
+
+                        let numericTolerance = hasTolerance && ((eMask &&& aMask &&& 4) <> 0 || allNumbers)
+
+                        if crossType || numericTolerance then
+                            needed <- true
+
+                    c <- c + 1
+
+                needed
+
             let decided =
-                matchRows left right (fun e a -> score expectedRows.[e] actualRows.[a])
+                if needsMatching () then
+                    matchRows left right (fun e a -> score expectedRows.[e] actualRows.[a])
+                else
+                    true
 
             let expectedLeft = ResizeArray<int>()
             let actualLeft = ResizeArray<int>()

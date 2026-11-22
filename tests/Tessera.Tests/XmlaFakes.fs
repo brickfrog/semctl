@@ -29,6 +29,8 @@ type FakeServer() =
 
     /// Thrown by Open instead of connecting, when set.
     member val OpenError: exn option = None with get, set
+    /// Called on Open before OpenError/session creation.
+    member val OnOpen: ConnectionRequest -> unit = ignore with get, set
     /// Thrown by Execute, when set.
     member val ExecuteError: exn option = None with get, set
     /// Messages Execute returns. With an error among them, the script is not applied.
@@ -77,6 +79,7 @@ type FakeServer() =
     interface IXmlaConnector with
         member this.Open(request: ConnectionRequest) =
             requests.Add request
+            this.OnOpen request
 
             match this.OpenError with
             | Some e -> raise e

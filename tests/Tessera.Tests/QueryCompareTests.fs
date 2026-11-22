@@ -427,10 +427,29 @@ let compareTests =
 
         testCase "an exhausted unordered search reports an inconclusive result"
         <| fun () ->
-            let values n =
-                result [ col "[v]" QueryType.Double ] (List.replicate 1500 [ d n ])
+            let values count n =
+                result [ col "[v]" QueryType.Double ] (List.replicate count [ d n ])
 
-            Expect.equal (diff unordered (values 1.) (values 5.)) [ ResultDifference.PairingLimit ] ""
+            // 1,500 mismatched rows stay within the 4,000,000-check budget now that redundant
+            // type-relaxation passes are skipped.
+            let decided = diff unordered (values 1500 1.) (values 1500 5.)
+            Expect.isFalse (List.contains ResultDifference.PairingLimit decided) "1500 rows stay within budget"
+
+            // 2,100 mismatched rows exceed the 4,000,000-check budget (2,100^2 = 4.41M).
+            Expect.equal (diff unordered (values 2100 1.) (values 2100 5.)) [ ResultDifference.PairingLimit ] ""
+
+            // When every actual row is already matched, no augmenting paths exist even above 2,000 rows.
+            let extraExpected = diff unordered (values 3000 1.) (values 1500 1.)
+            Expect.isFalse (List.contains ResultDifference.PairingLimit extraExpected) "0 free actual rows decides"
+            Expect.equal (List.head extraExpected) (ResultDifference.RowCount(3000, 1500)) ""
+
+            // Exact/non-numeric columns with 0 tolerance cannot form near matches beyond rowKey.
+            let strings n prefix =
+                result [ col "[v]" QueryType.String ] [ for k in 1..n -> [ s $"{prefix}-{k}" ] ]
+
+            let stringDiff = diff unordered (strings 2100 "a") (strings 2100 "b")
+            Expect.isFalse (List.contains ResultDifference.PairingLimit stringDiff) "non-numeric rows decide"
+            Expect.isNonEmpty stringDiff ""
 
         testCase "relative tolerance cannot overflow into a spurious match"
         <| fun () ->
@@ -538,6 +557,7 @@ let compareTests =
                 ResultDifference.ValueType(0, 0, "[a]", i 1, d 1.0)
                 ResultDifference.MissingRow(0, [| i 1; s "x" |])
                 ResultDifference.UnexpectedRow(0, [| QueryValue.Blank |])
+                ResultDifference.PairingLimit
                 ResultDifference.Truncated
             ]
 

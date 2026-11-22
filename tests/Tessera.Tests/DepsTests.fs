@@ -241,4 +241,108 @@ let tests =
                 deps
                 [ "measure:Sales/Total", "expression" ]
                 "only the measure; [Date] is produced, not referenced"
+
+        testCase "window functions propagate virtual columns into ORDERBY and keep outer row context"
+        <| fun () ->
+            let db = sampleDatabase ()
+
+            let dax =
+                """VAR t = ADDCOLUMNS(VALUES(Product[Color]), "Total", [Total]) RETURN SUMX(OFFSET(1, t, ORDERBY([Total], ASC)), [Total]) + [Total]"""
+
+            db.Model.Tables.["Sales"].Measures.Add(new Measure(Name = "Windowed", Expression = dax))
+            let hits = dependsOn (build db) (refOf "measure:Sales/Windowed")
+
+            Expect.equal
+                (hits
+                 |> List.filter (fun r -> r.Target = Resolved(refOf "measure:Sales/Total"))
+                 |> List.choose _.Start)
+                [ dax.IndexOf("[Total]"); dax.LastIndexOf("[Total]") ]
+                "only the ADDCOLUMNS definition and trailing addition refer to the model measure"
+
+            let db2 = sampleDatabase ()
+
+            let rankDax =
+                """VAR t = ADDCOLUMNS(VALUES(Date[Year]), "Total", [Total]) RETURN SUMX(t, RANK(DENSE, t, ORDERBY([Total], DESC)) + [Total])"""
+
+            db2.Model.Tables.["Sales"].Measures.Add(new Measure(Name = "Ranked", Expression = rankDax))
+            let rankHits = dependsOn (build db2) (refOf "measure:Sales/Ranked")
+
+            Expect.equal
+                (rankHits
+                 |> List.filter (fun r -> r.Target = Resolved(refOf "measure:Sales/Total"))
+                 |> List.choose _.Start)
+                [ rankDax.IndexOf("[Total]") ]
+                "RANK's ORDERBY and outer SUMX see the virtual column"
+
+        testCase "IF, SWITCH, anonymous qualified projections, and table generators retain virtual columns"
+        <| fun () ->
+            let db = sampleDatabase ()
+            let sales = db.Model.Tables.["Sales"]
+            sales.Measures.Add(new Measure(Name = "Value", Expression = "1"))
+            sales.Measures.Add(new Measure(Name = "Date", Expression = "1"))
+
+            let add name expr =
+                sales.Measures.Add(new Measure(Name = name, Expression = expr))
+
+            let ifDax =
+                """VAR t = IF(TRUE(), ROW("Total", [Total]), ROW("Total", 0)) RETURN SUMX(t, [Total])"""
+
+            let switchDax =
+                """VAR t = SWITCH(1, 1, ROW("Total", [Total]), ROW("Total", 0)) RETURN SUMX(t, [Total])"""
+
+            let anonDax =
+                """SUMX(SELECTCOLUMNS(ROW("Total", [Total]), ''[Total]), [Total]) + [Total]"""
+
+            let seriesDax = """SUMX(GENERATESERIES(1, 3), [Value]) + [Value]"""
+            let ctorDax = """SUMX({ 1, 2 }, [Value]) + [Value]"""
+
+            let calDax =
+                """COUNTROWS(FILTER(CALENDAR(DATE(2024,1,1), DATE(2024,1,2)), [Date] > DATE(2024,1,1))) + [Date]"""
+
+            let sampleDax = """SUMX(SAMPLE(1, ROW("Total", [Total]), [Total], ASC), [Total])"""
+
+            let xirrDax =
+                """XIRR(ROW("Total", [Total], "When", DATE(2024,1,1)), [Total], [When])"""
+
+            add "IfTable" ifDax
+            add "SwitchTable" switchDax
+            add "AnonProj" anonDax
+            add "Series" seriesDax
+            add "Ctor" ctorDax
+            add "CalExpr" calDax
+            add "SampleExpr" sampleDax
+            add "XirrExpr" xirrDax
+
+            let g = build db
+
+            let totalStarts name =
+                dependsOn g (refOf $"measure:Sales/{name}")
+                |> List.filter (fun r -> r.Target = Resolved(refOf "measure:Sales/Total"))
+                |> List.choose _.Start
+
+            Expect.equal (totalStarts "IfTable") [ ifDax.IndexOf("[Total]") ] "IF preserves ROW column"
+            Expect.equal (totalStarts "SwitchTable") [ switchDax.IndexOf("[Total]") ] "SWITCH preserves ROW column"
+
+            Expect.equal
+                (totalStarts "AnonProj")
+                [ anonDax.IndexOf("[Total]"); anonDax.LastIndexOf("[Total]") ]
+                "''[Total] preserves virtual column"
+
+            Expect.equal (totalStarts "SampleExpr") [ sampleDax.IndexOf("[Total]") ] "SAMPLE preserves virtual column"
+            Expect.equal (totalStarts "XirrExpr") [ xirrDax.IndexOf("[Total]") ] "XIRR preserves virtual column"
+
+            let valueStarts name =
+                dependsOn g (refOf $"measure:Sales/{name}")
+                |> List.filter (fun r -> r.Target = Resolved(refOf "measure:Sales/Value"))
+                |> List.choose _.Start
+
+            Expect.equal (valueStarts "Series") [ seriesDax.LastIndexOf("[Value]") ] "GENERATESERIES produces [Value]"
+            Expect.equal (valueStarts "Ctor") [ ctorDax.LastIndexOf("[Value]") ] "table constructor produces [Value]"
+
+            let dateStarts =
+                dependsOn g (refOf "measure:Sales/CalExpr")
+                |> List.filter (fun r -> r.Target = Resolved(refOf "measure:Sales/Date"))
+                |> List.choose _.Start
+
+            Expect.equal dateStarts [ calDax.LastIndexOf("[Date]") ] "CALENDAR produces [Date]"
     ]

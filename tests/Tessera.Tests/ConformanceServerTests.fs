@@ -535,4 +535,32 @@ let tests =
                 Expect.isTrue (File.Exists(dir.Combine "conformance-report.json")) ""
                 Expect.isTrue (File.Exists(dir.Combine "conformance-report.md")) ""
                 Expect.equal (server.Databases |> Seq.map _.Name |> List.ofSeq) [ "tessera-conformance-scalar" ] ""
+
+        testCase "a role-scoped connection failure on a negative case is a server error, not agreement"
+        <| fun () ->
+            let t = new TempDir()
+            use _ = t
+            write (t.Combine("models", "m.json")) model
+
+            write
+                (t.Combine("security", "role-error.json"))
+                """{ "title": "role failure", "model": "m", "query": "EVALUATE { 1 }",
+                     "as": { "roles": [ "Europe" ] },
+                     "expected": { "error": "role must reject query", "code": "dax-invalid" },
+                     "source": { "url": "https://example.org/dax", "supports": "says so" },
+                     "confidence": "derived", "derivation": "by hand", "tags": [ "security" ] }"""
+
+            let corpus = load t.Path
+            Expect.isEmpty corpus.Problems ""
+            let server = FakeServer()
+            server.OnQuery <- answer corpus.Cases
+
+            server.OnOpen <-
+                fun request ->
+                    if request.Address.Properties |> List.exists (fun (k, _) -> k = "Roles") then
+                        failwith "cannot open connection for role Europe"
+
+            let report = runOn server options corpus.Cases
+            Expect.equal (verdicts report) [ "security/role-error", ConformanceServer.Verdict.ServerError ] ""
+            Expect.isFalse (ConformanceServer.agrees report) ""
     ]

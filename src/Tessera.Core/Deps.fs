@@ -227,6 +227,11 @@ let private locals (isFunction: bool) (tokens: Token array) =
 let private localColumnOffsets isFunction (dax: string) =
     let offsets = HashSet<int>()
 
+    let rec unparen (e: DaxAst.Expr) =
+        match e.Kind with
+        | DaxAst.Paren inner -> unparen inner
+        | _ -> e
+
     let rec visit (vars: Map<string, Set<string>>) (row: Set<string>) (expr: DaxAst.Expr) =
         let visitHere = visit vars row
 
@@ -238,6 +243,15 @@ let private localColumnOffsets isFunction (dax: string) =
             Set.empty
         | DaxAst.Identifier name -> Map.tryFind (name.ToUpperInvariant()) vars |> Option.defaultValue Set.empty
         | DaxAst.Paren inner -> visitHere inner
+        | DaxAst.TableConstructor rows ->
+            rows |> List.iter (visitHere >> ignore)
+
+            match rows with
+            | [] -> Set.empty
+            | first :: _ ->
+                match (unparen first).Kind with
+                | DaxAst.Tuple cols -> [ for k in 1 .. cols.Length -> $"VALUE{k}" ] |> Set.ofList
+                | _ -> Set.singleton "VALUE"
         | DaxAst.VarBlock(decls, body) ->
             let mutable scope = vars
 
@@ -258,11 +272,16 @@ let private localColumnOffsets isFunction (dax: string) =
                         output <- output.Add(alias.ToUpperInvariant())
                         pairs tail
                     | arg :: tail ->
-                        visit vars (Set.union row input) arg |> ignore
-                        // A grouping column or an unnamed SELECTCOLUMNS projection keeps its name.
-                        match arg.Kind with
-                        | DaxAst.Bracketed n when input.Contains(n.ToUpperInvariant()) ->
+                        let produced = visit vars (Set.union row input) arg
+                        // A grouping column, an unnamed SELECTCOLUMNS projection, or ROLLUPADDISSUBTOTAL keeps its name.
+                        match (unparen arg).Kind with
+                        | DaxAst.Bracketed n
+                        | DaxAst.Qualified({ Name = ""; Quoted = true }, n) when input.Contains(n.ToUpperInvariant()) ->
                             output <- output.Add(n.ToUpperInvariant())
+                        | DaxAst.Call(c, _) when
+                            c.Name.Equals("ROLLUPADDISSUBTOTAL", StringComparison.OrdinalIgnoreCase)
+                            ->
+                            output <- Set.union output produced
                         | _ -> ()
 
                         pairs tail
@@ -272,6 +291,36 @@ let private localColumnOffsets isFunction (dax: string) =
                 output
 
             match fn, args with
+            | "GENERATESERIES", _ ->
+                args |> List.iter (visitHere >> ignore)
+                Set.singleton "VALUE"
+            | ("CALENDAR" | "CALENDARAUTO"), _ ->
+                args |> List.iter (visitHere >> ignore)
+                Set.singleton "DATE"
+            | "ROLLUPADDISSUBTOTAL", _ ->
+                let mutable output = Set.empty
+
+                for arg in args do
+                    match (unparen arg).Kind with
+                    | DaxAst.StringLiteral alias -> output <- output.Add(alias.ToUpperInvariant())
+                    | _ -> visitHere arg |> ignore
+
+                output
+            | "IF", cond :: branches ->
+                visitHere cond |> ignore
+                branches |> List.map visitHere |> Set.unionMany
+            | "SWITCH", expr :: rest ->
+                visitHere expr |> ignore
+
+                let rec collect acc =
+                    function
+                    | value :: result :: tail ->
+                        visitHere value |> ignore
+                        collect (Set.union acc (visitHere result)) tail
+                    | [ fallback ] -> Set.union acc (visitHere fallback)
+                    | [] -> acc
+
+                collect Set.empty rest
             | ("ROW" | "DATATABLE" | "SUMMARIZECOLUMNS"), _ -> projection Set.empty args
             | ("ADDCOLUMNS" | "SELECTCOLUMNS" | "SUMMARIZE" | "GROUPBY"), source :: rest ->
                 let input = visitHere source
@@ -291,7 +340,7 @@ let private localColumnOffsets isFunction (dax: string) =
                 |> List.iteri (fun i arg -> (if i % 2 = 1 then inRow else visitHere) arg |> ignore)
 
                 Set.empty
-            | "TOPN", count :: source :: order ->
+            | ("TOPN" | "SAMPLE"), count :: source :: order ->
                 visitHere count |> ignore
                 let input = visitHere source
 
@@ -305,6 +354,56 @@ let private localColumnOffsets isFunction (dax: string) =
                     |> ignore)
 
                 input
+            | ("XIRR" | "XNPV"), source :: values :: dates :: rest ->
+                let input = visitHere source
+                let inRow = visit vars (Set.union row input)
+                inRow values |> ignore
+                inRow dates |> ignore
+                rest |> List.iter (visitHere >> ignore)
+                Set.empty
+            | "LINESTX", source :: rest ->
+                let input = visitHere source
+                let inRow = visit vars (Set.union row input)
+                rest |> List.iter (inRow >> ignore)
+                Set.empty
+            | "SUBSTITUTEWITHINDEX", source :: nameArg :: indexTable :: order ->
+                let input = visitHere source
+                let indexCols = visitHere indexTable
+                let inRow = visit vars (Set.union row (Set.union input indexCols))
+
+                order
+                |> List.iteri (fun i arg -> (if i % 2 = 0 then inRow else visitHere) arg |> ignore)
+
+                match (unparen nameArg).Kind with
+                | DaxAst.StringLiteral alias -> input.Add(alias.ToUpperInvariant())
+                | _ -> input
+            | ("INDEX" | "OFFSET" | "WINDOW" | "RANK" | "ROWNUMBER"), _ ->
+                let isWindowClause (e: DaxAst.Expr) =
+                    match (unparen e).Kind with
+                    | DaxAst.Call(c, inner) when
+                        c.Name.Equals("ORDERBY", StringComparison.OrdinalIgnoreCase)
+                        || c.Name.Equals("PARTITIONBY", StringComparison.OrdinalIgnoreCase)
+                        || c.Name.Equals("MATCHBY", StringComparison.OrdinalIgnoreCase)
+                        ->
+                        Some inner
+                    | _ -> None
+
+                let clauses, other =
+                    args
+                    |> List.fold
+                        (fun (cs, os) arg ->
+                            match isWindowClause arg with
+                            | Some inner -> (inner :: cs), os
+                            | None -> cs, (arg :: os))
+                        ([], [])
+
+                let input = other |> List.rev |> List.map visitHere |> Set.unionMany
+                let inRow = visit vars (Set.union row input)
+
+                for inner in List.rev clauses do
+                    inner |> List.iter (inRow >> ignore)
+
+                if fn = "RANK" || fn = "ROWNUMBER" then Set.empty else input
             | ("GENERATE" | "GENERATEALL"), [ outer; inner ] ->
                 let input = visitHere outer
                 Set.union input (visit vars (Set.union row input) inner)
@@ -357,9 +456,15 @@ let private resolveSource (index: Index) (s: DaxSource) : Reference list =
     let isFunction = s.Owner.Ref.Kind = ObjectKind.Function
     let names = locals isFunction tokens
 
+    let mayHaveLocalColumns =
+        s.Dax.Contains '"'
+        || s.Dax.Contains '{'
+        || s.Dax.Contains("GENERATESERIES", StringComparison.OrdinalIgnoreCase)
+        || s.Dax.Contains("CALENDAR", StringComparison.OrdinalIgnoreCase)
+
     let localColumns =
         lazy
-            (if s.Dax.Contains '"' then
+            (if mayHaveLocalColumns then
                  localColumnOffsets isFunction s.Dax
              else
                  HashSet<int>())
