@@ -4,6 +4,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- 3390: malformed XML doc comments; 1182: unused variables -->
     <WarnOn>$(WarnOn);3390;1182</WarnOn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Deterministic>true</Deterministic>
     <Version>0.6.1</Version>
     <Authors>Justin</Authors>

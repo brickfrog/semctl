@@ -29,7 +29,7 @@ let queryType (t: Type) =
         QueryType.Variant
 
 /// A value as the reader returns it. null and DBNull are BLANK.
-let queryValue (v: obj) : QueryValue =
+let queryValue (v: obj | null) : QueryValue =
     match v with
     | null -> QueryValue.Blank
     | :? DBNull -> QueryValue.Blank
@@ -45,7 +45,12 @@ let queryValue (v: obj) : QueryValue =
     | :? DateTime as d -> QueryValue.DateTime d
     | :? bool as b -> QueryValue.Boolean b
     | :? (byte array) as b -> QueryValue.Binary b
-    | other -> QueryValue.String(Convert.ToString(other, Globalization.CultureInfo.InvariantCulture))
+    | other ->
+        QueryValue.String(
+            match Convert.ToString(other, Globalization.CultureInfo.InvariantCulture) with
+            | null -> ""
+            | s -> s
+        )
 
 /// The reader's current result set. With maxRows, at most that many rows are kept, and Truncated
 /// says whether there was at least one more.

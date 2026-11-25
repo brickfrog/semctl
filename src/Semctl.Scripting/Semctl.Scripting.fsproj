@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>Semctl.Scripting</RootNamespace>
     <Description>C# scripts against a model's TOM, compiled with Roslyn in memory (`sm csharp`). Self-contained: drop this project and the command to remove scripting.</Description>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,7 +13,7 @@
   <ItemGroup>
     <!-- The C# compiler API (not Microsoft.CodeAnalysis.CSharp.Scripting, which needs assemblies on disk
          and so fails in the single-file binary: see docs/scripting-design.md). -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
   </ItemGroup>
 
   <ItemGroup>

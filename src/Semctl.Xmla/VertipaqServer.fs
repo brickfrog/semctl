@@ -121,7 +121,7 @@ let number (v: QueryValue) : int64 option =
     | QueryValue.Boolean b -> Some(if b then 1L else 0L)
     | _ -> None
 
-let private string (v: QueryValue) =
+let private textOf (v: QueryValue) =
     match v with
     | QueryValue.String s -> Some s
     | QueryValue.Blank -> None
@@ -188,7 +188,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
     match rows run "row counts" tablesQuery with
     | Some rs ->
         for r in rs do
-            match string (cell r 0), string (cell r 1), number (cell r 2) with
+            match textOf (cell r 0), textOf (cell r 1), number (cell r 2) with
             | Some t, Some id, Some n when (findTable t).IsSome ->
                 tableRows.[t] <- n
                 idOf id |> Option.iter (fun i -> tableIds.[i] <- (findTable t).Value.Name)
@@ -207,7 +207,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
         match rows run "row counts from DAX" q with
         | Some rs ->
             for r in rs do
-                match string (cell r 0), number (cell r 1) with
+                match textOf (cell r 0), number (cell r 1) with
                 | Some t, Some n when t.Length > 4 -> daxRows.[t.Substring 4] <- n
                 | Some t, None when t.Length > 4 -> daxRows.[t.Substring 4] <- 0L
                 | _ -> ()
@@ -234,7 +234,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
         match rows run "dictionary sizes" columnsQuery with
         | Some rs ->
             for r in rs do
-                match string (cell r 0), string (cell r 1), string (cell r 2) with
+                match textOf (cell r 0), textOf (cell r 1), textOf (cell r 2) with
                 | Some t, Some id, Some c ->
                     columnId.[key t c] <- id
                     columnByDmv.[key t id] <- c
@@ -260,7 +260,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
     match rows run "cardinalities" cardinalityQuery with
     | Some rs ->
         for r in rs do
-            match string (cell r 0), string (cell r 1), number (cell r 2) with
+            match textOf (cell r 0), textOf (cell r 1), number (cell r 2) with
             | Some t, Some id, Some n ->
                 byDmv t (afterLastDollar id)
                 |> Option.iter (fun c -> dmvCardinality.[key t c] <- n)
@@ -284,7 +284,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
         match rows run "cardinalities from DAX" q with
         | Some rs ->
             for r in rs do
-                match string (cell r 0), string (cell r 1), number (cell r 2) with
+                match textOf (cell r 0), textOf (cell r 1), number (cell r 2) with
                 | Some t, Some c, n when t.Length > 4 && c.Length > 4 ->
                     daxCardinality.[key (t.Substring 4) (c.Substring 4)] <- defaultArg n 0L
                 | _ -> ()
@@ -298,7 +298,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
         match rows run "data sizes" segmentsQuery with
         | Some rs ->
             for r in rs do
-                match string (cell r 0), string (cell r 1), string (cell r 2) with
+                match textOf (cell r 0), textOf (cell r 1), textOf (cell r 2) with
                 | Some t, Some p, Some id ->
                     match byDmv t id with
                     | Some c ->
@@ -331,7 +331,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
         match rows run "hierarchy sizes" hierarchiesQuery with
         | Some rs ->
             for r in rs do
-                match string (cell r 0), number (cell r 1), string (cell r 2) with
+                match textOf (cell r 0), number (cell r 1), textOf (cell r 2) with
                 | Some t, Some n, Some id ->
                     match byDmv t (afterLastDollar id) with
                     | Some c ->
@@ -438,7 +438,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
     match rows run "user hierarchy names" userHierarchyNamesQuery with
     | Some rs ->
         for r in rs do
-            match number (cell r 0), string (cell r 1) with
+            match number (cell r 0), textOf (cell r 1) with
             | Some id, Some n -> hierarchyNames.[id] <- n
             | _ -> ()
     | None -> ()
@@ -449,7 +449,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
         match rows run "user hierarchy sizes" userHierarchiesQuery with
         | Some rs ->
             for r in rs do
-                match string (cell r 0), number (cell r 1), string (cell r 2) with
+                match textOf (cell r 0), number (cell r 1), textOf (cell r 2) with
                 | Some t, Some n, Some id ->
                     let short = afterLastDollar id
 
@@ -497,7 +497,7 @@ let collect (query: string -> Result<QueryResult list, SemctlError>) (address: s
         match rows run "relationship sizes" relationshipSizesQuery with
         | Some rs ->
             for r in rs do
-                match string (cell r 0), string (cell r 1), number (cell r 2) with
+                match textOf (cell r 0), textOf (cell r 1), number (cell r 2) with
                 | Some t, Some id, Some n ->
                     match tableIdOf t, idOf id with
                     | Some tid, Some rid -> relSizes.[(tid, rid)] <- n

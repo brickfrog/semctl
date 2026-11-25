@@ -29,8 +29,12 @@ open System.IO
 open System.Runtime.InteropServices
 open System.Text.Json
 open System.Text.Json.Nodes
+open System.Text.RegularExpressions
 open Semctl
 open Semctl.Prelude
+
+let private secretKeyPair =
+    Regex(@"([A-Za-z_ ]+)\s*=", RegexOptions.Compiled, TimeSpan.FromSeconds 1.0)
 
 // ---------------------------------------------------------------------------------------------
 // Profiles
@@ -239,7 +243,7 @@ let check (p: Profile) : Result<Profile, SemctlError> =
     ]
 
     let hasSecret (v: string) =
-        Text.RegularExpressions.Regex.Matches(v, @"([A-Za-z_ ]+)\s*=")
+        secretKeyPair.Matches v
         |> Seq.exists (fun m ->
             let key = m.Groups.[1].Value.Trim().Replace(" ", "").ToLowerInvariant()
             secretKeys |> List.exists (fun k -> key.EndsWith k))

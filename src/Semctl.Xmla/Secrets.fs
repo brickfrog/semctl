@@ -7,17 +7,26 @@ open System.Text.RegularExpressions
 
 let masked = "***"
 
-let private options = RegexOptions.IgnoreCase ||| RegexOptions.CultureInvariant
+let private options =
+    RegexOptions.IgnoreCase
+    ||| RegexOptions.CultureInvariant
+    ||| RegexOptions.Compiled
+
+let private timeout = TimeSpan.FromSeconds 1.0
 
 /// password=...; in a connection string (quoted or not).
 let private passwordPair =
-    Regex("""\b(password|pwd)\s*=\s*("(?:[^"]|"")*"|'(?:[^']|'')*'|[^;\s]*)""", options)
+    Regex("""\b(password|pwd)\s*=\s*("(?:[^"]|"")*"|'(?:[^']|'')*'|[^;\s]*)""", options, timeout)
 
 /// A JSON Web Token: three base64url parts, the first starting with a JSON object's `{"`.
 let private jwt =
-    Regex("""\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*""", RegexOptions.CultureInvariant)
+    Regex(
+        """\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*""",
+        RegexOptions.CultureInvariant ||| RegexOptions.Compiled,
+        timeout
+    )
 
-let private bearer = Regex("""\b(Bearer)\s+[A-Za-z0-9._~+/=-]+""", options)
+let private bearer = Regex("""\b(Bearer)\s+[A-Za-z0-9._~+/=-]+""", options, timeout)
 
 /// Remove the given secrets, and anything that looks like one (a password in a connection string, a
 /// bearer token, a JWT), from a text.

@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Argu" Version="6.2.5" />
+    <PackageVersion Include="Dax.ViewModel" Version="1.12.1" />
+    <PackageVersion Include="Dax.Vpax" Version="1.12.1" />
+    <PackageVersion Include="Dax.Vpax.Obfuscator" Version="1.2.1" />
+    <PackageVersion Include="Expecto" Version="11.1.1" />
+    <PackageVersion Include="Expecto.FsCheck" Version="11.1.1" />
+    <PackageVersion Include="Microsoft.AnalysisServices" Version="19.118.3" />
+    <PackageVersion Include="Microsoft.AnalysisServices.AdomdClient" Version="19.118.3" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.Data.SqlClient" Version="7.1.2" />
+    <PackageVersion Include="Microsoft.Data.SqlClient.SNI.runtime" Version="7.1.2" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageVersion Include="System.Linq.Dynamic.Core" Version="1.7.4" />
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+    <PackageVersion Include="YoloDev.Expecto.TestSdk" Version="0.16.1" />
+  </ItemGroup>
+</Project>

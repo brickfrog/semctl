@@ -113,16 +113,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AnalysisServices" Version="19.118.3" />
+    <PackageReference Include="Microsoft.AnalysisServices" />
     <!-- Apache-2.0. Evaluates BPA rule expressions (Dynamic LINQ, as Tabular Editor uses). -->
-    <PackageReference Include="System.Linq.Dynamic.Core" Version="1.7.4" />
+    <PackageReference Include="System.Linq.Dynamic.Core" />
     <!-- MIT. Reads `sm test` suites (YAML); it makes no network calls. -->
-    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <PackageReference Include="YamlDotNet" />
     <!-- MIT (SQLBI). Reads and writes VertiPaq Analyzer files (.vpax) for `sm vertipaq`; brings Dax.Metadata,
          Dax.ViewVpaExport, Newtonsoft.Json (MIT) and System.IO.Packaging (MIT). No network calls. -->
-    <PackageReference Include="Dax.Vpax" Version="1.12.1" />
+    <PackageReference Include="Dax.Vpax" />
     <!-- MIT (SQLBI). `vertipaq` export with obfuscate; brings Antlr4.Runtime.Standard (BSD-3-Clause). -->
-    <PackageReference Include="Dax.Vpax.Obfuscator" Version="1.2.1" />
+    <PackageReference Include="Dax.Vpax.Obfuscator" />
   </ItemGroup>
 
 </Project>

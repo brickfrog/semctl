@@ -146,12 +146,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Expecto" Version="11.1.1" />
+    <PackageReference Include="Expecto" />
     <!-- MIT (SQLBI). The view model DAX Studio's VertiPaq Analyzer builds from a .vpax: tests open exported files with it. -->
-    <PackageReference Include="Dax.ViewModel" Version="1.12.1" />
-    <PackageReference Include="Expecto.FsCheck" Version="11.1.1" />
-    <PackageReference Include="YoloDev.Expecto.TestSdk" Version="0.16.1" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="Dax.ViewModel" />
+    <PackageReference Include="Expecto.FsCheck" />
+    <PackageReference Include="YoloDev.Expecto.TestSdk" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
   </ItemGroup>
 
   <ItemGroup>

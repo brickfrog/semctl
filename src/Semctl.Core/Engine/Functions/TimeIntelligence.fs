@@ -303,6 +303,12 @@ module TimeIntelligence =
     /// where the day can't be a month ("6/30": the documented form; a day-first locale can't read
     /// it as day 6 of month 30, and "if conversion using the locale and date/time settings of the
     /// model fails, DATEVALUE will attempt to use other date formats": Microsoft Learn, DATEVALUE).
+    let private isoYearEndRegex =
+        Regex(@"^\s*\d{4}-(\d{1,2})-(\d{1,2})\s*$", RegexOptions.Compiled, TimeSpan.FromSeconds 1.0)
+
+    let private twoPartYearEndRegex =
+        Regex(@"^\s*(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*$", RegexOptions.Compiled, TimeSpan.FromSeconds 1.0)
+
     let private yearEnd (ctx: Ctx) (arg: Expr option) : Period =
         match arg with
         | None -> calendarYear
@@ -313,8 +319,8 @@ module TimeIntelligence =
                 | StringLiteral s -> s
                 | _ -> Fail.notSupported ctx e.Span "a year end date that is not a text literal"
 
-            let iso = Regex.Match(text, @"^\s*\d{4}-(\d{1,2})-(\d{1,2})\s*$")
-            let two = Regex.Match(text, @"^\s*(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*$")
+            let iso = isoYearEndRegex.Match text
+            let two = twoPartYearEndRegex.Match text
 
             let month, day =
                 if iso.Success then

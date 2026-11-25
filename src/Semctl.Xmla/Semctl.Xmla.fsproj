@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>Semctl.Xmla</RootNamespace>
     <Description>Connected mode for semctl: talk to an Analysis Services / Power BI XMLA endpoint. The only assembly that opens connections.</Description>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,9 +28,9 @@
 
   <ItemGroup>
     <!-- DAX queries. Same version as Microsoft.AnalysisServices (TOM/AMO) in Semctl.Core. -->
-    <PackageReference Include="Microsoft.AnalysisServices.AdomdClient" Version="19.118.3" />
+    <PackageReference Include="Microsoft.AnalysisServices.AdomdClient" />
     <!-- MIT. schemacheck's SQL source (SchemaCheckLiveSql.fs). -->
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.2" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
   </ItemGroup>
 
   <ItemGroup>

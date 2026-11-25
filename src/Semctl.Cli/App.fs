@@ -1,7 +1,9 @@
 /// The CLI entry point, kept separate from Program.main so tests can drive it with captured writers.
 module Semctl.Cli.App
 
+open System
 open System.IO
+open System.Text.RegularExpressions
 open Argu
 open Semctl
 open Semctl.Cli.Args
@@ -10,12 +12,14 @@ open Semctl.Cli.Output
 
 let private parser = lazy (ArgumentParser.Create<CliArgs>(programName = "sm"))
 
+let private unrecognizedArg =
+    Regex("unrecognized argument: '(.*?)'", RegexOptions.Compiled, TimeSpan.FromSeconds 1.0)
+
 /// For Argu's "unrecognized argument: 'x'": the subcommands (or, for `-x`, the options) of the
 /// command it was given to that are close to x. The command is found by following the
 /// subcommands named before x on the command line.
 let private argumentSuggestions (argv: string array) (message: string) =
-    let m =
-        System.Text.RegularExpressions.Regex.Match(message, "unrecognized argument: '(.*?)'")
+    let m = unrecognizedArg.Match message
 
     if not m.Success then
         []

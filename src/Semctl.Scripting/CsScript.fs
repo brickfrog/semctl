@@ -24,7 +24,12 @@ exception ScriptError of string
 /// Set for the duration of one run (runs are serialized).
 [<AbstractClass; Sealed>]
 type Host private () =
-    static member val Model: Model = null with get, set
+    static let mutable currentModel: Model | null = null
+
+    static member Model
+        with get (): Model | null = currentModel
+        and set (value: Model | null) = currentModel <- value
+
     static member val Out: TextWriter = TextWriter.Null with get, set
     static member Info(message: string) = Host.Out.WriteLine("info: " + message)
 
@@ -339,7 +344,7 @@ let run (model: Model) (path: string) (out: TextWriter) : Result<unit, SemctlErr
                         Console.SetOut out
 
                         try
-                            let args: obj array =
+                            let args: (obj | null) array =
                                 if entry.GetParameters().Length = 0 then
                                     [||]
                                 else

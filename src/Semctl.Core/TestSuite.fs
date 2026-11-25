@@ -385,6 +385,16 @@ module TestSuite =
             )
         | _ -> raise (Problem(line, column, "this kind of YAML node is not supported"))
 
+    let private yamlPrefix =
+        Regex(
+            @"^\(Line: \d+, Col: \d+, Idx: \d+\) - \(Line: \d+, Col: \d+, Idx: \d+\): ",
+            RegexOptions.Compiled,
+            TimeSpan.FromSeconds 1.0
+        )
+
+    let private jsonPosition =
+        Regex(@"\s*LineNumber: \d+ \| BytePositionInLine: \d+\.?$", RegexOptions.Compiled, TimeSpan.FromSeconds 1.0)
+
     let private readYaml (text: string) : Node =
         let stream = YamlStream()
 
@@ -394,12 +404,7 @@ module TestSuite =
             // "(Line: 3, Col: 5, Idx: 20) - (Line: ...): message": the position is given apart.
             let message =
                 match e.InnerException with
-                | null ->
-                    Regex.Replace(
-                        e.Message,
-                        @"^\(Line: \d+, Col: \d+, Idx: \d+\) - \(Line: \d+, Col: \d+, Idx: \d+\): ",
-                        ""
-                    )
+                | null -> yamlPrefix.Replace(e.Message, "")
                 | inner -> inner.Message
 
             raise (Problem(int e.Start.Line, int e.Start.Column, $"not valid YAML: {message}"))
@@ -532,8 +537,7 @@ module TestSuite =
                     1
 
             // "... LineNumber: 3 | BytePositionInLine: 7." repeats the position.
-            let message =
-                Regex.Replace(e.Message, @"\s*LineNumber: \d+ \| BytePositionInLine: \d+\.?$", "")
+            let message = jsonPosition.Replace(e.Message, "")
 
             raise (Problem(line, column, $"not valid JSON: {message}"))
 

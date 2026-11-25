@@ -9,17 +9,18 @@ open Semctl
 /// The messages of an exception and its causes, outermost first: one line each, without repeats,
 /// and without the "Technical Details" (activity IDs, timestamps) the service appends.
 let messages (e: exn) : string list =
-    let rec chain (e: exn) =
-        if isNull e then
-            []
-        else
-            match e with
-            | :? AggregateException as a when a.InnerExceptions.Count > 0 ->
-                a.InnerExceptions |> Seq.collect chain |> List.ofSeq
-            | _ -> e.Message :: chain e.InnerException
+    let rec chain (e: exn | null) =
+        match e with
+        | null -> []
+        | :? AggregateException as a when a.InnerExceptions.Count > 0 ->
+            a.InnerExceptions |> Seq.collect (fun inner -> chain inner) |> List.ofSeq
+        | e -> e.Message :: chain e.InnerException
 
-    let tidy (m: string) =
-        let m = if isNull m then "" else m
+    let tidy (m: string | null) =
+        let m =
+            match m with
+            | null -> ""
+            | s -> s
 
         let cut =
             match m.IndexOf("Technical Details", StringComparison.OrdinalIgnoreCase) with
@@ -43,7 +44,8 @@ let messages (e: exn) : string list =
 let private has (text: string) (part: string) =
     text.Contains(part, StringComparison.OrdinalIgnoreCase)
 
-let private aadsts = Regex(@"AADSTS(\d+)", RegexOptions.CultureInvariant)
+let private aadsts =
+    Regex(@"AADSTS(\d+)", RegexOptions.CultureInvariant ||| RegexOptions.Compiled, TimeSpan.FromSeconds 1.0)
 
 let private aadHint (code: string) =
     match code with
@@ -87,9 +89,11 @@ let classify (address: XmlaAddress) (secrets: string list) (e: exn) : SemctlErro
     let reason = if text = "" then e.GetType().Name else text
     let has = has text
 
-    let rec notSupported (e: exn) =
-        not (isNull e)
-        && ((e :? NotSupportedException) || notSupported e.InnerException)
+    let rec notSupported (e: exn | null) =
+        match e with
+        | null -> false
+        | :? NotSupportedException -> true
+        | e -> notSupported e.InnerException
 
     let status (code: string) (name: string) = has $"({code})" || has name
 
@@ -102,68 +106,68 @@ let classify (address: XmlaAddress) (secrets: string list) (e: exn) : SemctlErro
                 reason
                 + " (on this system an HTTP server needs a user name and password: SM_XMLA_USER and SM_XMLA_PASSWORD)"
             )
-    elif aadsts.IsMatch text then
-        AuthenticationFailed(server, reason, aadHint (aadsts.Match text).Groups.[1].Value)
-    elif has "Unable to obtain authentication token" || has "authentication failed" then
-        AuthenticationFailed(server, reason, None)
-    elif has "access-token is required" || has "access token is required" then
-        AuthenticationRequired(server, "the client library needs a token or a service principal for this server")
-    elif has "Resolving the PBI workspace" && status "403" "Forbidden" then
-        ConnectionFailed(
-            server,
-            reason,
-            Some(
-                "Power BI refused access to the workspace. Check the workspace name; that the identity is a "
-                + "Contributor, Member or Admin of it; and, for a service principal, that the tenant setting "
-                + "\"Service principals can use Fabric APIs\" allows it."
-            )
-        )
-    elif has "Resolving the PBI workspace" && status "404" "Not Found" then
-        ConnectionFailed(server, reason, Some "No such workspace: check its name (and the tenant in the URL).")
-    elif
-        has "XMLA"
-        && (has "read/write"
-            || has "readwrite"
-            || has "read-only"
-            || has "readonly"
-            || has "read only")
-    then
-        ConnectionFailed(
-            server,
-            reason,
-            Some
-                "The capacity's XMLA endpoint is read-only or off: an admin sets \"XMLA Endpoint\" to \"Read Write\" in the capacity settings (Power BI workloads)."
-        )
-    elif
-        (has "Premium" || has "dedicated capacity" || has "capacity")
-        && (has "workspace" || has "XMLA")
-    then
-        ConnectionFailed(
-            server,
-            reason,
-            Some
-                "XMLA endpoints need the workspace to be on a Premium, Premium Per User, Embedded or Fabric capacity, with the XMLA endpoint enabled."
-        )
-    elif status "401" "Unauthorized" then
-        AuthenticationFailed(
-            server,
-            reason,
-            Some
-                "The server refused the credentials. For a token: is it still valid, and issued for this server's resource (Power BI: https://analysis.windows.net/powerbi/api)?"
-        )
-    elif status "403" "Forbidden" then
-        ConnectionFailed(server, reason, Some "The identity is known but not allowed to do this on the server.")
-    elif address.Endpoint = XmlaEndpoint.AzureAS && has "is not found" then
-        ConnectionFailed(server, reason, Some "No such Azure Analysis Services server: check the region and name.")
-    elif
-        has "No such host"
-        || has "Name or service not known"
-        || has "nodename nor servname"
-        || has "Connection refused"
-        || has "actively refused"
-        || has "timed out"
-        || has "A connection cannot be made"
-    then
-        ConnectionFailed(server, reason, Some "Check the server address and that it can be reached from here.")
     else
-        ConnectionFailed(server, reason, None)
+        match aadsts.Match text with
+        | m when m.Success -> AuthenticationFailed(server, reason, aadHint m.Groups.[1].Value)
+        | _ when has "Unable to obtain authentication token" || has "authentication failed" ->
+            AuthenticationFailed(server, reason, None)
+        | _ when has "access-token is required" || has "access token is required" ->
+            AuthenticationRequired(server, "the client library needs a token or a service principal for this server")
+        | _ when has "Resolving the PBI workspace" && status "403" "Forbidden" ->
+            ConnectionFailed(
+                server,
+                reason,
+                Some(
+                    "Power BI refused access to the workspace. Check the workspace name; that the identity is a "
+                    + "Contributor, Member or Admin of it; and, for a service principal, that the tenant setting "
+                    + "\"Service principals can use Fabric APIs\" allows it."
+                )
+            )
+        | _ when has "Resolving the PBI workspace" && status "404" "Not Found" ->
+            ConnectionFailed(server, reason, Some "No such workspace: check its name (and the tenant in the URL).")
+        | _ when
+            has "XMLA"
+            && (has "read/write"
+                || has "readwrite"
+                || has "read-only"
+                || has "readonly"
+                || has "read only")
+            ->
+            ConnectionFailed(
+                server,
+                reason,
+                Some
+                    "The capacity's XMLA endpoint is read-only or off: an admin sets \"XMLA Endpoint\" to \"Read Write\" in the capacity settings (Power BI workloads)."
+            )
+        | _ when
+            (has "Premium" || has "dedicated capacity" || has "capacity")
+            && (has "workspace" || has "XMLA")
+            ->
+            ConnectionFailed(
+                server,
+                reason,
+                Some
+                    "XMLA endpoints need the workspace to be on a Premium, Premium Per User, Embedded or Fabric capacity, with the XMLA endpoint enabled."
+            )
+        | _ when status "401" "Unauthorized" ->
+            AuthenticationFailed(
+                server,
+                reason,
+                Some
+                    "The server refused the credentials. For a token: is it still valid, and issued for this server's resource (Power BI: https://analysis.windows.net/powerbi/api)?"
+            )
+        | _ when status "403" "Forbidden" ->
+            ConnectionFailed(server, reason, Some "The identity is known but not allowed to do this on the server.")
+        | _ when address.Endpoint = XmlaEndpoint.AzureAS && has "is not found" ->
+            ConnectionFailed(server, reason, Some "No such Azure Analysis Services server: check the region and name.")
+        | _ when
+            has "No such host"
+            || has "Name or service not known"
+            || has "nodename nor servname"
+            || has "Connection refused"
+            || has "actively refused"
+            || has "timed out"
+            || has "A connection cannot be made"
+            ->
+            ConnectionFailed(server, reason, Some "Check the server address and that it can be reached from here.")
+        | _ -> ConnectionFailed(server, reason, None)

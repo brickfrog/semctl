@@ -571,13 +571,20 @@ let private kindOf (value: Value) =
     | Roles
     | Perspectives -> "dyn"
 
+let private sentenceEnd =
+    RegularExpressions.Regex(
+        @"(?<!\be\.g|\bi\.e)\. ",
+        RegularExpressions.RegexOptions.Compiled,
+        TimeSpan.FromSeconds 1.0
+    )
+
 /// The first sentence of a help text, on one line.
 let private brief (help: string) =
     let oneLine = help.Replace("\r", " ").Replace("\n", " ").Trim()
 
     // Not at "e.g. " or "i.e. ".
     let sentence =
-        match RegularExpressions.Regex.Match(oneLine, @"(?<!\be\.g|\bi\.e)\. ") with
+        match sentenceEnd.Match oneLine with
         | m when m.Success -> oneLine.Substring(0, m.Index)
         | _ -> oneLine
 
