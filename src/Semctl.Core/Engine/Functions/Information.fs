@@ -93,13 +93,13 @@ module Information =
         // (dax.guide/contains). The columns are named as model columns of the table.
         Fn.scalar "CONTAINS" "Information" (3, -1) (Fn.typeIs DaxType.Boolean) (fun ev ctx call ->
             let table = ev.Table(ctx, call.Args.[0])
-            let pairs = call.Args.Tail |> List.chunkBySize 2
+            let pairs = Array.chunkBySize 2 call.Args.[1..]
 
             let tests =
                 pairs
-                |> List.map (fun pair ->
+                |> Array.map (fun pair ->
                     match pair with
-                    | [ column; value ] ->
+                    | [| column; value |] ->
                         let c = ev.Column(ctx, column)
 
                         let index =
@@ -119,7 +119,7 @@ module Information =
                 seq { 0 .. table.Count - 1 }
                 |> Seq.exists (fun row ->
                     tests
-                    |> List.forall (fun (data, value) ->
+                    |> Array.forall (fun (data, value) ->
                         Fail.dax ctx call.Span (DaxValue.strictEquals ctx.Model.Collation value data.[row])))
 
             DaxValue.Boolean found)
@@ -164,21 +164,7 @@ module Information =
                 | true, t -> Some t
                 | _ -> None
 
-            let measureNamed (name: string) =
-                let fromQuery =
-                    if isNull ctx.Query || not ctx.Scope.InQuery then
-                        None
-                    else
-                        match ctx.Query.Measures.TryGetValue name with
-                        | true, m -> Some m
-                        | _ -> None
-
-                match fromQuery with
-                | Some m -> Some m
-                | None ->
-                    match ctx.Model.Measures.TryGetValue name with
-                    | true, m -> Some m
-                    | _ -> None
+            let measureNamed = Context.tryMeasure ctx
 
             // (parent table, own name): a table has no parent; `child` says whether the own name
             // is a column's or a measure's.

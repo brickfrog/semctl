@@ -334,7 +334,7 @@ module Security =
                 args
                 |> List.iteri (fun i a ->
                     let p =
-                        if scalarFunctions.Contains upper then
+                        if scalarFunctions.Contains name.Name then
                             pos
                         else
                             match upper with

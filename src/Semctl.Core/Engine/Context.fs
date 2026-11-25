@@ -159,11 +159,14 @@ module Filters =
         // because something it needs is), so the transition needs it.
         let innermost =
             if table.Model.Computing.Count > 0 then
-                table.Model.Computing.Peek()
+                ValueSome(table.Model.Computing.Peek())
             else
-                null
+                ValueNone
 
-        let own (c: BColumn) = obj.ReferenceEquals(c, innermost)
+        let own (c: BColumn) =
+            match innermost with
+            | ValueSome(ComputingItem.Column current) -> obj.ReferenceEquals(c, current)
+            | _ -> false
 
         match key with
         | Some _ when not (computing |> Array.exists _.ChangesRelationships) -> plain ()
@@ -262,8 +265,7 @@ module Filters =
 
             [ for (c, map) in cols -> OnColumn(c, RowSet.One(c.IdCount, c.IdAt map.[row])) ]
         else
-            let tuples =
-                HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+            let tuples = HashSet<int array>(IntArrayComparer.Instance)
 
             for row in rows.Rows do
                 tuples.Add(cols |> Array.map (fun (c, map) -> c.IdAt map.[row])) |> ignore
@@ -312,8 +314,7 @@ module Filters =
                 if keep.Length = 0 then
                     []
                 else
-                    let projected =
-                        HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+                    let projected = HashSet<int array>(IntArrayComparer.Instance)
 
                     for t in tuples do
                         projected.Add(keep |> Array.map (fun i -> t.[i])) |> ignore
@@ -449,11 +450,14 @@ module Filters =
         marked
 
     /// The columns a filter is on, as a test.
-    let private covers (f: Filter) : BColumn -> bool =
+    let covers (f: Filter) (x: BColumn) : bool =
         match f with
-        | OnColumn(c, _) -> fun x -> obj.ReferenceEquals(x, c)
-        | Tuples(cols, _) -> fun x -> Array.exists (fun c -> obj.ReferenceEquals(x, c)) cols
-        | Rows(table, _, cfg) -> fun x -> cfg.IsExpanded(table, x.Table)
+        | OnColumn(c, _) -> obj.ReferenceEquals(x, c)
+        | Tuples(cols, _) -> Array.exists (fun c -> obj.ReferenceEquals(x, c)) cols
+        | Rows(table, _, cfg) -> cfg.IsExpanded(table, x.Table)
+
+    let private coveredBy (filters: Filter list) (x: BColumn) : bool =
+        filters |> List.exists (fun f -> covers f x)
 
     /// What `covers` depends on, as a key: the column, the columns, or the table and relationships.
     let private coverKey (filters: Filter list) : obj array = [|
@@ -483,8 +487,7 @@ module Filters =
     /// shared part of the result of `add` (every row of an iteration keeps the same ones), the
     /// same object for the same columns replaced.
     let keptBy (fc: FilterCtx) (filters: Filter list) : FilterCtx =
-        let tests = filters |> List.map covers
-        let drop (c: BColumn) = tests |> List.exists (fun t -> t c)
+        let drop (c: BColumn) = coveredBy filters c
         let model = fc.Config.Model
 
         if model.Computing.Count > 0 then
@@ -494,7 +497,7 @@ module Filters =
             let key = coverKey filters
 
             match fc.State.Bases.TryGetValue key with
-            | true, b -> b :?> FilterCtx
+            | true, b -> b
             | _ ->
                 let b = through (without drop) fc.Config 0 fc
 
@@ -518,8 +521,7 @@ module Filters =
                 if keep then
                     fc, fc.Scope
                 else
-                    let tests = filters |> List.map covers
-                    let drop (c: BColumn) = tests |> List.exists (fun t -> t c)
+                    let drop (c: BColumn) = coveredBy filters c
                     keptBy fc filters, Unfiltered drop :: fc.Scope
 
             let made = FilterCtx(kept.Filters @ added, fc.Config, scope)
@@ -581,10 +583,10 @@ module Filters =
                             RowSet.All t.Size
                         else
                             compute fc t via (RowSet.All t.Size)
-                    elif shared.Usable && incrementable fc t then
+                    elif shared.Usable && incrementableWith shared fc t then
                         // Its own rows are cheap from the base's (shared, cached): not worth a
                         // key and an entry of their own.
-                        fresh fc t via
+                        freshWith shared fc t via
                     elif shared.Usable then
                         let k = shared.Key(fc.Filters, t, via)
                         let mutable found = null
@@ -592,14 +594,14 @@ module Filters =
                         if shared.TryGet(k, &found) then
                             found
                         else
-                            let set = fresh fc t via
+                            let set = compute fc t via (RowSet.All t.Size)
 
                             if shared.Usable then
                                 shared.Add(k, set)
 
                             set
                     else
-                        fresh fc t via
+                        compute fc t via (RowSet.All t.Size)
                 finally
                     // A context asked again after an error must not see the table as in progress.
                     fc.InProgress.Remove key |> ignore
@@ -608,8 +610,8 @@ module Filters =
             set
 
     /// The rows worked out, not looked up: incrementally where that is exact, else in full.
-    and private fresh (fc: FilterCtx) (t: BTable) (via: BRel) : RowSet =
-        match incremental fc t via with
+    and private freshWith (shared: VisCache) (fc: FilterCtx) (t: BTable) (via: BRel) : RowSet =
+        match incrementalWith shared fc t via with
         | null -> compute fc t via (RowSet.All t.Size)
         | set -> set
 
@@ -617,9 +619,7 @@ module Filters =
     /// others allow: null where that isn't known to be exact, or it raised (see "Incremental
     /// filter contexts" in the author's guide).
     /// Whether the rows of `t` may be worked out incrementally (see `incremental`).
-    and private incrementable (fc: FilterCtx) (t: BTable) : bool =
-        let shared = VisCache.Of fc.Config
-
+    and private incrementableWith (shared: VisCache) (fc: FilterCtx) (t: BTable) : bool =
         not (isNull fc.Base)
         && IncrementalStats.Global.Enabled
         && t.Model.Incremental.Enabled
@@ -627,12 +627,11 @@ module Filters =
         && shared.Intersective t
         && shared.Safe(t, fc.Filters)
 
-    and private incremental (fc: FilterCtx) (t: BTable) (via: BRel) : RowSet =
+    and private incrementalWith (shared: VisCache) (fc: FilterCtx) (t: BTable) (via: BRel) : RowSet =
         let stats = t.Model.Incremental
         let all = IncrementalStats.Global
-        let shared = VisCache.Of fc.Config
 
-        if not (incrementable fc t) then
+        if not (incrementableWith shared fc t) then
             null
         else
             if isNull fc.Added then
@@ -670,7 +669,9 @@ module Filters =
                             rows
                     else
                         start
-                with _ ->
+                with
+                | EngineException _
+                | DaxRuntimeException _ ->
                     // The full computation raises what it raises.
                     Interlocked.Increment(&stats.Errors) |> ignore
                     Interlocked.Increment(&all.Errors) |> ignore
@@ -691,8 +692,9 @@ module Filters =
                     let full =
                         try
                             vis reference t via
-                        with _ ->
-                            null
+                        with
+                        | EngineException _
+                        | DaxRuntimeException _ -> null
 
                     Interlocked.Increment(&stats.Checked) |> ignore
                     Interlocked.Increment(&all.Checked) |> ignore
@@ -761,8 +763,7 @@ module Filters =
                                 if here.Length = cols.Length then
                                     tuples
                                 else
-                                    let p =
-                                        HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+                                    let p = HashSet<int array>(IntArrayComparer.Instance)
 
                                     for tuple in tuples do
                                         p.Add(here |> Array.map (fun i -> tuple.[i])) |> ignore
@@ -836,8 +837,7 @@ module Filters =
                             let fromX = top |> Array.map (fun y -> cfg.RowMap(x, y))
                             let fromT = top |> Array.map (fun y -> cfg.RowMap(t, y))
 
-                            let combos =
-                                HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+                            let combos = HashSet<int array>(IntArrayComparer.Instance)
 
                             for r in rows.Rows do
                                 combos.Add(fromX |> Array.map (fun m -> m.[r])) |> ignore
@@ -1017,8 +1017,7 @@ module Filters =
                     if here.Length = 0 then
                         []
                     else
-                        let p =
-                            HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+                        let p = HashSet<int array>(IntArrayComparer.Instance)
 
                         for tuple in tuples do
                             p.Add(here |> Array.map (fun i -> tuple.[i])) |> ignore
@@ -1119,8 +1118,7 @@ module Filters =
                     OnColumn(c, RowSet.OfSeq(c.IdCount, values |> Seq.map c.FindId |> Seq.filter (fun id -> id >= 0)))
                 ]
             else
-                let tuples =
-                    HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+                let tuples = HashSet<int array>(IntArrayComparer.Instance)
 
                 let data = cols |> Array.map t.Column
 
@@ -1190,12 +1188,8 @@ module DateTable =
             else
                 No
 
-    /// The columns a filter is on.
-    let private covers (f: Filter) : BColumn -> bool =
-        match f with
-        | OnColumn(c, _) -> fun x -> obj.ReferenceEquals(x, c)
-        | Tuples(cols, _) -> fun x -> Array.exists (fun c -> obj.ReferenceEquals(x, c)) cols
-        | Rows(table, _, cfg) -> fun x -> cfg.IsExpanded(table, x.Table)
+    /// The columns a filter is on: reuse `Filters.covers`.
+    let private covers (f: Filter) = Filters.covers f
 
     /// Whether the context filters a column of the table (or of a table it expands to) that
     /// `replaced` doesn't name: what an ALL over the table would remove beyond those.
@@ -1482,6 +1476,33 @@ module Context =
             rows <- rows.Tail
 
         result
+
+    /// Resolve a measure name in the query's DEFINE section first (when `ctx.Scope.InQuery`), then in the model.
+    let tryMeasure (ctx: Ctx) (name: string) : BMeasure option =
+        let fromQuery =
+            if ctx.Scope.InQuery && not (isNull ctx.Query) then
+                match ctx.Query.Measures.TryGetValue name with
+                | true, m -> Some m
+                | _ -> None
+            else
+                None
+
+        match fromQuery with
+        | Some _ -> fromQuery
+        | None ->
+            match ctx.Model.Measures.TryGetValue name with
+            | true, m -> Some m
+            | _ -> None
+
+    /// Resolve an expression naming a measure (`[M]` or `T[M]`) in `ctx`.
+    let tryMeasureExpr (ctx: Ctx) (e: Expr) : BMeasure option =
+        match (Fn.unparen e).Kind with
+        | Bracketed name -> tryMeasure ctx name
+        | Qualified(table, name) ->
+            match ctx.Model.TableByName.TryGetValue table.Name with
+            | true, t when not (t.ColumnByName.ContainsKey name) -> tryMeasure ctx name
+            | _ -> None
+        | _ -> None
 
 /// Row contexts that are not an iterator's, and the rows of SUMMARIZECOLUMNS, for ALLSELECTED: an
 /// iterator's table is a shadow filter context (`ScopeMark.Shadow`); a row context that no source

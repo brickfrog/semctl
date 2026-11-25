@@ -332,25 +332,18 @@ module Aggregation =
 
     /// The third argument of MINX and MAXX: TRUE or FALSE (FALSE when left out).
     let private variantArgument (ev: IEval) (ctx: Ctx) (call: Call) : bool =
-        match List.tryItem 2 call.Args with
-        | Some a when not (Fn.isOmitted a) ->
+        match Fn.tryArg 2 call.Args with
+        | Some a ->
             match ev.Scalar(ctx, a) with
             | DaxValue.Boolean b -> b
             | _ -> Fail.notSupported ctx a.Span "a third argument of MINX or MAXX that is not TRUE or FALSE"
-        | _ -> false
+        | None -> false
 
     let private order (ctx: Ctx) (e: Expr) : bool =
         // TRUE: descending.
-        match Fn.keyword e with
-        | Some "DESC" -> true
-        | Some "ASC" -> false
-        | _ ->
-            match (Fn.unparen e).Kind with
-            | IntegerLiteral(0L, _)
-            | BooleanLiteral false -> true
-            | IntegerLiteral(1L, _)
-            | BooleanLiteral true -> false
-            | _ -> Fail.notSupported ctx e.Span "an order that is not ASC, DESC, TRUE, FALSE, 1 or 0"
+        match Fn.parseSortOrder e with
+        | Some d -> d
+        | None -> Fail.notSupported ctx e.Span "an order that is not ASC, DESC, TRUE, FALSE, 1 or 0"
 
     let functions: DaxFunction list = [
         Fn.scalar "SUM" "Aggregation" (1, 1) (fun ev ctx args -> numericOf ev ctx args.[0]) sumColumn
@@ -510,13 +503,17 @@ module Aggregation =
             let table = ev.Table(ctx, call.Args.[0])
 
             let delimiter =
-                match List.tryItem 2 call.Args with
-                | Some d when not (Fn.isOmitted d) -> Convert.toText ctx d.Span (ev.Scalar(ctx, d))
-                | _ -> ""
+                match Fn.tryArg 2 call.Args with
+                | Some d -> Convert.toText ctx d.Span (ev.Scalar(ctx, d))
+                | None -> ""
 
             // Order-by expressions, each optionally followed by its order.
             let keys =
-                let rest = call.Args |> List.skip (min 3 call.Args.Length)
+                let rest =
+                    if call.Args.Length > 3 then
+                        List.ofArray call.Args.[3..]
+                    else
+                        []
 
                 let rec read (items: Expr list) =
                     match items with
@@ -587,10 +584,7 @@ module Aggregation =
         // "If expression or value evaluates to BLANK it is treated as a 0 (zero) for all expressions
         // that result in a number, or as an empty text"; order DESC and ties SKIP by default.
         Fn.scalar "RANKX" "Aggregation" (2, 5) (Fn.typeIs DaxType.Integer) (fun ev ctx call ->
-            let arg i =
-                match List.tryItem i call.Args with
-                | Some a when not (Fn.isOmitted a) -> Some a
-                | _ -> None
+            let arg i = Fn.tryArg i call.Args
 
             let table = ev.Table(ctx, call.Args.[0])
             let expr = call.Args.[1]

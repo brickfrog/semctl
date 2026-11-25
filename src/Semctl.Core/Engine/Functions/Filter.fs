@@ -29,8 +29,7 @@ module Filter =
             let ids = Filters.idsIn c (RowSet.OfSeq(size, rows)) true
             Tables.ofColumns infos [| ids |> Array.map c.ValueOfId |] ids.Length
         else
-            let seen =
-                HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+            let seen = HashSet<int array>(IntArrayComparer.Instance)
 
             let keep = ResizeArray<int array>()
 
@@ -55,13 +54,11 @@ module Filter =
     /// blank row" (SQLBI, "Blank row in DAX").
     let private allTable (name: string) (blankRow: bool) (ev: IEval) (ctx: Ctx) (call: Call) : TableVal =
         match call.Args with
-        | [] ->
+        | [||] ->
             Fail.invalid ctx call.Span $"{name} () with no argument can only be used as a filter argument of CALCULATE"
-        | [ single ] when (ev.TryModelTable(ctx, single)).IsSome ->
-            let t = (ev.TryModelTable(ctx, single)).Value
-            Tables.ofBase ctx.Filter.Config t (allRows t blankRow)
+        | [| ModelTable ev ctx t |] -> Tables.ofBase ctx.Filter.Config t (allRows t blankRow)
         | args ->
-            let cols = args |> List.map (fun a -> ev.Column(ctx, a)) |> Array.ofList
+            let cols = args |> Array.map (fun a -> ev.Column(ctx, a))
             let t = sameTable ctx call.Span name cols
             combinations cols (allRows t blankRow)
 
@@ -88,12 +85,15 @@ module Filter =
             fun (c: BColumn) -> config.IsExpanded(t, c.Table)
 
         match name, call.Args with
-        | ("ALL" | "REMOVEFILTERS"), [] -> fun _ -> true
-        | "ALLEXCEPT", table :: kept ->
+        | ("ALL" | "REMOVEFILTERS"), [||] -> fun _ -> true
+        | "ALLEXCEPT", args when args.Length >= 1 ->
+            let table = args.[0]
+            let kept = args.[1..]
+
             let t =
-                match ev.TryModelTable(ctx, table) with
-                | Some t -> t
-                | None -> Fail.invalid ctx table.Span "the first argument of ALLEXCEPT is a table"
+                match table with
+                | ModelTable ev ctx t -> t
+                | _ -> Fail.invalid ctx table.Span "the first argument of ALLEXCEPT is a table"
 
             let inTable = expandedOf t
 
@@ -101,10 +101,10 @@ module Filter =
             // the expanded table (dax.guide/allexcept).
             let keeps =
                 kept
-                |> List.map (fun k ->
-                    match ev.TryModelTable(ctx, k) with
-                    | Some kt -> fun (c: BColumn) -> obj.ReferenceEquals(c.Table, kt)
-                    | None ->
+                |> Array.map (fun k ->
+                    match k with
+                    | ModelTable ev ctx kt -> fun (c: BColumn) -> obj.ReferenceEquals(c.Table, kt)
+                    | _ ->
                         let kc = ev.Column(ctx, k)
 
                         if not (inTable kc) then
@@ -115,12 +115,12 @@ module Filter =
 
                         fun (c: BColumn) -> obj.ReferenceEquals(c, kc))
 
-            fun c -> inTable c && not (keeps |> List.exists (fun k -> k c))
-        | "ALLCROSSFILTERED", [ table ] ->
+            fun c -> inTable c && not (keeps |> Array.exists (fun k -> k c))
+        | "ALLCROSSFILTERED", [| table |] ->
             let t =
-                match ev.TryModelTable(ctx, table) with
-                | Some t -> t
-                | None -> Fail.invalid ctx table.Span "the argument of ALLCROSSFILTERED is a table"
+                match table with
+                | ModelTable ev ctx t -> t
+                | _ -> Fail.invalid ctx table.Span "the argument of ALLCROSSFILTERED is a table"
 
             // It also removes the filters "on columns and tables that are cross-filtering the table
             // argument because of ... bidirectional cross-filters" (dax.guide/allcrossfiltered):
@@ -129,12 +129,12 @@ module Filter =
                 Fail.notSupported ctx call.Span "ALLCROSSFILTERED in a model with a relationship that filters both ways"
 
             expandedOf t
-        | _, [ single ] when (ev.TryModelTable(ctx, single)).IsSome ->
+        | _, [| ModelTable ev ctx t |] ->
             // "ALL ( Sales ) ... also removes filters from the derived columns of Sales, which
             // include Product[Color]" (SQLBI, "Filtering tables").
-            expandedOf (ev.TryModelTable(ctx, single)).Value
+            expandedOf t
         | _, args ->
-            let cols = args |> List.map (fun a -> ev.Column(ctx, a)) |> Array.ofList
+            let cols = args |> Array.map (fun a -> ev.Column(ctx, a))
             sameTable ctx call.Span name cols |> ignore
             fun c -> cols |> Array.exists (fun x -> obj.ReferenceEquals(x, c))
 
@@ -145,13 +145,13 @@ module Filter =
     /// as a kept argument, a kept column of a related table, and listing every column.
     let private allExceptTable (ev: IEval) (ctx: Ctx) (call: Call) : TableVal =
         let t =
-            match ev.TryModelTable(ctx, call.Args.Head) with
-            | Some t -> t
-            | None -> Fail.invalid ctx call.Args.Head.Span "the first argument of ALLEXCEPT is a table"
+            match call.Args.[0] with
+            | ModelTable ev ctx t -> t
+            | _ -> Fail.invalid ctx call.Args.[0].Span "the first argument of ALLEXCEPT is a table"
 
         let kept =
-            call.Args.Tail
-            |> List.map (fun k ->
+            call.Args.[1..]
+            |> Array.map (fun k ->
                 if (ev.TryModelTable(ctx, k)).IsSome then
                     Fail.notSupported ctx k.Span "ALLEXCEPT as a table with a table among the kept arguments"
 
@@ -175,7 +175,7 @@ module Filter =
 
         let rest =
             t.Columns
-            |> Array.filter (fun c -> not (kept |> List.exists (fun k -> obj.ReferenceEquals(k, c))))
+            |> Array.filter (fun c -> not (kept |> Array.exists (fun k -> obj.ReferenceEquals(k, c))))
 
         if rest.Length = 0 then
             Fail.notSupported ctx call.Span "ALLEXCEPT as a table that lists every column of the table"
@@ -259,16 +259,6 @@ module Filter =
                 call.Span
                 $"relationships that give more than one filter path between {tables} (the engine's priority rules are not implemented)"
         | None -> next
-
-    let private isCallTo (names: string list) (e: Expr) : Call option =
-        match (Fn.unparen e).Kind with
-        | Call(name, args) when names |> List.contains (name.Name.ToUpperInvariant()) ->
-            Some {
-                Name = name
-                Args = args
-                Span = e.Span
-            }
-        | _ -> None
 
     /// The model columns a predicate reads (measures are an error in one).
     let private predicateColumns (ev: IEval) (ctx: Ctx) (e: Expr) : BColumn list =
@@ -488,8 +478,9 @@ module Filter =
                         match
                             (try
                                 Some value.Value
-                             with _ ->
-                                 None)
+                             with
+                             | EngineException _
+                             | DaxRuntimeException _ -> None)
                         with
                         | Some(Value.Scalar v) -> Some v
                         | _ -> None
@@ -549,22 +540,21 @@ module Filter =
 
     let private targetsOf (ev: IEval) (ctx: Ctx) (call: Call) : Targets =
         match call.Args with
-        | [] -> Everything
-        | [ single ] when (ev.TryModelTable(ctx, single)).IsSome -> OfTable (ev.TryModelTable(ctx, single)).Value
+        | [||] -> Everything
+        | [| ModelTable ev ctx t |] -> OfTable t
         | args ->
             // "ALLSELECTED arguments must be a base table or base columns. You cannot use a table
             // expression or a column expression" (dax.guide/allselected).
             let cols =
                 args
-                |> List.map (fun a ->
-                    match ev.TryColumn(ctx, a) with
-                    | Some c -> c
-                    | None ->
+                |> Array.map (fun a ->
+                    match a with
+                    | ModelColumn ev ctx c -> c
+                    | _ ->
                         Fail.invalid
                             ctx
                             a.Span
                             "the arguments of ALLSELECTED are the name of a model table or columns of one model table, not an expression")
-                |> Array.ofList
 
             sameTable ctx call.Span "ALLSELECTED" cols |> ignore
             OfColumns cols
@@ -942,7 +932,7 @@ module Filter =
 
     /// CALCULATE's context: dax.guide/calculate, steps 1 to 5.
     let private calculateContext (ev: IEval) (ctx: Ctx) (call: Call) : Ctx =
-        let args = call.Args.Tail
+        let args = List.ofArray call.Args.[1..]
 
         if not (isNull ctx.Group) then
             Fail.invalid ctx call.Span "CALCULATE can't be used inside GROUPBY"
@@ -955,20 +945,19 @@ module Filter =
         let filters =
             args
             |> List.choose (fun a ->
-                if
-                    (isCallTo removers a).IsSome
-                    || (isCallTo relationshipModifiers a).IsSome
-                    || (isCallTo [ "ALLSELECTED" ] a).IsSome
-                then
-                    None
-                else
+                match a with
+                | CallTo removers _
+                | CallTo relationshipModifiers _
+                | CallTo [ "ALLSELECTED" ] _ -> None
+                | _ ->
                     let inner, keep =
-                        match isCallTo [ "KEEPFILTERS" ] a with
-                        | Some k -> k.Args.[0], true
-                        | None -> a, false
+                        match a with
+                        | CallTo [ "KEEPFILTERS" ] k -> k.Args.[0], true
+                        | _ -> a, false
 
-                    if (isCallTo [ "KEEPFILTERS" ] inner).IsSome then
-                        Fail.notSupported ctx inner.Span "KEEPFILTERS inside KEEPFILTERS"
+                    match inner with
+                    | CallTo [ "KEEPFILTERS" ] _ -> Fail.notSupported ctx inner.Span "KEEPFILTERS inside KEEPFILTERS"
+                    | _ -> ()
 
                     let filter =
                         if ev.IsTable(ctx, inner) then
@@ -982,11 +971,11 @@ module Filter =
         // remove. The transition doesn't change which relationships are in force.
         let config =
             args
-            |> List.choose (isCallTo relationshipModifiers)
+            |> List.choose ((|CallTo|_|) relationshipModifiers)
             |> List.fold (fun cfg m -> reconfigure ev ctx cfg m) ctx.Filter.Config
 
         let removals =
-            args |> List.choose (isCallTo removers) |> List.map (removal ev ctx config)
+            args |> List.choose ((|CallTo|_|) removers) |> List.map (removal ev ctx config)
 
         // 2 and 3. The row contexts become filters; none is left. The removals come next, so the
         // transition need not spell out what they remove (`Context.transitionDropping`).
@@ -1001,7 +990,7 @@ module Filter =
             fc <- Filters.remove fc drop
 
         // ALLSELECTED is not a table here: it restores filters (`allSelectedModifier`).
-        for m in args |> List.choose (isCallTo [ "ALLSELECTED" ]) do
+        for m in args |> List.choose ((|CallTo|_|) [ "ALLSELECTED" ]) do
             fc <- allSelectedModifier ev { moved with Filter = fc } m
 
         // A filter on the date column of a date table first removes the filters on that table
@@ -1021,7 +1010,7 @@ module Filter =
 
     let private checkCalculate (args: Expr list) : string option =
         let filters = args |> List.skip (min 1 args.Length)
-        let named (names: string list) (a: Expr) = (isCallTo names a).IsSome
+        let named (names: string list) (a: Expr) = ((|CallTo|_|) names a).IsSome
         let selected = filters |> List.filter (named [ "ALLSELECTED" ])
 
         let others = [
@@ -1037,9 +1026,9 @@ module Filter =
         let underKeep =
             filters
             |> List.exists (fun a ->
-                match isCallTo [ "KEEPFILTERS" ] a with
-                | Some k -> k.Args |> List.exists (named [ "ALLSELECTED" ])
-                | None -> false)
+                match a with
+                | CallTo [ "KEEPFILTERS" ] k -> k.Args |> Array.exists (named [ "ALLSELECTED" ])
+                | _ -> false)
 
         if underKeep then
             // KEEPFILTERS changes how a filter is added; ALLSELECTED here is no filter to add.
@@ -1212,7 +1201,7 @@ module Filter =
                 if ids.Length = 1 then
                     c.ValueOfId ids.[0]
                 else
-                    match List.tryItem 1 call.Args with
+                    match Array.tryItem 1 call.Args with
                     | Some alt -> ev.Scalar(ctx, alt)
                     | None -> DaxValue.Blank)
 
@@ -1220,9 +1209,10 @@ module Filter =
         // being filtered directly ... It does not check the columns of related tables"
         // (dax.guide/isfiltered).
         Fn.scalar "ISFILTERED" "Filter" (1, 1) (Fn.typeIs DaxType.Boolean) (fun ev ctx call ->
-            match ev.TryModelTable(ctx, call.Args.[0]) with
-            | Some t -> DaxValue.Boolean(t.Columns |> Array.exists (isFiltered ctx call.Span "ISFILTERED"))
-            | None -> DaxValue.Boolean(isFiltered ctx call.Span "ISFILTERED" (ev.Column(ctx, call.Args.[0]))))
+            match call.Args.[0] with
+            | ModelTable ev ctx t ->
+                DaxValue.Boolean(t.Columns |> Array.exists (isFiltered ctx call.Span "ISFILTERED"))
+            | _ -> DaxValue.Boolean(isFiltered ctx call.Span "ISFILTERED" (ev.Column(ctx, call.Args.[0]))))
 
         // "TRUE when any column of the table specified or of a related table is being filtered"
         // (dax.guide/iscrossfiltered). A filter that reaches the table makes it TRUE; a filter on a
@@ -1230,9 +1220,9 @@ module Filter =
         // case the definition leaves open.
         Fn.scalar "ISCROSSFILTERED" "Filter" (1, 1) (Fn.typeIs DaxType.Boolean) (fun ev ctx call ->
             let t =
-                match ev.TryModelTable(ctx, call.Args.[0]) with
-                | Some t -> t
-                | None -> (ev.Column(ctx, call.Args.[0])).Table
+                match call.Args.[0] with
+                | ModelTable ev ctx t -> t
+                | _ -> (ev.Column(ctx, call.Args.[0])).Table
 
             if anyRestored ctx.Filter then
                 Fail.notSupported
@@ -1327,7 +1317,7 @@ module Filter =
         // (dax.guide/treatas).
         Fn.table "TREATAS" "Filter" (2, -1) (fun ev ctx call ->
             let table = ev.Table(ctx, call.Args.[0])
-            let cols = call.Args.Tail |> List.map (fun a -> ev.Column(ctx, a)) |> Array.ofList
+            let cols = call.Args.[1..] |> Array.map (fun a -> ev.Column(ctx, a))
 
             if cols.Length <> table.Cols.Length then
                 Fail.invalid
@@ -1419,7 +1409,7 @@ module Filter =
         // result, or an error without one.
         Fn.scalar "LOOKUPVALUE" "Relationship" (3, -1) (Fn.typeOfArg 0) (fun ev ctx call ->
             let result = ev.Column(ctx, call.Args.[0])
-            let rest = call.Args.Tail
+            let rest = List.ofArray call.Args.[1..]
 
             let pairs, alternate =
                 let rec read (items: Expr list) (acc: (Expr * Expr) list) =
@@ -1486,7 +1476,7 @@ module Filter =
             let c = ev.Column(ctx, call.Args.[0])
 
             let n =
-                match List.tryItem 1 call.Args with
+                match Array.tryItem 1 call.Args with
                 | None -> 1
                 | Some a ->
                     match ev.Scalar(ctx, a) with

@@ -400,9 +400,9 @@ module Math =
         // Decimal data type": a Decimal.
         Fn.scalar "TRUNC" "Math" (1, 2) (Fn.typeIs DaxType.Decimal) (fun ev ctx call ->
             let digits =
-                match List.tryItem 1 call.Args with
-                | Some d when not (Fn.isOmitted d) -> argNotBlank ev ctx call 1
-                | _ -> DaxValue.Integer 0L
+                match Fn.tryArg 1 call.Args with
+                | Some _ -> argNotBlank ev ctx call 1
+                | None -> DaxValue.Integer 0L
 
             atDigits ctx call "TRUNC" Mode.Down (argNotBlank ev ctx call 0) digits)
 
@@ -531,8 +531,8 @@ module Math =
         Fn.scalar "ISO.CEILING" "Math" (1, 2) Fn.typeUnknown (fun ev ctx call ->
             let number = argNotBlank ev ctx call 0
 
-            match List.tryItem 1 call.Args with
-            | Some s when not (Fn.isOmitted s) ->
+            match Fn.tryArg 1 call.Args with
+            | Some s ->
                 let raw = ev.Scalar(ctx, s)
                 let significance = Coerce.numberNotBlank ctx s.Span "ISO.CEILING" raw
 
@@ -726,9 +726,9 @@ module Math =
             let x = floatArg ev ctx call 0
 
             let b =
-                match List.tryItem 1 call.Args with
-                | Some e when not (Fn.isOmitted e) -> floatArg ev ctx call 1
-                | _ -> 10.0
+                match Fn.tryArg 1 call.Args with
+                | Some _ -> floatArg ev ctx call 1
+                | None -> 10.0
 
             if x <= 0.0 then
                 Fail.notSupported ctx call.Span "LOG of a number that is not positive"

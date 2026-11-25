@@ -65,7 +65,7 @@ module NonBlank =
             let order = if last then Array.rev order else order
 
             let calculated: Expr = {
-                Kind = Call({ Name = "CALCULATE"; Span = expr.Span }, [ expr ])
+                Kind = ExprKind.Call({ Name = "CALCULATE"; Span = expr.Span }, [ expr ])
                 Span = expr.Span
             }
 

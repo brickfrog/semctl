@@ -153,13 +153,7 @@ module TableFunctions =
     /// See `Sorting.check`.
     let checkSortable (ctx: Ctx) (span: Span) (what: string) (values: DaxValue seq) = Sorting.check ctx span what values
 
-    let private descending (e: Expr) : bool option =
-        match Fn.keyword e, (Fn.unparen e).Kind with
-        | Some "DESC", _ -> Some true
-        | Some "ASC", _ -> Some false
-        | _, (IntegerLiteral(0L, _) | BooleanLiteral false) -> Some true
-        | _, (IntegerLiteral(1L, _) | BooleanLiteral true) -> Some false
-        | _ -> None
+    let private descending (e: Expr) : bool option = Fn.parseSortOrder e
 
     let private datatableType (ctx: Ctx) (e: Expr) : DaxType =
         match Fn.keyword e with
@@ -564,8 +558,7 @@ module TableFunctions =
                 let groups =
                     groupRows ctx.Model keys count
                     |> Array.map (fun (key, positions) ->
-                        let tuples =
-                            HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+                        let tuples = HashSet<int array>(IntArrayComparer.Instance)
 
                         for p in positions do
                             tuples.Add(cols |> Array.map (fun c -> idAt c (rowOf c.Table p))) |> ignore
@@ -651,10 +644,11 @@ module TableFunctions =
                 call.Span
                 "SUMMARIZECOLUMNS inside a row context (it is supported under a filter context: in a measure, or inside CALCULATE or CALCULATETABLE)"
 
-        let before = call.Args |> List.takeWhile (fun a -> not (isName a))
+        let args = List.ofArray call.Args
+        let before = args |> List.takeWhile (fun a -> not (isName a))
 
         let added =
-            pairs ctx call.Span "SUMMARIZECOLUMNS" (call.Args |> List.skip before.Length)
+            pairs ctx call.Span "SUMMARIZECOLUMNS" (args |> List.skip before.Length)
             |> List.map (fun (name, expr) ->
                 match callTo "IGNORE" expr with
                 | Some [ inner ] -> name, inner, true
@@ -933,7 +927,7 @@ module TableFunctions =
         // caller's (dax.guide/addcolumns).
         Fn.table "ADDCOLUMNS" "Table manipulation" (3, -1) (fun ev ctx call ->
             let table = ev.Table(ctx, call.Args.[0])
-            let added = pairs ctx call.Span "ADDCOLUMNS" call.Args.Tail
+            let added = pairs ctx call.Span "ADDCOLUMNS" (List.ofArray call.Args.[1..])
             checkNewNames ctx call.Span "ADDCOLUMNS" table.Cols (added |> List.map fst)
 
             let columns =
@@ -957,7 +951,7 @@ module TableFunctions =
                 | expr :: tail -> (None, expr) :: read tail
 
             let columns =
-                read call.Args.Tail
+                read (List.ofArray call.Args.[1..])
                 |> List.map (fun (name, expr) ->
                     let at = Context.pushRow ctx table 0
                     let t, values = extensionColumn ev ctx table expr
@@ -1020,7 +1014,7 @@ module TableFunctions =
 
         Fn.table "ROW" "Table manipulation" (2, -1) (fun ev ctx call ->
             let columns =
-                pairs ctx call.Span "ROW" call.Args
+                pairs ctx call.Span "ROW" (List.ofArray call.Args)
                 |> List.map (fun (name, expr) ->
                     let t, values = Typing.column (ev.TypeOf(ctx, expr)) [| ev.Scalar(ctx, expr) |]
                     Tables.extension name t, values)
@@ -1031,7 +1025,7 @@ module TableFunctions =
 
         // DATATABLE ( name, type, ..., { { value, ... }, ... } ): constants only.
         Fn.table "DATATABLE" "Table manipulation" (3, -1) (fun ev ctx call ->
-            let args = Array.ofList call.Args
+            let args = call.Args
 
             if args.Length % 2 <> 1 then
                 Fail.invalid ctx call.Span "DATATABLE takes pairs of a name and a type, then the rows"
@@ -1097,7 +1091,7 @@ module TableFunctions =
                     (key, descending order |> Option.defaultValue true) :: read tail
                 | key :: tail -> (key, true) :: read tail
 
-            let keys = read (call.Args |> List.skip 2) |> Array.ofList
+            let keys = read (List.ofArray call.Args.[2..]) |> Array.ofList
 
             if n <= 0L then
                 Tables.select table [||]
@@ -1142,7 +1136,7 @@ module TableFunctions =
         // "Column names from table arguments must all be different in all tables or an error is
         // returned" (Microsoft Learn, CROSSJOIN).
         Fn.table "CROSSJOIN" "Table manipulation" (2, -1) (fun ev ctx call ->
-            let tables = call.Args |> List.map (fun a -> ev.Table(ctx, a))
+            let tables = call.Args |> Array.map (fun a -> ev.Table(ctx, a)) |> List.ofArray
             let cols = tables |> List.map _.Cols |> Array.concat
             checkNewNames ctx call.Span "CROSSJOIN" cols []
 
@@ -1169,7 +1163,7 @@ module TableFunctions =
         // the column names in tableExpression1"; "Duplicate rows are retained" (Microsoft Learn,
         // UNION). A column keeps its lineage when every table gives it the same one.
         Fn.table "UNION" "Table manipulation" (2, -1) (fun ev ctx call ->
-            let tables = call.Args |> List.map (fun a -> ev.Table(ctx, a))
+            let tables = call.Args |> Array.map (fun a -> ev.Table(ctx, a)) |> List.ofArray
             let first = tables.Head
 
             if tables |> List.exists (fun t -> t.Cols.Length <> first.Cols.Length) then
@@ -1218,7 +1212,7 @@ module TableFunctions =
         // secrets of SUMMARIZE"). ROLLUP and its relatives are not supported.
         Fn.table "SUMMARIZE" "Table manipulation" (2, -1) (fun ev ctx call ->
             let table = ev.Table(ctx, call.Args.[0])
-            let rest = call.Args.Tail
+            let rest = List.ofArray call.Args.[1..]
             let groupArgs = rest |> List.takeWhile (fun a -> not (isName a))
             let added = pairs ctx call.Span "SUMMARIZE" (rest |> List.skip groupArgs.Length)
 
@@ -1273,7 +1267,7 @@ module TableFunctions =
         // (Microsoft Learn, GROUPBY).
         Fn.table "GROUPBY" "Table manipulation" (1, -1) (fun ev ctx call ->
             let table = ev.Table(ctx, call.Args.[0])
-            let rest = call.Args.Tail
+            let rest = List.ofArray call.Args.[1..]
             let groupArgs = rest |> List.takeWhile (fun a -> not (isName a))
             let added = pairs ctx call.Span "GROUPBY" (rest |> List.skip groupArgs.Length)
 

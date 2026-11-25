@@ -674,13 +674,10 @@ module TimeIntelligence =
     let private checkExtra (index: int) (what: string) (args: Expr list) : string option =
         if args.Length > index then Some what else None
 
-    let private checks (rules: (Expr list -> string option) list) : Expr list -> string option =
-        fun args -> rules |> List.tryPick (fun rule -> rule args)
-
     // ---- The functions that are a CALCULATE ------------------------------------------------------
 
     let private callOf (name: string) (span: Span) (args: Expr list) : Expr = {
-        Kind = Call({ Name = name; Span = span }, args)
+        Kind = ExprKind.Call({ Name = name; Span = span }, args)
         Span = span
     }
 
@@ -690,14 +687,14 @@ module TimeIntelligence =
         let given (e: Expr) = if Fn.isOmitted e then [] else [ e ]
 
         match call.Args with
-        | [ e; d ] -> e, d, [], []
-        | [ e; d; third ] when withYearEnd && isTextLiteral third -> e, d, [], [ third ]
-        | [ e; d; f ] -> e, d, given f, []
-        | [ e; d; f; y ] -> e, d, given f, given y
+        | [| e; d |] -> e, d, [], []
+        | [| e; d; third |] when withYearEnd && isTextLiteral third -> e, d, [], [ third ]
+        | [| e; d; f |] -> e, d, given f, []
+        | [| e; d; f; y |] -> e, d, given f, given y
         | _ -> invalidOp "the argument count is checked before the call"
 
     let private checkBalance (withYearEnd: bool) : Expr list -> string option =
-        checks [
+        Fn.firstCheck [
             checkDates 1
             if withYearEnd then
                 checkYearEnd 3
@@ -1143,7 +1140,7 @@ module TimeIntelligence =
             | _ ->
                 let d = read ev ctx name call.Args.[0]
                 tableOf d.Column (impl ev ctx call d))
-        |> Fn.withCheck (checks [ checkDates 0; check ])
+        |> Fn.withCheck (Fn.firstCheck [ checkDates 0; check ])
 
     let private none: Expr list -> string option = fun _ -> None
 
@@ -1212,7 +1209,7 @@ module TimeIntelligence =
                 | _ -> range d.U lo last)
 
     let private yearEndAt (index: int) : Call -> Ctx -> Period =
-        fun call ctx -> yearEnd ctx (List.tryItem index call.Args)
+        fun call ctx -> yearEnd ctx (Array.tryItem index call.Args)
 
     let private always (p: Period) : Call -> Ctx -> Period = fun _ _ -> p
 
@@ -1282,7 +1279,7 @@ module TimeIntelligence =
 
             tableOf c (period ctx call.Span u start n unit))
         |> Fn.withCheck (
-            checks [
+            Fn.firstCheck [
                 checkDates 0
                 checkInterval 3
                 checkExtra 4 "DATESINPERIOD with an EndBehavior argument (calendar-based time intelligence)"
@@ -1292,7 +1289,7 @@ module TimeIntelligence =
         datesTable
             "DATEADD"
             5
-            (checks [
+            (Fn.firstCheck [
                 checkInterval 2
                 checkExtra 3 "DATEADD with the Extension or Truncation arguments (calendar-based time intelligence)"
             ])

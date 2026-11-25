@@ -112,21 +112,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
                 | None -> t
         | _ -> Fail.invalid ctx span $"there is no table '{name}'"
 
-    let tryMeasure (ctx: Ctx) (name: string) : BMeasure option =
-        let fromQuery =
-            if ctx.Scope.InQuery && not (isNull ctx.Query) then
-                match ctx.Query.Measures.TryGetValue name with
-                | true, m -> Some m
-                | _ -> None
-            else
-                None
-
-        match fromQuery with
-        | Some m -> Some m
-        | None ->
-            match ctx.Model.Measures.TryGetValue name with
-            | true, m -> Some m
-            | _ -> None
+    let tryMeasure (ctx: Ctx) (name: string) : BMeasure option = Context.tryMeasure ctx name
 
     let tryFunction (ctx: Ctx) (name: string) : BFunction option =
         let fromQuery =
@@ -260,11 +246,11 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
                 body ()
 
         let cached () =
-            match moved.Filter.Measures.TryGetValue(m :> obj) with
+            match moved.Filter.Measures.TryGetValue m with
             | true, v -> v
             | _ ->
                 let v = shared ()
-                moved.Filter.Measures.[m :> obj] <- v
+                moved.Filter.Measures.[m] <- v
                 v
 
         if ctx.Model.CalcGroups.Length = 0 then
@@ -349,7 +335,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
             Fail.invalid ctx call.Span $"function {f.Name} calls itself: DAX functions can't be recursive"
 
         let def = f.Def
-        let args = Array.ofList call.Args
+        let args = call.Args
 
         if args.Length > def.Parameters.Length then
             Fail.invalid ctx call.Span $"{f.Name} takes {def.Parameters.Length} arguments, {args.Length} were given"
@@ -427,7 +413,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
 
     let bindCall (ctx: Ctx) (call: Call) (f: BFunction) : Ctx * Expr = bindCallWith true ctx call f
 
-    let checkCall (ctx: Ctx) (call: Call) (fn: DaxFunction) =
+    let checkCall (ctx: Ctx) (call: Call) (rawArgs: Expr list) (fn: DaxFunction) =
         let n = call.Args.Length
 
         if n < fn.MinArgs || (fn.MaxArgs >= 0 && n > fn.MaxArgs) then
@@ -438,7 +424,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
 
             Fail.invalid ctx call.Span $"{fn.Name} takes {expected} arguments, {n} were given"
 
-        match Checks.check fn call.Args with
+        match Checks.check fn rawArgs with
         | Some why -> Fail.notSupported ctx call.Span why
         | None -> ()
 
@@ -639,7 +625,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
 
                     Fail.invalid ctx e.Span $"there is no measure or column [{name}] here"
             | QueryParameter name -> Fail.notSupported ctx e.Span $"the query parameter @{name}"
-            | Omitted -> Fail.invalid ctx e.Span "an argument is missing"
+            | ExprKind.Omitted -> Fail.invalid ctx e.Span "an argument is missing"
             | Words _ -> Fail.invalid ctx e.Span "keywords where a value is needed"
             | Tuple _ ->
                 Fail.invalid ctx e.Span "a (value, ...) row is only allowed in a table constructor or before IN"
@@ -663,13 +649,13 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
             | Call(name, args) ->
                 let call = {
                     Name = name
-                    Args = args
+                    Args = Fn.argsArray args
                     Span = e.Span
                 }
 
-                match registry.TryGetValue(upper name.Name) with
+                match registry.TryGetValue name.Name with
                 | true, fn ->
-                    checkCall ctx call fn
+                    checkCall ctx call args fn
                     fn.Scalar ev ctx call
                 | _ ->
                     match tryFunction ctx name.Name with
@@ -701,13 +687,13 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
             | Call(name, args) ->
                 let call = {
                     Name = name
-                    Args = args
+                    Args = Fn.argsArray args
                     Span = e.Span
                 }
 
-                match registry.TryGetValue(upper name.Name) with
+                match registry.TryGetValue name.Name with
                 | true, fn ->
-                    checkCall ctx call fn
+                    checkCall ctx call args fn
                     fn.Table ev ctx call
                 | _ ->
                     match tryFunction ctx name.Name with
@@ -729,7 +715,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
                 | None -> ctx.Model.TableByName.ContainsKey name
             | VarBlock(vars, body) -> ev.IsTable(bindVars ctx vars, body)
             | Call(name, args) ->
-                match registry.TryGetValue(upper name.Name) with
+                match registry.TryGetValue name.Name with
                 | true, fn -> fn.Returns = Returns.Table
                 | _ ->
                     match tryFunction ctx name.Name with
@@ -740,7 +726,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
                                 ctx
                                 {
                                     Name = name
-                                    Args = args
+                                    Args = Fn.argsArray args
                                     Span = e.Span
                                 }
                                 f
@@ -851,7 +837,7 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
                     start
             | VarBlock(vars, body) -> ev.TypeOf(bindVars ctx vars, body)
             | Call(name, args) ->
-                match registry.TryGetValue(upper name.Name) with
+                match registry.TryGetValue name.Name with
                 | true, fn when
                     fn.Returns = Returns.Scalar
                     && args.Length >= fn.MinArgs

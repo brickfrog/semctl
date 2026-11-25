@@ -254,16 +254,9 @@ module Statistical =
     let private order (ctx: Ctx) (e: Expr) : bool =
         // TRUE: descending. "0/FALSE/DESC – descending; 1/TRUE/ASC – ascending. If omitted, the
         // default is descending" (dax.guide/rank-eq).
-        match Fn.keyword e with
-        | Some "DESC" -> true
-        | Some "ASC" -> false
-        | _ ->
-            match (Fn.unparen e).Kind with
-            | IntegerLiteral(0L, _)
-            | BooleanLiteral false -> true
-            | IntegerLiteral(1L, _)
-            | BooleanLiteral true -> false
-            | _ -> Fail.notSupported ctx e.Span "an order that is not ASC, DESC, TRUE, FALSE, 1 or 0"
+        match Fn.parseSortOrder e with
+        | Some d -> d
+        | None -> Fail.notSupported ctx e.Span "an order that is not ASC, DESC, TRUE, FALSE, 1 or 0"
 
     let private decimalType = Fn.typeIs DaxType.Decimal
 
@@ -454,9 +447,9 @@ module Statistical =
             let c, values = columnValues ev ctx call.Args.[1]
 
             let descending =
-                match List.tryItem 2 call.Args with
-                | Some o when not (Fn.isOmitted o) -> order ctx o
-                | _ -> true
+                match Fn.tryArg 2 call.Args with
+                | Some o -> order ctx o
+                | None -> true
 
             match c.Data.DataType with
             | DaxType.Integer

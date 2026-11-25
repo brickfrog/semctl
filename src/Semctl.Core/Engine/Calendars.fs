@@ -379,8 +379,7 @@ module Calendars =
                         let key (r: int) = cols |> Array.map (fun c -> c.IdAt r)
                         let index = Array.zeroCreate<int> n
 
-                        let seen =
-                            HashSet<int array>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+                        let seen = HashSet<int array>(IntArrayComparer.Instance)
 
                         let mutable current = -1
                         let mutable last: int array = null

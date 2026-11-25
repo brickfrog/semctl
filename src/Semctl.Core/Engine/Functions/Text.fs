@@ -24,13 +24,12 @@ open Semctl.DaxEngine
 module Text =
 
     let private hasSurrogate (s: string) =
-        let mutable found = false
+        let mutable i = 0
 
-        for ch in s do
-            if Char.IsSurrogate ch then
-                found <- true
+        while i < s.Length && not (Char.IsSurrogate s.[i]) do
+            i <- i + 1
 
-        found
+        i < s.Length
 
     let private positional (ctx: Ctx) (span: Span) (name: string) (s: string) : unit =
         if hasSurrogate s then
@@ -89,11 +88,6 @@ module Text =
             Fail.notSupported ctx e.Span $"{name} with a position before the first character"
 
         int (min n (int64 Int32.MaxValue))
-
-    let private optional (args: Expr list) (n: int) : Expr option =
-        match List.tryItem n args with
-        | Some e when not (Fn.isOmitted e) -> Some e
-        | _ -> None
 
     // ---- Case ---------------------------------------------------------------------------------------
 
@@ -307,7 +301,7 @@ module Text =
             "Text"
             (2, 4)
             (fun ev ctx args ->
-                match optional args 3 with
+                match Fn.tryListArg 3 args with
                 | Some e -> Typing.unify (StaticType.Known DaxType.Integer) (ev.TypeOf(ctx, e))
                 | None -> StaticType.Known DaxType.Integer)
             (fun ev ctx call ->
@@ -321,7 +315,7 @@ module Text =
                 // "(optional) The character position in within_text at which you want to start
                 // searching. If omitted, 1."
                 let start =
-                    match optional call.Args 2 with
+                    match Fn.tryArg 2 call.Args with
                     | Some e -> position ev ctx name e
                     | None -> 1
 
@@ -358,7 +352,7 @@ module Text =
                     // "The value to return when the operation doesn't find a matching substring,
                     // typically 0, -1, or BLANK(). If you don't specify it, the function returns an
                     // error."
-                    match optional call.Args 3 with
+                    match Fn.tryArg 3 call.Args with
                     | Some e -> ev.Scalar(ctx, e)
                     | None ->
                         Fail.runtime
@@ -409,7 +403,7 @@ module Text =
             positional ctx call.Args.[0].Span "LEFT" s
 
             let n =
-                match optional call.Args 1 with
+                match Fn.tryArg 1 call.Args with
                 | Some e -> count ev ctx "LEFT" e
                 | None -> 1
 
@@ -423,7 +417,7 @@ module Text =
             positional ctx call.Args.[0].Span "RIGHT" s
 
             let n =
-                match optional call.Args 1 with
+                match Fn.tryArg 1 call.Args with
                 | Some e -> count ev ctx "RIGHT" e
                 | None -> 1
 
@@ -510,7 +504,7 @@ module Text =
             let newText = text ev ctx call.Args.[2]
 
             let instance =
-                match optional call.Args 3 with
+                match Fn.tryArg 3 call.Args with
                 | Some e ->
                     let n = whole ctx e "SUBSTITUTE with an instance" (ev.Scalar(ctx, e))
 
@@ -648,9 +642,8 @@ module Text =
                         "COMBINEVALUES with a delimiter that is not a text literal (it must be a constant)"
 
             let parts =
-                call.Args
-                |> List.tail
-                |> List.map (fun e -> Convert.toText ctx e.Span (ev.Scalar(ctx, e)))
+                call.Args.[1..]
+                |> Array.map (fun e -> Convert.toText ctx e.Span (ev.Scalar(ctx, e)))
 
             DaxValue.String(String.Join(delimiter, parts)))
         |> Fn.withCheck (fun args ->

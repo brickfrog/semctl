@@ -264,33 +264,36 @@ module Sorting =
     /// Refuse to sort by values of different types, or by a key that is BLANK in some rows and
     /// zero, negative, empty or FALSE in others: where BLANK sorts among those is not documented.
     let check (ctx: Ctx) (span: Span) (what: string) (values: DaxValue seq) : unit =
-        let values = List.ofSeq values
-        let blank = values |> List.exists DaxValue.isBlank
+        let mutable hasBlank = false
+        let mutable hasLow = false
+        let mutable firstFamily = -1
+        let mutable mixed = false
 
-        let families =
-            values
-            |> List.choose (fun v ->
-                match v with
-                | DaxValue.Blank -> None
-                | DaxValue.String _ -> Some 1
-                | DaxValue.Boolean _ -> Some 2
-                | _ -> Some 0)
-            |> List.distinct
+        for v in values do
+            if DaxValue.isBlank v then
+                hasBlank <- true
+            else
+                let family =
+                    match v with
+                    | DaxValue.String _ -> 1
+                    | DaxValue.Boolean _ -> 2
+                    | _ -> 0
 
-        if families.Length > 1 then
+                if firstFamily = -1 then
+                    firstFamily <- family
+                elif firstFamily <> family then
+                    mixed <- true
+
+                if not hasLow then
+                    match DaxValue.compare ctx.Model.Collation v DaxValue.Blank with
+                    | Ok c when c <= 0 -> hasLow <- true
+                    | _ -> ()
+
+        if mixed then
             Fail.notSupported ctx span $"{what} by values of different data types"
 
-        if blank then
-            let low =
-                values
-                |> List.exists (fun v ->
-                    not (DaxValue.isBlank v)
-                    && (match DaxValue.compare ctx.Model.Collation v DaxValue.Blank with
-                        | Ok c -> c <= 0
-                        | Error _ -> false))
-
-            if low then
-                Fail.notSupported
-                    ctx
-                    span
-                    $"{what} by a key that is BLANK in some rows and zero, negative, empty or FALSE in others (where BLANK sorts among those is not documented)"
+        if hasBlank && hasLow then
+            Fail.notSupported
+                ctx
+                span
+                $"{what} by a key that is BLANK in some rows and zero, negative, empty or FALSE in others (where BLANK sorts among those is not documented)"

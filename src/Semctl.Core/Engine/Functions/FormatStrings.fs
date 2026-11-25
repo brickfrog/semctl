@@ -106,29 +106,7 @@ module FormatStrings =
         obj.ReferenceEquals(app.Item.Group, ownGroup)
 
     /// The measure a measure reference names, as code of the model or of the query sees it.
-    let private measureNamed (ctx: Ctx) (e: Expr) : BMeasure option =
-        let find (name: string) =
-            let fromQuery =
-                if ctx.Scope.InQuery && not (isNull ctx.Query) then
-                    match ctx.Query.Measures.TryGetValue name with
-                    | true, m -> Some m
-                    | _ -> None
-                else
-                    None
-
-            fromQuery
-            |> Option.orElseWith (fun () ->
-                match ctx.Model.Measures.TryGetValue name with
-                | true, m -> Some m
-                | _ -> None)
-
-        match (Fn.unparen e).Kind with
-        | Bracketed name -> find name
-        | Qualified(table, name) ->
-            match ctx.Model.TableByName.TryGetValue table.Name with
-            | true, t when not (t.ColumnByName.ContainsKey name) -> find name
-            | _ -> None
-        | _ -> None
+    let private measureNamed (ctx: Ctx) (e: Expr) : BMeasure option = Context.tryMeasureExpr ctx e
 
     /// The first thing in a format string expression that evaluates a measure (a measure reference,
     /// SELECTEDMEASURE (), a user-defined function, which may do either), if any.
@@ -392,7 +370,7 @@ module FormatStrings =
                             let reference: Expr = { Kind = Bracketed m.Name; Span = at }
 
                             let body: Expr = {
-                                Kind = Call({ Name = ownName; Span = at }, [ reference ])
+                                Kind = ExprKind.Call({ Name = ownName; Span = at }, [ reference ])
                                 Span = at
                             }
 
@@ -481,14 +459,14 @@ module FormatStrings =
                             let at = p.Reference.Span
 
                             let probe: Expr = {
-                                Kind = Call({ Name = probeName; Span = at }, [ p.Reference ])
+                                Kind = ExprKind.Call({ Name = probeName; Span = at }, [ p.Reference ])
                                 Span = at
                             }
 
                             let value: Expr =
                                 if fn = "SUMMARIZECOLUMNS" then
                                     {
-                                        Kind = Call({ Name = "IGNORE"; Span = at }, [ probe ])
+                                        Kind = ExprKind.Call({ Name = "IGNORE"; Span = at }, [ probe ])
                                         Span = at
                                     }
                                 else
@@ -505,7 +483,7 @@ module FormatStrings =
 
                     {
                         e with
-                            Kind = Call(name, List.ofArray args @ extra)
+                            Kind = ExprKind.Call(name, List.ofArray args @ extra)
                     },
                     probes,
                     pairs

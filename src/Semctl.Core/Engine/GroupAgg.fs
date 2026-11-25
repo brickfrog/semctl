@@ -25,32 +25,25 @@ type internal GroupAggSuppress private () =
 
 module GroupAgg =
 
+    [<RequireQualifiedAccess>]
+    type private EntryKind =
+        | Unusable
+        | Usable of
+            fact: BTable *
+            agg: Expr *
+            kept: FilterCtx *
+            buckets: Dictionary<int, ResizeArray<int>> *
+            unique: bool
+
     /// What one iteration's CALCULATE (or measure) needs, made on its first row: the rows of F
     /// under the filters the transition keeps, by the row of T they belong to, and the values
     /// worked out.
     [<Sealed; AllowNullLiteral>]
-    type private Entry
-        (
-            table: TableVal,
-            source: SourceText,
-            usable: bool,
-            agg: Expr,
-            fact: BTable,
-            kept: FilterCtx,
-            buckets: Dictionary<int, ResizeArray<int>>,
-            unique: bool
-        ) =
+    type private Entry(table: TableVal, source: SourceText, kind: EntryKind) =
         member _.Table = table
         /// The text the aggregation is written in (its names resolve there).
         member _.Source = source
-        member _.Usable = usable
-        /// The aggregation, `SUM ( F[x] )`.
-        member _.Agg = agg
-        member _.Fact = fact
-        member _.Kept = kept
-        member _.Buckets = buckets
-        /// Whether T has a key (`BTable.UniqueColumn`): a row is then its own row set.
-        member _.Unique = unique
+        member _.Kind = kind
         /// By the first row of the row set: the value (for a row set with fact rows).
         member val Values = Dictionary<int, DaxValue>() with get
         /// The value over no fact rows, once worked out.
@@ -95,7 +88,7 @@ module GroupAgg =
         | _ -> None
 
     let private unusable (table: TableVal) (source: SourceText) =
-        Entry(table, source, false, Unchecked.defaultof<Expr>, null, null, null, false)
+        Entry(table, source, EntryKind.Unusable)
 
     /// The entry for the iteration `rc` is a row of, or one that says to fall back. `inner`: the
     /// context the aggregation is evaluated in, from the caller's and a filter context.
@@ -182,19 +175,19 @@ module GroupAgg =
                                             list.Add f
                                             buckets.[r] <- list
 
-                            Entry(t, source, true, agg, fact, kept, buckets, table.UniqueColumn.IsSome)
+                            Entry(t, source, EntryKind.Usable(fact, agg, kept, buckets, table.UniqueColumn.IsSome))
 
     /// The fact rows of a row set of T, ascending.
-    let private factRows (e: Entry) (rows: RowSet) : int array =
+    let private factRows (buckets: Dictionary<int, ResizeArray<int>>) (rows: RowSet) : int array =
         if rows.Count = 1 then
-            match e.Buckets.TryGetValue rows.Rows.[0] with
+            match buckets.TryGetValue rows.Rows.[0] with
             | true, list -> list.ToArray()
             | _ -> [||]
         else
             let all = ResizeArray<int>()
 
             for r in rows.Rows do
-                match e.Buckets.TryGetValue r with
+                match buckets.TryGetValue r with
                 | true, list -> all.AddRange list
                 | _ -> ()
 
@@ -209,18 +202,27 @@ module GroupAgg =
         (ctx: Ctx)
         (inner: Ctx -> FilterCtx -> Ctx)
         (e: Entry)
+        (fact: BTable)
+        (agg: Expr)
+        (kept: FilterCtx)
         (rows: RowSet)
         (facts: int array)
         =
         let cfg = ctx.Filter.Config
         let table = e.Table.BaseTable
-        let fc = FilterCtx(e.Kept.Filters @ [ Rows(table, rows, cfg) ], cfg)
-        let fact = e.Fact
+        let fc = FilterCtx(kept.Filters @ [ Rows(table, rows, cfg) ], cfg)
         fc.Visible.[fact.Id * (fact.Model.Rels.Length + 1)] <- RowSet.OfSorted(fact.Size, facts)
-        ev.Scalar(inner ctx fc, e.Agg)
+        ev.Scalar(inner ctx fc, agg)
 
     /// Check mode: the value and the fact rows compared with the row-by-row evaluation's.
-    let private check (ctx: Ctx) (span: Span) (slow: unit -> DaxValue) (e: Entry) (facts: int array) (value: DaxValue) =
+    let private check
+        (ctx: Ctx)
+        (span: Span)
+        (slow: unit -> DaxValue)
+        (fact: BTable)
+        (facts: int array)
+        (value: DaxValue)
+        =
         let stats = ctx.Model.Incremental
         let all = IncrementalStats.Global
         GroupAggSuppress.On <- true
@@ -236,9 +238,10 @@ module GroupAgg =
                 let rows =
                     try
                         let moved = Context.transition ctx span
-                        Some(Filters.visibleStored moved.Filter e.Fact)
-                    with _ ->
-                        None
+                        Some(Filters.visibleStored moved.Filter fact)
+                    with
+                    | EngineException _
+                    | DaxRuntimeException _ -> None
 
                 v, rows
             finally
@@ -268,7 +271,7 @@ module GroupAgg =
 
             raise (
                 InvalidOperationException(
-                    $"the value by group at {Fail.where ctx span} differs from the row-by-row evaluation: %A{value} over {facts.Length} rows of '{e.Fact.Name}', row by row {says} over {rows |> Option.map _.Length} rows"
+                    $"the value by group at {Fail.where ctx span} differs from the row-by-row evaluation: %A{value} over {facts.Length} rows of '{fact.Name}', row by row {says} over {rows |> Option.map _.Length} rows"
                 )
             )
 
@@ -299,7 +302,7 @@ module GroupAgg =
         (expr: Expr)
         (source: SourceText)
         (inner: Ctx -> FilterCtx -> Ctx)
-        : struct (Entry * DaxValue * int array) voption =
+        : struct (Entry * BTable * DaxValue * int array) voption =
         let stats = ctx.Model.Incremental
         let all = IncrementalStats.Global
         let entries = entriesOf ctx.Filter.State
@@ -311,22 +314,25 @@ module GroupAgg =
                 let e =
                     try
                         make ev ctx rc expr source inner
-                    with _ ->
-                        unusable rc.Table source
+                    with
+                    | EngineException _
+                    | DaxRuntimeException _ -> unusable rc.Table source
 
                 entries.[key] <- e
                 e
 
-        if not entry.Usable || rc.Table.BaseRows.[rc.Row] >= entry.Table.BaseTable.RowCount then
-            ValueNone
-        else
+        match entry.Kind with
+        | EntryKind.Unusable -> ValueNone
+        | EntryKind.Usable(fact, agg, kept, buckets, unique) when
+            rc.Table.BaseRows.[rc.Row] < entry.Table.BaseTable.RowCount
+            ->
             let row = rc.Table.BaseRows.[rc.Row]
 
             try
                 let table = entry.Table.BaseTable
 
                 let rows =
-                    if entry.Unique then
+                    if unique then
                         RowSet.One(table.Size, row)
                     else
                         Filters.closeRows table [| row |]
@@ -341,7 +347,7 @@ module GroupAgg =
 
                 let facts =
                     if cached.IsNone || checking then
-                        factRows entry rows
+                        factRows buckets rows
                     else
                         null
 
@@ -352,22 +358,25 @@ module GroupAgg =
                         match entry.Empty with
                         | ValueSome v -> v
                         | ValueNone ->
-                            let v = valueOver ev ctx inner entry rows facts
+                            let v = valueOver ev ctx inner entry fact agg kept rows facts
                             entry.Empty <- ValueSome v
                             v
                     | ValueNone ->
-                        let v = valueOver ev ctx inner entry rows facts
+                        let v = valueOver ev ctx inner entry fact agg kept rows facts
                         entry.Values.[first] <- v
                         v
 
                 Interlocked.Increment(&stats.GroupApplied) |> ignore
                 Interlocked.Increment(&all.GroupApplied) |> ignore
-                ValueSome(struct (entry, value, facts))
-            with _ ->
+                ValueSome(struct (entry, fact, value, facts))
+            with
+            | EngineException _
+            | DaxRuntimeException _ ->
                 // The row-by-row evaluation raises what it raises.
                 Interlocked.Increment(&stats.GroupErrors) |> ignore
                 Interlocked.Increment(&all.GroupErrors) |> ignore
                 ValueNone
+        | EntryKind.Usable _ -> ValueNone
 
     let private calculateInner (ctx: Ctx) (fc: FilterCtx) : Ctx = { ctx with Filter = fc; Rows = [] }
 
@@ -376,13 +385,13 @@ module GroupAgg =
     let calculate (ev: IEval) (ctx: Ctx) (call: Call) (slow: IEval -> Ctx -> Call -> DaxValue) : DaxValue =
         match ctx.Rows with
         | [ rc ] when call.Args.Length = 1 && allowed ctx ->
-            let arg = call.Args.Head
+            let arg = call.Args.[0]
 
             match lookup ev ctx rc arg arg ctx.Scope.Source calculateInner with
             | ValueNone -> slow ev ctx call
-            | ValueSome(struct (entry, value, facts)) ->
+            | ValueSome(struct (_, fact, value, facts)) ->
                 if IncrementalStats.Global.Check || ctx.Model.Incremental.Check then
-                    check ctx call.Span (fun () -> slow ev ctx call) entry facts value
+                    check ctx call.Span (fun () -> slow ev ctx call) fact facts value
 
                 value
         | _ -> slow ev ctx call
@@ -407,9 +416,9 @@ module GroupAgg =
             ->
             let expr =
                 try
-                    m.Expr
-                with _ ->
-                    Unchecked.defaultof<Expr>
+                    ValueSome m.Expr
+                with EngineException _ ->
+                    ValueNone
 
             // The measure's expression, evaluated as `Eval.evalMeasure` does after its transition.
             let inner (c: Ctx) (fc: FilterCtx) : Ctx = {
@@ -426,14 +435,14 @@ module GroupAgg =
                     Items = { c.Items with Current = None }
             }
 
-            if obj.ReferenceEquals(expr, null) then
-                slow ctx span m
-            else
+            match expr with
+            | ValueNone -> slow ctx span m
+            | ValueSome expr ->
                 match lookup ev ctx rc m expr m.Source inner with
                 | ValueNone -> slow ctx span m
-                | ValueSome(struct (entry, value, facts)) ->
+                | ValueSome(struct (_, fact, value, facts)) ->
                     if IncrementalStats.Global.Check || ctx.Model.Incremental.Check then
-                        check ctx span (fun () -> slow ctx span m) entry facts value
+                        check ctx span (fun () -> slow ctx span m) fact facts value
 
                     value
         | _ -> slow ctx span m
@@ -550,8 +559,9 @@ module GroupAgg =
     let private tryEval (ctx: Ctx) (values: DaxValue array) (calcs: DaxValue array) (n: Node) =
         try
             ValueSome(eval ctx values calcs n)
-        with _ ->
-            ValueNone
+        with
+        | EngineException _
+        | DaxRuntimeException _ -> ValueNone
 
     /// Whether the body is BLANK for every stored value of its one column (and its CALCULATEs'
     /// values over no rows): then a row with nothing in its buckets is BLANK, whatever its value.
@@ -579,8 +589,9 @@ module GroupAgg =
                             id <- id + 1
 
                         blank
-                    with _ ->
-                        false
+                    with
+                    | EngineException _
+                    | DaxRuntimeException _ -> false
             )
 
     let private checkRow (ctx: Ctx) (real: int -> DaxValue) (t: BTable) (expr: Expr) (row: int) (value: DaxValue) =
@@ -651,10 +662,16 @@ module GroupAgg =
                         | _ -> null)
 
                 if found |> Array.forall (fun e -> not (isNull e)) then
-                    if found |> Array.forall (fun e -> e.Usable && e.Unique) then
+                    if
+                        found
+                        |> Array.forall (fun e ->
+                            match e.Kind with
+                            | EntryKind.Usable(_, _, _, _, unique) -> unique
+                            | EntryKind.Unusable -> false)
+                    then
                         if found |> Array.forall (fun e -> e.Empty.IsSome) then
                             entries <- found
-                            empty <- found |> Array.map (fun e -> e.Empty.Value)
+                            empty <- found |> Array.choose (fun e -> Option.ofValueOption e.Empty)
                             blank <- skipBlank && blankEverywhere ctx body columns empty
                     else
                         off <- true
@@ -669,7 +686,10 @@ module GroupAgg =
                 let mutable i = 0
 
                 while none && i < entries.Length do
-                    none <- not (entries.[i].Buckets.ContainsKey r)
+                    match entries.[i].Kind with
+                    | EntryKind.Usable(_, _, _, buckets, _) -> none <- not (buckets.ContainsKey r)
+                    | EntryKind.Unusable -> none <- false
+
                     i <- i + 1
 
                 none
@@ -746,8 +766,9 @@ module GroupAgg =
                 cols |> Array.map Option.get
             else
                 null
-        with _ ->
-            null
+        with
+        | EngineException _
+        | DaxRuntimeException _ -> null
 
     /// The values of `expr` in each row of `table`, in order, as an iterator evaluates them. In a
     /// row whose CALCULATEs all have nothing in their buckets, the expression is evaluated from

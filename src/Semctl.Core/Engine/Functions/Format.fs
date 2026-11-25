@@ -1203,11 +1203,6 @@ module Formatting =
 
         fst results.Head
 
-    let private optional (args: Expr list) (n: int) : Expr option =
-        match List.tryItem n args with
-        | Some e when not (Fn.isOmitted e) -> Some e
-        | _ -> None
-
     let private literalText (e: Expr) : string option =
         match (Fn.unparen e).Kind with
         | StringLiteral s -> Some s
@@ -1229,7 +1224,7 @@ module Formatting =
             // "Predefined format strings use the model culture property when formatting the
             // result"; the locale argument names another.
             let culture =
-                match optional call.Args 2 with
+                match Fn.tryArg 2 call.Args with
                 | None -> ctx.Model.Culture
                 | Some e ->
                     match ev.Scalar(ctx, e) with
@@ -1275,7 +1270,7 @@ module Formatting =
                 | _ -> Fail.notSupported ctx call.Args.[0].Span "FIXED of a value that is not a number"
 
             let decimals =
-                match optional call.Args 1 with
+                match Fn.tryArg 1 call.Args with
                 | None -> 2
                 | Some e ->
                     match ev.Scalar(ctx, e) with
@@ -1284,7 +1279,7 @@ module Formatting =
                         Fail.notSupported ctx e.Span "FIXED with a number of decimals that is not a small whole number"
 
             let commas =
-                match optional call.Args 2 with
+                match Fn.tryArg 2 call.Args with
                 | None -> true
                 | Some e ->
                     match ev.Scalar(ctx, e) with

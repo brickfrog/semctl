@@ -31,6 +31,7 @@ open Semctl.DaxEngine
 module DateText =
 
     /// What a text says: a date (at midnight), a time of day, or both.
+    [<Struct>]
     type Reading = {
         Date: DateTime voption
         Time: TimeSpan voption
@@ -323,11 +324,11 @@ module DateAndTime =
 
         cut
 
-    [<RequireQualifiedAccess>]
+    [<Struct; RequireQualifiedAccess>]
     type private Num =
         | Blank
-        | Whole of int64
-        | Real of float
+        | Whole of whole: int64
+        | Real of real: float
 
     /// A numeric argument. `what` names it in a refusal: "a DATE year".
     let private numArg (ev: IEval) (ctx: Ctx) (what: string) (e: Expr) : Num =
@@ -380,9 +381,6 @@ module DateAndTime =
             match List.tryItem i args |> Option.map (fun e -> (Fn.unparen e).Kind) with
             | Some(StringLiteral text) when (DateText.read "en-US" text).IsNone -> Some(unreadable name)
             | _ -> None)
-
-    let private firstOf (checks: (Expr list -> string option) list) (args: Expr list) : string option =
-        checks |> List.tryPick (fun check -> check args)
 
     // ---- Parts of a date ----------------------------------------------------------------------------
 
@@ -448,10 +446,9 @@ module DateAndTime =
         | _ -> None
 
     /// The optional return type of WEEKDAY and WEEKNUM: 1 when left out.
-    let private returnType (ev: IEval) (ctx: Ctx) (name: string) (valid: Set<int64>) (args: Expr list) : int64 =
-        match List.tryItem 1 args with
+    let private returnType (ev: IEval) (ctx: Ctx) (name: string) (valid: Set<int64>) (args: Expr array) : int64 =
+        match Fn.tryArg 1 args with
         | None -> 1L
-        | Some e when Fn.isOmitted e -> 1L
         | Some e ->
             match numArg ev ctx $"a {name} return type" e with
             | Num.Whole t when valid.Contains t -> t
@@ -693,7 +690,7 @@ module DateAndTime =
             | 3L, _ -> DaxValue.Integer(int64 ((weekday + 6) % 7))
             | _, ValueSome start -> DaxValue.Integer(int64 ((weekday - start + 7) % 7 + 1))
             | _ -> Fail.notSupported ctx call.Span (returnTypeRefusal "WEEKDAY" returnType))
-        |> Fn.withCheck (firstOf [ textCheck "WEEKDAY" [ 0 ]; returnTypeCheck "WEEKDAY" weekdayTypes ])
+        |> Fn.withCheck (Fn.firstCheck [ textCheck "WEEKDAY" [ 0 ]; returnTypeCheck "WEEKDAY" weekdayTypes ])
 
         // "System 1 - The week containing January 1 is the first week of the year"; "System 2 - The
         // week containing the first Thursday of the year is the first week of the year ... the
@@ -709,7 +706,7 @@ module DateAndTime =
                 let before = (dayOfWeek (dayOfDate (DateTime(d.Year, 1, 1))) - start + 7) % 7
                 DaxValue.Integer(int64 ((d.DayOfYear - 1 + before) / 7 + 1))
             | _ -> Fail.notSupported ctx call.Span (returnTypeRefusal "WEEKNUM" returnType))
-        |> Fn.withCheck (firstOf [ textCheck "WEEKNUM" [ 0 ]; returnTypeCheck "WEEKNUM" weeknumTypes ])
+        |> Fn.withCheck (Fn.firstCheck [ textCheck "WEEKNUM" [ 0 ]; returnTypeCheck "WEEKNUM" weeknumTypes ])
 
         // ---- Months ---------------------------------------------------------------------------------
 
@@ -846,9 +843,8 @@ module DateAndTime =
         // definition (and "a bug": dax.guide).
         Fn.scalar "YEARFRAC" family (2, 3) (Fn.typeIs DaxType.Decimal) (fun ev ctx call ->
             let basis =
-                match List.tryItem 2 call.Args with
+                match Fn.tryArg 2 call.Args with
                 | None -> 0L
-                | Some e when Fn.isOmitted e -> 0L
                 | Some e ->
                     match numArg ev ctx "a YEARFRAC basis" e with
                     | Num.Whole b -> b
@@ -901,7 +897,7 @@ module DateAndTime =
                     / 360.0
                 ))
         |> Fn.withCheck (
-            firstOf [
+            Fn.firstCheck [
                 textCheck "YEARFRAC" [ 0; 1 ]
                 fun args ->
                     match List.tryItem 2 args |> Option.bind literalWhole with
@@ -917,7 +913,7 @@ module DateAndTime =
         // The start "can be earlier than, the same as, or later than the end_date", but the page
         // doesn't say what a later start returns, so that is refused.
         Fn.scalar "NETWORKDAYS" family (2, 4) (Fn.typeIs DaxType.Integer) (fun ev ctx call ->
-            let args = Array.ofList call.Args
+            let args = call.Args
             let first = workDate ev ctx args.[0]
             let last = workDate ev ctx args.[1]
 
@@ -1032,10 +1028,9 @@ module DateAndTime =
         // 12": there is no such template here.
         Fn.table "CALENDARAUTO" family (0, 1) (fun ev ctx call ->
             let fiscalEnd =
-                match call.Args with
-                | [] -> 12
-                | e :: _ when Fn.isOmitted e -> 12
-                | e :: _ ->
+                match Fn.tryArg 0 call.Args with
+                | None -> 12
+                | Some e ->
                     let what = "a CALENDARAUTO fiscal year end month"
 
                     match nearest ctx e.Span what (numArg ev ctx what e) with

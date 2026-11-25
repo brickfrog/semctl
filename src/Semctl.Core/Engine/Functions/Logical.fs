@@ -105,13 +105,9 @@ module Logical =
     /// branches share when both are numbers (see `Typing.unify`).
     let private ifImpl (ev: IEval) (ctx: Ctx) (call: Call) : DaxValue =
         let cond = toBool ctx call.Args.[0] (ev.Scalar(ctx, call.Args.[0]))
-        let branches = call.Args.Tail
+        let branches = List.ofArray call.Args.[1..]
 
-        let chosen =
-            if cond then
-                Some branches.[0]
-            else
-                List.tryItem 1 branches |> Option.filter (fun e -> not (Fn.isOmitted e))
+        let chosen = if cond then Some branches.[0] else Fn.tryArg 2 call.Args
 
         branchValue ev ctx call.Span branches chosen None
 
@@ -119,7 +115,7 @@ module Logical =
     /// regardless of the condition expression" (Microsoft Learn, IF.EAGER): an error in the
     /// branch that isn't taken is raised.
     let private ifEagerImpl (ev: IEval) (ctx: Ctx) (call: Call) : DaxValue =
-        let branches = call.Args.Tail
+        let branches = List.ofArray call.Args.[1..]
 
         let values =
             branches
@@ -168,7 +164,7 @@ module Logical =
                 let pairs, otherwise = switchParts args
                 unifyAll ev ctx ((pairs |> List.map snd) @ Option.toList otherwise))
             (fun ev ctx call ->
-                let pairs, otherwise = switchParts call.Args
+                let pairs, otherwise = switchParts (List.ofArray call.Args)
                 let subject = ev.Scalar(ctx, call.Args.[0])
                 let results = (pairs |> List.map snd) @ Option.toList otherwise
 
@@ -203,10 +199,10 @@ module Logical =
         // BLANK"; "The data type of the result can be different from the data type of the returned
         // argument" (dax.guide/coalesce). Arguments after the first non-blank are not evaluated.
         Fn.scalar "COALESCE" "Logical" (2, -1) unifyAll (fun ev ctx call ->
-            let t = unifyAll ev ctx call.Args
+            let t = unifyAll ev ctx (List.ofArray call.Args)
 
             call.Args
-            |> List.tryPick (fun a ->
+            |> Array.tryPick (fun a ->
                 match ev.Scalar(ctx, a) with
                 | DaxValue.Blank -> None
                 | v -> Some(Typing.coerce t v))
@@ -234,10 +230,9 @@ module Logical =
                 | StaticType.Variant
                 | StaticType.Unknown -> StaticType.Unknown
                 | _ ->
-                    match List.tryItem 2 args with
-                    | Some alt when not (Fn.isOmitted alt) ->
-                        Typing.unify (StaticType.Known DaxType.Decimal) (ev.TypeOf(ctx, alt))
-                    | _ -> StaticType.Known DaxType.Decimal)
+                    match Fn.tryListArg 2 args with
+                    | Some alt -> Typing.unify (StaticType.Known DaxType.Decimal) (ev.TypeOf(ctx, alt))
+                    | None -> StaticType.Known DaxType.Decimal)
             (fun ev ctx call ->
                 let number (e: Expr) =
                     match ev.Scalar(ctx, e) with
@@ -253,12 +248,12 @@ module Logical =
                 | DaxValue.Blank
                 | DaxValue.Currency 0L
                 | DaxValue.Decimal 0.0 ->
-                    match List.tryItem 2 call.Args with
-                    | Some alt when not (Fn.isOmitted alt) ->
+                    match Fn.tryArg 2 call.Args with
+                    | Some alt ->
                         Typing.coerce
                             (Typing.unify (StaticType.Known DaxType.Decimal) (ev.TypeOf(ctx, alt)))
                             (ev.Scalar(ctx, alt))
-                    | _ -> DaxValue.Blank
+                    | None -> DaxValue.Blank
                 | _ -> Fail.dax ctx call.Span (DaxValue.divide n d))
 
         // "IFERROR ( A, B ) corresponds to IF ( ISERROR ( A ), B, A )" (dax.guide/iferror). Only
@@ -296,7 +291,8 @@ module Logical =
         // CONTAINSROW"), with strict comparison (dax.guide/containsrow).
         Fn.scalar "CONTAINSROW" "Information" (2, -1) (Fn.typeIs DaxType.Boolean) (fun ev ctx call ->
             let table = ev.Table(ctx, call.Args.[0])
-            let values = call.Args.Tail |> List.map (fun a -> ev.Scalar(ctx, a)) |> Array.ofList
+            let nVals = call.Args.Length - 1
+            let values = Array.init nVals (fun i -> ev.Scalar(ctx, call.Args.[i + 1]))
 
             if table.Cols.Length <> values.Length then
                 Fail.invalid
@@ -304,15 +300,20 @@ module Logical =
                     call.Span
                     $"CONTAINSROW was given {values.Length} value(s) for a table of {table.Cols.Length} column(s)"
 
-            let data = Array.init values.Length table.Column
+            let data = Array.init nVals table.Column
+            let coll = ctx.Model.Collation
+            let mutable found = false
+            let mutable row = 0
 
-            let found =
-                seq { 0 .. table.Count - 1 }
-                |> Seq.exists (fun row ->
-                    values
-                    |> Array.mapi (fun c v ->
-                        Fail.dax ctx call.Span (DaxValue.strictEquals ctx.Model.Collation v data.[c].[row]))
-                    |> Array.forall id)
+            while not found && row < table.Count do
+                let mutable eq = true
+                let mutable c = 0
+
+                while eq && c < nVals do
+                    eq <- Fail.dax ctx call.Span (DaxValue.strictEquals coll values.[c] data.[c].[row])
+                    c <- c + 1
+
+                if eq then found <- true else row <- row + 1
 
             DaxValue.Boolean found)
     ]

@@ -55,7 +55,7 @@ module FilterKey =
         | _ ->
             let h =
                 if isIntArraySet s then
-                    let cmp = IntArrayComparer.Instance :> IEqualityComparer<int array>
+                    let cmp = IntArrayComparer.Instance
                     let mutable h = s.Count
 
                     for t in s do
@@ -296,21 +296,21 @@ type VisCache(config: RelConfig) =
                  || (try
                          r.Check()
                          readable r.From && readable r.To
-                     with _ ->
+                     with EngineException _ ->
                          false)))
 
     /// Tables whose rows and blank row are known, not refused: asking for them can't raise.
-    let settled = Array.zeroCreate<bool> model.Tables.Length
+    let settled = Array.zeroCreate<int> model.Tables.Length
 
     let isSettled (x: BTable) =
-        settled.[x.Id]
+        Volatile.Read(&settled.[x.Id]) <> 0
         || (let ok =
                 // The full computation asks for the table's size, so its rows and its blank row
                 // are decided either way.
                 (try
                     x.Size |> ignore
                     true
-                 with _ ->
+                 with EngineException _ ->
                      false)
                 && x.IsReady
                 && x.BlankRowKnown
@@ -318,7 +318,7 @@ type VisCache(config: RelConfig) =
                 && x.Gate.IsNone
 
             if ok then
-                settled.[x.Id] <- true
+                Volatile.Write(&settled.[x.Id], 1)
 
             ok)
 
@@ -577,7 +577,7 @@ module MeasureCache =
 
                 try
                     refs (Semctl.DaxAst.references m.Expr)
-                with _ ->
+                with EngineException _ ->
                     // A measure that doesn't parse: its evaluation is the error.
                     blind <- false
 

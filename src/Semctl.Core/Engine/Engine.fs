@@ -320,7 +320,7 @@ let private transitionTraits (model: Model) (defs: QueryDefs option) (expr: Expr
         | Call(name, args) ->
             let upper = name.Name.ToUpperInvariant()
 
-            if removers.Contains upper then
+            if removers.Contains name.Name then
                 narrows <- true
 
             if upper = "USERELATIONSHIP" then
@@ -455,8 +455,9 @@ let private multipleOrEmpty (db: Database) (t: Table) : string option =
     let behavior =
         try
             db.Model.SelectionExpressionBehavior
-        with _ ->
-            SelectionExpressionBehaviorType.Automatic
+        with
+        | :? InvalidOperationException
+        | :? NotSupportedException -> SelectionExpressionBehaviorType.Automatic
 
     if not (isNull t.CalculationGroup.MultipleOrEmptySelectionExpression) then
         Some $"the multipleOrEmptySelectionExpression of calculation group '{t.Name}'"
@@ -480,8 +481,9 @@ let private bindCalculationGroups (db: Database) (store: DataStore) (model: Semc
     let visual =
         try
             db.Model.SelectionExpressionBehavior = SelectionExpressionBehaviorType.Visual
-        with _ ->
-            false
+        with
+        | :? InvalidOperationException
+        | :? NotSupportedException -> false
 
     for t in db.Model.Tables do
         if not (isNull t.CalculationGroup) then
@@ -1067,7 +1069,7 @@ let private bindWith
                         )
             | None, Some source ->
                 c.Computing <- true
-                model.Computing.Push(c)
+                model.Computing.Push(ComputingItem.Column c)
 
                 try
                     fail (fun e -> c.Failure <- Some e) (fun () ->
@@ -1124,7 +1126,7 @@ let private bindWith
             | None, None -> t.SetRowCount 0
             | None, Some source ->
                 t.Computing <- true
-                model.Computing.Push(t)
+                model.Computing.Push(ComputingItem.Table t)
 
                 try
                     fail (fun e -> t.Failure <- Some e) (fun () ->
@@ -1725,12 +1727,14 @@ let private evaluateTable (ctx: Ctx) (e: Evaluate) : TableVal * int array =
 
                         v.Span, value)
 
+                let pairs = List.zip (List.take starts.Length keys) starts |> Array.ofList
+
                 let before (row: int) =
                     let mutable c = 0
-                    let mutable rest = List.zip (List.take starts.Length keys) starts
+                    let mutable i = 0
 
-                    while c = 0 && not rest.IsEmpty do
-                        let (values: DaxValue array, descending), (span, start) = rest.Head
+                    while c = 0 && i < pairs.Length do
+                        let (values: DaxValue array, descending), (span, start) = pairs.[i]
 
                         // Where BLANK sorts against the value is not settled by `compare`.
                         if DaxValue.isBlank values.[row] then
@@ -1748,7 +1752,7 @@ let private evaluateTable (ctx: Ctx) (e: Evaluate) : TableVal * int array =
                         if descending then
                             c <- -c
 
-                        rest <- rest.Tail
+                        i <- i + 1
 
                     c < 0
 

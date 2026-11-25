@@ -165,29 +165,7 @@ module CalculationGroups =
                 $"{name} outside the expression of a calculation item (\"Can only be referenced in the expression for a calculation item\": Learn)"
 
     /// The measure an argument of ISSELECTEDMEASURE names, as the code it is written in sees it.
-    let private measureNamed (ctx: Ctx) (arg: Expr) : BMeasure option =
-        let find (name: string) =
-            let fromQuery =
-                if ctx.Scope.InQuery && not (isNull ctx.Query) then
-                    match ctx.Query.Measures.TryGetValue name with
-                    | true, m -> Some m
-                    | _ -> None
-                else
-                    None
-
-            fromQuery
-            |> Option.orElseWith (fun () ->
-                match ctx.Model.Measures.TryGetValue name with
-                | true, m -> Some m
-                | _ -> None)
-
-        match (Fn.unparen arg).Kind with
-        | Bracketed name -> find name
-        | Qualified(table, name) ->
-            match ctx.Model.TableByName.TryGetValue table.Name with
-            | true, t when not (t.ColumnByName.ContainsKey name) -> find name
-            | _ -> None
-        | _ -> None
+    let private measureNamed (ctx: Ctx) (arg: Expr) : BMeasure option = Context.tryMeasureExpr ctx arg
 
     let functions: DaxFunction list = [
         // "A reference to the measure that is currently in context when the calculation item or
@@ -209,7 +187,7 @@ module CalculationGroups =
 
             let named =
                 call.Args
-                |> List.map (fun a ->
+                |> Array.map (fun a ->
                     match measureNamed ctx a with
                     | Some m -> m
                     | None ->
@@ -227,7 +205,7 @@ module CalculationGroups =
                     call.Span
                     $"ISSELECTEDMEASURE when the measure in context is a query measure that redefines the model's [{app.Measure.Name}]"
 
-            DaxValue.Boolean(named |> List.exists (fun m -> obj.ReferenceEquals(m, app.Measure))))
+            DaxValue.Boolean(named |> Array.exists (fun m -> obj.ReferenceEquals(m, app.Measure))))
 
         // SELECTEDMEASUREFORMATSTRING is in Functions/FormatStrings.fs.
     ]

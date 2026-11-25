@@ -204,6 +204,8 @@ open System
 open System.Collections.Concurrent
 open System.Collections.Generic
 open System.Numerics
+open System.Runtime.CompilerServices
+open System.Threading
 open Semctl
 open Semctl.DaxAst
 
@@ -290,40 +292,56 @@ type RowSet private (size: int, isAll: bool, rows: int array, bits: uint64 array
 
     /// The members in ascending order. Do not modify.
     member _.Rows: int array =
-        if isNull rows then
-            rows <-
+        let current = Volatile.Read(&rows)
+
+        if not (isNull current) then
+            current
+        else
+            let computed =
                 if isAll then
                     Array.init size id
                 else
                     extract size bits count
 
-        rows
+            Volatile.Write(&rows, computed)
+            computed
 
     member this.Bits: uint64 array =
-        if isNull bits then
+        let current = Volatile.Read(&bits)
+
+        if not (isNull current) then
+            current
+        else
             let b = Array.zeroCreate<uint64>((size + 63) >>> 6)
 
             if isAll then
                 for i in 0 .. size - 1 do
                     b.[i >>> 6] <- b.[i >>> 6] ||| (1UL <<< (i &&& 63))
             else
-                for i in rows do
+                for i in this.Rows do
                     b.[i >>> 6] <- b.[i >>> 6] ||| (1UL <<< (i &&& 63))
 
-            bits <- b
-
-        bits
+            Volatile.Write(&bits, b)
+            b
 
     member this.Contains(i: int) : bool =
         if isAll then
             i >= 0 && i < size
-        elif not (isNull bits) then
-            i >= 0 && i < size && ((bits.[i >>> 6] >>> (i &&& 63)) &&& 1UL) <> 0UL
-        elif rows.Length <= 8 then
-            Array.IndexOf(rows, i) >= 0
+        elif i < 0 || i >= size then
+            false
         else
-            let b = this.Bits
-            i >= 0 && i < size && ((b.[i >>> 6] >>> (i &&& 63)) &&& 1UL) <> 0UL
+            let b = Volatile.Read(&bits)
+
+            if not (isNull b) then
+                ((b.[i >>> 6] >>> (i &&& 63)) &&& 1UL) <> 0UL
+            else
+                let r = Volatile.Read(&rows)
+
+                if not (isNull r) && r.Length <= 8 then
+                    Array.IndexOf(r, i) >= 0
+                else
+                    let b = this.Bits
+                    ((b.[i >>> 6] >>> (i &&& 63)) &&& 1UL) <> 0UL
 
     /// A hash of the members (and of `Size` and `IsAll`), for keys of caches (see Caching.fs).
     /// Up to 32 members it is of the members, above of the words of `Bits`.
@@ -437,19 +455,14 @@ type ReferenceArrayComparer() =
             h
 
 type IntArrayComparer() =
-    static member val Instance = IntArrayComparer()
+    static member val Instance: IEqualityComparer<int array> = IntArrayComparer()
 
     interface IEqualityComparer<int array> with
         member _.Equals(a, b) =
-            a.Length = b.Length
-            && (let mutable same = true
-                let mutable i = 0
-
-                while same && i < a.Length do
-                    same <- a.[i] = b.[i]
-                    i <- i + 1
-
-                same)
+            obj.ReferenceEquals(a, b)
+            || (not (isNull a)
+                && not (isNull b)
+                && ReadOnlySpan<int>(a).SequenceEqual(ReadOnlySpan<int>(b)))
 
         member _.GetHashCode a =
             let mutable h = 17
@@ -705,6 +718,7 @@ type BColumn(id: int, table: BTable, name: string, dataType: DaxType) =
 
 /// A model table bound to its data.
 and [<Sealed; AllowNullLiteral>] BTable(id: int, model: Model, name: string) =
+    let sync = obj ()
     let mutable rowCount = -1
     let mutable blankRow = 0 // 0 unknown, 1 no, 2 yes
     let mutable unique: BColumn option voption = ValueNone
@@ -763,69 +777,70 @@ and [<Sealed; AllowNullLiteral>] BTable(id: int, model: Model, name: string) =
     /// ProductKey is unique, has the circular dependency. A calculated key column not computed yet
     /// is computed (the transition depends on it); one being computed is no key.
     member this.UniqueColumn: BColumn option =
-        match unique with
-        | ValueSome u -> u
-        | ValueNone ->
-            let candidates =
-                model.Rels
-                |> Array.collect (fun r ->
-                    if r.Limited then [||]
-                    elif r.OneToOne then [| r.To; r.From |]
-                    else [| r.To |])
-                |> Array.filter (fun c -> obj.ReferenceEquals(c.Table, this))
-                |> Array.distinct
+        lock sync (fun () ->
+            match unique with
+            | ValueSome u -> u
+            | ValueNone ->
+                let candidates =
+                    model.Rels
+                    |> Array.collect (fun r ->
+                        if r.Limited then [||]
+                        elif r.OneToOne then [| r.To; r.From |]
+                        else [| r.To |])
+                    |> Array.filter (fun c -> obj.ReferenceEquals(c.Table, this))
+                    |> Array.distinct
 
-            let u =
-                candidates
-                |> Array.tryFind (fun c -> not c.Computing && c.Data.IsUnique && c.Data.BlankId < 0)
+                let u =
+                    candidates
+                    |> Array.tryFind (fun c -> not c.Computing && c.Data.IsUnique && c.Data.BlankId < 0)
 
-            if candidates |> Array.forall (fun c -> not c.Computing) then
-                unique <- ValueSome u
+                if candidates |> Array.forall (fun c -> not c.Computing) then
+                    unique <- ValueSome u
 
-            u
+                u)
 
     /// For a table with rows that repeat in every column: for each row, the rows equal to it
     /// (itself included), or null for a row that is alone. Null when no row repeats. During
     /// `prepare` this is over the columns computed so far.
     member this.Duplicates: int array array =
-        let ready = this.Columns |> Array.filter _.IsReady
+        lock sync (fun () ->
+            let ready = this.Columns |> Array.filter _.IsReady
 
-        match duplicates with
-        | ValueSome(stamp, d) when stamp = ready.Length -> d
-        | _ ->
-            let n = this.RowCount
-            let cols = ready |> Array.map (fun c -> c.Data.ValueIds)
+            match duplicates with
+            | ValueSome(stamp, d) when stamp = ready.Length -> d
+            | _ ->
+                let n = this.RowCount
+                let cols = ready |> Array.map (fun c -> c.Data.ValueIds)
 
-            let groups =
-                Dictionary<int array, ResizeArray<int>>(IntArrayComparer.Instance :> IEqualityComparer<int array>)
+                let groups = Dictionary<int array, ResizeArray<int>>(IntArrayComparer.Instance)
 
-            for row in 0 .. n - 1 do
-                let key = cols |> Array.map (fun ids -> ids.[row])
+                for row in 0 .. n - 1 do
+                    let key = cols |> Array.map (fun ids -> ids.[row])
 
-                match groups.TryGetValue key with
-                | true, list -> list.Add row
-                | _ ->
-                    let list = ResizeArray<int>()
-                    list.Add row
-                    groups.[key] <- list
+                    match groups.TryGetValue key with
+                    | true, list -> list.Add row
+                    | _ ->
+                        let list = ResizeArray<int>()
+                        list.Add row
+                        groups.[key] <- list
 
-            let result =
-                if groups.Count = n then
-                    null
-                else
-                    let per = Array.zeroCreate<int array> n
+                let result =
+                    if groups.Count = n then
+                        null
+                    else
+                        let per = Array.zeroCreate<int array> n
 
-                    for kv in groups do
-                        if kv.Value.Count > 1 then
-                            let rows = kv.Value.ToArray()
+                        for kv in groups do
+                            if kv.Value.Count > 1 then
+                                let rows = kv.Value.ToArray()
 
-                            for r in rows do
-                                per.[r] <- rows
+                                for r in rows do
+                                    per.[r] <- rows
 
-                    per
+                        per
 
-            duplicates <- ValueSome(ready.Length, result)
-            result
+                duplicates <- ValueSome(ready.Length, result)
+                result)
 
 /// A single-column relationship: `From` is the many side, `To` the one side. A limited relationship
 /// (`Limited`: many-to-many cardinality) has no one side: `To` filters `From`, and `From` filters
@@ -1261,6 +1276,10 @@ and [<Sealed; AllowNullLiteral>] BCalcGroup(name: string, table: BTable, precede
     /// Why every measure reference is refused, filtered or not (two groups with one precedence).
     member val Refused: string option = None with get, set
 
+and [<RequireQualifiedAccess>] ComputingItem =
+    | Column of BColumn
+    | Table of BTable
+
 and [<Sealed; AllowNullLiteral>] Model(collation: Collation) =
     let configs = ConcurrentDictionary<string, RelConfig>()
     let mutable defaultConfig: RelConfig = null
@@ -1280,7 +1299,7 @@ and [<Sealed; AllowNullLiteral>] Model(collation: Collation) =
     member val ForceTable: BTable -> unit = ignore with get, set
     member val ForceBlankRow: BTable -> unit = ignore with get, set
     /// The calculated columns (`BColumn`) and tables (`BTable`) being computed, innermost on top.
-    member val Computing = Stack<obj>() with get
+    member val Computing = Stack<ComputingItem>() with get
     /// The instant TODAY and NOW see (local time), fixed when the model is prepared: every
     /// calculated table and column and every query sees the same one.
     member val Now: DateTime = DateTime.MinValue with get, set
@@ -1426,11 +1445,10 @@ and SelectionMark = {
 
 /// The caches of a filter context that depend on its filters and relationships alone (see
 /// `FilterCtx.State`), made when first used.
-[<Sealed; AllowNullLiteral>]
-type FilterState() =
+and [<Sealed; AllowNullLiteral>] FilterState() =
     let mutable visible: Dictionary<int, RowSet> = null
     let mutable inProgress: HashSet<int> = null
-    let mutable bases: Dictionary<obj array, obj> = null
+    let mutable bases: Dictionary<obj array, FilterCtx> = null
 
     member _.Visible: Dictionary<int, RowSet> =
         if isNull visible then
@@ -1445,9 +1463,9 @@ type FilterState() =
         inProgress
 
     /// What `Filters.add` kept of these filters, by what the filters added replace.
-    member _.Bases: Dictionary<obj array, obj> =
+    member _.Bases: Dictionary<obj array, FilterCtx> =
         if isNull bases then
-            bases <- Dictionary<obj array, obj>(ReferenceArrayComparer.Instance)
+            bases <- Dictionary<obj array, FilterCtx>(ReferenceArrayComparer.Instance)
 
         bases
 
@@ -1461,9 +1479,9 @@ type FilterState() =
 
 /// A filter context: filters, and the relationships in force. Immutable; the caches belong to one
 /// evaluation (one thread).
-[<Sealed; AllowNullLiteral>]
-type FilterCtx(filters: Filter list, config: RelConfig, scope: ScopeMark list, state: FilterState) =
-    let mutable measures: Dictionary<obj, DaxValue> = null
+and [<Sealed; AllowNullLiteral>] FilterCtx
+    (filters: Filter list, config: RelConfig, scope: ScopeMark list, state: FilterState) =
+    let mutable measures: Dictionary<BMeasure, DaxValue> = null
 
     new(filters: Filter list, config: RelConfig, scope: ScopeMark list) =
         FilterCtx(filters, config, scope, FilterState())
@@ -1495,13 +1513,14 @@ type FilterCtx(filters: Filter list, config: RelConfig, scope: ScopeMark list, s
     /// The full computation check mode compares with (`Private`, and without shortcuts).
     member val Reference = false with get, set
 
-    member _.Measures: Dictionary<obj, DaxValue> =
+    member _.Measures: Dictionary<BMeasure, DaxValue> =
         if isNull measures then
-            measures <- Dictionary<obj, DaxValue>(HashIdentity.Reference)
+            measures <- Dictionary<BMeasure, DaxValue>(HashIdentity.Reference)
 
         measures
 
 /// One level of row context: a row of a table.
+[<Struct>]
 type RowCtx = { Table: TableVal; Row: int }
 
 /// What a name is bound to: a VAR or a VAL parameter (a value, computed once, on first use), or an
@@ -1578,9 +1597,10 @@ type Ctx = {
     Items: ItemCtx
 }
 
+[<Struct>]
 type Call = {
     Name: Ident
-    Args: Expr list
+    Args: Expr array
     /// The whole call.
     Span: Span
 }
@@ -1714,6 +1734,14 @@ module Fn =
 
     let withCheck (check: Expr list -> string option) (f: DaxFunction) = { f with Check = check }
 
+    let private argsCache = ConditionalWeakTable<Expr list, Expr array>()
+
+    /// Cached array view of a parsed argument list so per-row call construction allocates nothing.
+    let argsArray (args: Expr list) : Expr array =
+        match args with
+        | [] -> [||]
+        | _ -> argsCache.GetValue(args, fun xs -> Array.ofList xs)
+
     /// The expression without the parentheses around it.
     let rec unparen (e: Expr) : Expr =
         match e.Kind with
@@ -1728,5 +1756,58 @@ module Fn =
 
     let isOmitted (e: Expr) =
         match e.Kind with
-        | Omitted -> true
+        | ExprKind.Omitted -> true
         | _ -> false
+
+    /// The argument at `n` if present and not omitted.
+    let tryArg (n: int) (args: Expr array) : Expr option =
+        if n >= 0 && n < args.Length && not (isOmitted args.[n]) then
+            Some args.[n]
+        else
+            None
+
+    /// The argument at `n` in an argument list if present and not omitted.
+    let tryListArg (n: int) (args: Expr list) : Expr option =
+        match List.tryItem n args with
+        | Some e when not (isOmitted e) -> Some e
+        | _ -> None
+
+    /// Parse a DAX sort direction argument (`DESC`/`0`/`FALSE` -> Some true, `ASC`/`1`/`TRUE` -> Some false).
+    let parseSortOrder (e: Expr) : bool option =
+        match keyword e with
+        | Some "DESC" -> Some true
+        | Some "ASC" -> Some false
+        | _ ->
+            match (unparen e).Kind with
+            | IntegerLiteral(0L, _)
+            | BooleanLiteral false -> Some true
+            | IntegerLiteral(1L, _)
+            | BooleanLiteral true -> Some false
+            | _ -> None
+
+    /// Run `checks` in order and return the first refusal message.
+    let firstCheck (checks: (Expr list -> string option) list) (args: Expr list) : string option =
+        checks |> List.tryPick (fun check -> check args)
+
+[<AutoOpen>]
+module Patterns =
+    let (|Unparen|) (e: Expr) = Fn.unparen e
+
+    let (|Omitted|_|) (e: Expr) = if Fn.isOmitted e then Some() else None
+
+    let (|CallTo|_|) (names: string list) (e: Expr) : Call option =
+        match (Fn.unparen e).Kind with
+        | Call(name, args) when
+            names
+            |> List.exists (fun n -> String.Equals(name.Name, n, StringComparison.OrdinalIgnoreCase))
+            ->
+            Some {
+                Name = name
+                Args = Fn.argsArray args
+                Span = e.Span
+            }
+        | _ -> None
+
+    let (|ModelTable|_|) (ev: IEval) (ctx: Ctx) (e: Expr) = ev.TryModelTable(ctx, e)
+
+    let (|ModelColumn|_|) (ev: IEval) (ctx: Ctx) (e: Expr) = ev.TryColumn(ctx, e)

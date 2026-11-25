@@ -296,14 +296,23 @@ module Window =
                         Blanks = None
                     }
                     :: rest)
-            | e :: o :: tail when (order o).IsSome ->
-                match (order o).Value with
-                | Error m -> Error m
-                | Ok(d, b) ->
+            | e :: o :: tail ->
+                match order o with
+                | Some(Error m) -> Error m
+                | Some(Ok(d, b)) ->
                     read tail
                     |> Result.map (fun rest -> { Expr = e; Descending = d; Blanks = b } :: rest)
-            | e :: tail ->
-                read tail
+                | None ->
+                    read (o :: tail)
+                    |> Result.map (fun rest ->
+                        {
+                            Expr = e
+                            Descending = false
+                            Blanks = None
+                        }
+                        :: rest)
+            | [ e ] ->
+                read []
                 |> Result.map (fun rest ->
                     {
                         Expr = e
@@ -343,7 +352,7 @@ module Window =
                 $"{name} without its relation argument and with ORDERBY and PARTITIONBY columns of more than one table"
 
         let allSelected: Expr = {
-            Kind = Call({ Name = "ALLSELECTED"; Span = span }, columns)
+            Kind = ExprKind.Call({ Name = "ALLSELECTED"; Span = span }, columns)
             Span = span
         }
 
@@ -489,8 +498,10 @@ module Window =
         let invalid (span: Span option) (m: string) =
             Fail.invalid ctx (defaultArg span call.Span) m
 
+        let argList = List.ofArray call.Args
+
         let p =
-            match parse name call.Args with
+            match parse name argList with
             | Ok p -> p
             | Error(span, m) -> invalid span m
 
@@ -499,7 +510,7 @@ module Window =
             | Ok c -> c
             | Error(span, m) -> invalid span m
 
-        match check name call.Args with
+        match check name argList with
         | Some why -> Fail.notSupported ctx call.Span why
         | None -> ()
 
