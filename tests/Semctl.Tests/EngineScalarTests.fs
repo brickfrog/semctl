@@ -488,5 +488,9 @@ let tests =
                 Expect.equal (scalar (p ()) "TRUE") (QueryValue.Boolean true) "boolean"
                 Expect.equal (scalar (p ()) "dt\"2024-01-31\"") (QueryValue.DateTime(DateTime(2024, 1, 31))) "date"
                 Expect.equal (scalar (p ()) "BLANK ()") QueryValue.Blank "blank")
+
+            testCase "malformed arity in scalar context returns DaxInvalid rather than crashing" (fun () ->
+                isError "dax-invalid" "SUM ()"
+                isError "dax-invalid" "CONVERT ( 1 )")
         ]
     ]

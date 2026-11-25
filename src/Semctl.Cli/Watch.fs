@@ -153,7 +153,7 @@ type Changes() =
     member _.Quiet = Diagnostics.Stopwatch.GetElapsedTime(Interlocked.Read &last)
 
     /// Wait until something has changed since the last Take.
-    member _.Wait(token: CancellationToken) = signal.WaitAsync(token)
+    member _.Wait(token: CancellationToken) = signal.Wait(token)
 
     /// Mark the changes so far as acted on.
     member _.Take() =
@@ -200,10 +200,16 @@ type Poller(scope: Scope, interval: TimeSpan, changes: Changes) =
                 while not stop.IsCancellationRequested do
                     do! Task.Delay(interval, stop.Token)
                     let now = snapshot scope
-                    let differs = lock gate (fun () -> now <> baseline)
 
-                    if differs then
-                        lock gate (fun () -> baseline <- now)
+                    let changed =
+                        lock gate (fun () ->
+                            if now <> baseline then
+                                baseline <- now
+                                true
+                            else
+                                false)
+
+                    if changed then
                         changes.Notify()
             with :? OperationCanceledException ->
                 ()
@@ -236,32 +242,37 @@ let private watchers (scope: Scope) (changes: Changes) (onError: string -> unit)
     let watch (folder: string) (recursive: bool) =
         try
             let w = new FileSystemWatcher(folder)
-            w.IncludeSubdirectories <- recursive
 
-            w.NotifyFilter <-
-                NotifyFilters.FileName
-                ||| NotifyFilters.DirectoryName
-                ||| NotifyFilters.LastWrite
-                ||| NotifyFilters.Size
-                ||| NotifyFilters.CreationTime
+            try
+                w.IncludeSubdirectories <- recursive
 
-            w.InternalBufferSize <- 64 * 1024
-            w.Changed.Add(fun e -> notifyIf e.FullPath)
-            w.Created.Add(fun e -> notifyIf e.FullPath)
-            w.Deleted.Add(fun e -> notifyIf e.FullPath)
+                w.NotifyFilter <-
+                    NotifyFilters.FileName
+                    ||| NotifyFilters.DirectoryName
+                    ||| NotifyFilters.LastWrite
+                    ||| NotifyFilters.Size
+                    ||| NotifyFilters.CreationTime
 
-            w.Renamed.Add(fun e ->
-                // An editor's save-rename: the old name is often a temporary file, the new one counts.
-                notifyIf e.FullPath
-                notifyIf e.OldFullPath)
+                w.InternalBufferSize <- 64 * 1024
+                w.Changed.Add(fun e -> notifyIf e.FullPath)
+                w.Created.Add(fun e -> notifyIf e.FullPath)
+                w.Deleted.Add(fun e -> notifyIf e.FullPath)
 
-            w.Error.Add(fun e ->
-                // A buffer overflow loses events: run again to be safe, and let the poller carry on.
-                onError (e.GetException().Message)
-                changes.Notify())
+                w.Renamed.Add(fun e ->
+                    // An editor's save-rename: the old name is often a temporary file, the new one counts.
+                    notifyIf e.FullPath
+                    notifyIf e.OldFullPath)
 
-            w.EnableRaisingEvents <- true
-            Some(w :> IDisposable)
+                w.Error.Add(fun e ->
+                    // A buffer overflow loses events: run again to be safe, and let the poller carry on.
+                    onError (e.GetException().Message)
+                    changes.Notify())
+
+                w.EnableRaisingEvents <- true
+                Some(w :> IDisposable)
+            with _ ->
+                w.Dispose()
+                reraise ()
         with e ->
             onError e.Message
             None
@@ -418,10 +429,14 @@ let runWithChanges
     (command: Ctx -> Outcome)
     : Outcome =
     let reported = HashSet<string>()
+    let errGate = Object()
+
+    let writeErr (line: string) =
+        lock errGate (fun () -> ctx.Err.WriteLine line)
 
     let onError (message: string) =
         if not ctx.Json && lock reported (fun () -> reported.Add message) then
-            ctx.Err.WriteLine($"sm: watch: {message}; polling for changes instead")
+            writeErr $"sm: watch: {message}; polling for changes instead"
 
     // Watch before the first run, so nothing saved during it is missed.
     let watching =
@@ -439,7 +454,7 @@ let runWithChanges
             let time =
                 DateTime.Now.ToString("HH:mm:ss", Globalization.CultureInfo.InvariantCulture)
 
-            ctx.Err.WriteLine($"[{time}] watching {Scope.describe scope} (Ctrl+C to stop)")
+            writeErr $"[{time}] watching {Scope.describe scope} (Ctrl+C to stop)"
 
     let rebase () =
         poller |> Option.iter (fun p -> p.Rebase())
@@ -455,24 +470,25 @@ let runWithChanges
 
             try
                 while not token.IsCancellationRequested do
-                    changes.Wait(token).Wait(token)
+                    changes.Wait(token)
 
                     // Debounce: wait until nothing has changed for a quiet period.
                     let mutable quiet = changes.Quiet
 
                     while quiet < options.Debounce do
-                        Task.Delay(options.Debounce - quiet, token).Wait(token)
+                        if token.WaitHandle.WaitOne(options.Debounce - quiet) then
+                            raise (OperationCanceledException token)
+
                         quiet <- changes.Quiet
 
-                    // The baseline first: a poll between the two would report what this run reads.
-                    rebase ()
+                    // Clear pending before rebase/run so watcher events arriving during either aren't dropped.
                     changes.Take()
+                    rebase ()
                     let _, code = runOnce options ctx command
                     onRun code
                     status ()
-            with
-            | :? OperationCanceledException -> ()
-            | :? AggregateException as e when (e.InnerException :? OperationCanceledException) -> ()
+            with :? OperationCanceledException ->
+                ()
 
             Done
     finally

@@ -92,7 +92,7 @@ let private secret (env: Credentials.Environment) (direct: string) (file: string
 
 let private token (env: Credentials.Environment) =
     secret env Var.token Var.tokenFile
-    |> Result.map (Option.map SqlCredential.AccessToken)
+    |> Result.map (Option.map (fun t -> SqlCredential.AccessToken(t.Trim())))
 
 /// The service principal connected mode uses: SM_XMLA_CLIENT_ID / _TENANT_ID / _CLIENT_SECRET(_FILE),
 /// else AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_CLIENT_SECRET.

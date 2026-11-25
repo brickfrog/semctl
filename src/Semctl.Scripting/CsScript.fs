@@ -254,21 +254,22 @@ let private framework = [
     "netstandard"
 ]
 
-let private references () =
-    for name in framework do
-        try
-            System.Reflection.Assembly.Load name |> ignore
-        with _ ->
-            ()
+let private references =
+    lazy
+        (for name in framework do
+            try
+                System.Reflection.Assembly.Load name |> ignore
+            with _ ->
+                ()
 
-    typeof<Model>.Assembly |> ignore
-    typeof<Host>.Assembly |> ignore
+         typeof<Model>.Assembly |> ignore
+         typeof<Host>.Assembly |> ignore
 
-    AppDomain.CurrentDomain.GetAssemblies()
-    |> Array.filter (fun a -> not a.IsDynamic)
-    |> Array.distinctBy (fun a -> a.GetName().Name)
-    |> Array.choose reference
-    |> List.ofArray
+         AppDomain.CurrentDomain.GetAssemblies()
+         |> Array.filter (fun a -> not a.IsDynamic)
+         |> Array.distinctBy (fun a -> a.GetName().Name)
+         |> Array.choose reference
+         |> List.ofArray)
 
 /// Compile a script: the program's bytes, or its errors as "<file>(<line>,<col>): error CSxxxx: ...".
 let compile (path: string) (text: string) : Result<byte array, string list> =
@@ -282,7 +283,7 @@ let compile (path: string) (text: string) : Result<byte array, string list> =
                 CSharpSyntaxTree.ParseText(preamble, options, "<preamble>")
                 CSharpSyntaxTree.ParseText(text, options, path)
             ],
-            references (),
+            references.Value,
             CSharpCompilationOptions(
                 OutputKind.ConsoleApplication,
                 nullableContextOptions = NullableContextOptions.Disable
@@ -306,43 +307,59 @@ let private gate = obj ()
 /// Run a script file against `model`, mutating it. The script's output (Console, Info, Warning,
 /// Output) goes to `out`.
 let run (model: Model) (path: string) (out: TextWriter) : Result<unit, SemctlError> =
-    if not (File.Exists path) then
-        Error(PathNotFound path)
-    else
-        let text = File.ReadAllText path
+    let textResult =
+        if not (File.Exists path) then
+            Error(PathNotFound path)
+        else
+            try
+                Ok(File.ReadAllText path)
+            with
+            | :? IOException
+            | :? UnauthorizedAccessException as e -> Error(LoadFailed(path, e.Message))
 
+    match textResult with
+    | Error e -> Error e
+    | Ok text ->
         match compile path text with
         | Error diagnostics -> Error(CSharpCompileFailed(path, diagnostics))
         | Ok bytes ->
             lock gate (fun () ->
-                let assembly = System.Reflection.Assembly.Load(bytes: byte array)
-                let entry = assembly.EntryPoint
+                let alc = System.Runtime.Loader.AssemblyLoadContext(null, isCollectible = true)
                 let original = Console.Out
-                Host.Model <- model
-                Host.Out <- out
-                Console.SetOut out
 
                 try
-                    try
-                        let args: obj array =
-                            if entry.GetParameters().Length = 0 then
-                                [||]
-                            else
-                                [| box ([||]: string array) |]
+                    use pe = new MemoryStream(bytes)
+                    let assembly = alc.LoadFromStream pe
 
-                        match entry.Invoke(null, args) with
-                        | :? Threading.Tasks.Task as t -> t.GetAwaiter().GetResult()
-                        | _ -> ()
+                    match assembly.EntryPoint with
+                    | null -> Error(CSharpScriptFailed(path, "compiled script has no entry point"))
+                    | entry ->
+                        Host.Model <- model
+                        Host.Out <- out
+                        Console.SetOut out
 
-                        Ok()
-                    with
-                    | :? TargetInvocationException as e ->
-                        match e.InnerException with
+                        try
+                            let args: obj array =
+                                if entry.GetParameters().Length = 0 then
+                                    [||]
+                                else
+                                    [| box ([||]: string array) |]
+
+                            match entry.Invoke(null, args) with
+                            | :? Threading.Tasks.Task as t -> t.GetAwaiter().GetResult()
+                            | _ -> ()
+
+                            Ok()
+                        with
+                        | :? TargetInvocationException as e ->
+                            match e.InnerException with
+                            | null -> Error(CSharpScriptFailed(path, e.Message))
+                            | ScriptError message -> Error(CSharpScriptFailed(path, message))
+                            | inner -> Error(CSharpScriptFailed(path, $"{inner.GetType().Name}: {inner.Message}"))
                         | ScriptError message -> Error(CSharpScriptFailed(path, message))
-                        | inner -> Error(CSharpScriptFailed(path, $"{inner.GetType().Name}: {inner.Message}"))
-                    | ScriptError message -> Error(CSharpScriptFailed(path, message))
                 finally
                     out.Flush()
                     Console.SetOut original
                     Host.Model <- null
-                    Host.Out <- TextWriter.Null)
+                    Host.Out <- TextWriter.Null
+                    alc.Unload())

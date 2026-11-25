@@ -22,21 +22,29 @@ let write (path: string) (data: byte array) : unit =
     | "" -> ()
     | dir -> Directory.CreateDirectory dir |> ignore
 
-    let temp = full + ".tmp"
+    let temp = $"{full}.{Guid.NewGuid():N}.tmp"
 
     let options =
-        FileStreamOptions(Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.None)
+        FileStreamOptions(Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None)
 
     if not (OperatingSystem.IsWindows()) then
         options.UnixCreateMode <- UnixFileMode.UserRead ||| UnixFileMode.UserWrite
 
-    if File.Exists temp then
-        File.Delete temp
+    try
+        do
+            use stream = new FileStream(temp, options)
+            stream.Write(data, 0, data.Length)
 
-    using (new FileStream(temp, options)) (fun stream -> stream.Write(data, 0, data.Length))
+        if not (OperatingSystem.IsWindows()) then
+            // The mode above applies only when the file is created; make sure of it either way.
+            File.SetUnixFileMode(temp, UnixFileMode.UserRead ||| UnixFileMode.UserWrite)
 
-    if not (OperatingSystem.IsWindows()) then
-        // The mode above applies only when the file is created; make sure of it either way.
-        File.SetUnixFileMode(temp, UnixFileMode.UserRead ||| UnixFileMode.UserWrite)
+        File.Move(temp, full, true)
+    with _ ->
+        try
+            if File.Exists temp then
+                File.Delete temp
+        with _ ->
+            ()
 
-    File.Move(temp, full, true)
+        reraise ()

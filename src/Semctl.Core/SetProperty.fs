@@ -354,10 +354,9 @@ let private namedEntry (ctx: Ctx) (node: Node) (p: PropertyInfo) (named: Named) 
 
             items
             |> List.tryFind (fun i -> i.Name = name)
-            |> Option.orElse (
+            |> Option.orElseWith (fun () ->
                 items
-                |> List.tryFind (fun i -> String.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase))
-            )
+                |> List.tryFind (fun i -> String.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase)))
 
     let current = find ()
 

@@ -852,7 +852,12 @@ type Evaluator(registry: IReadOnlyDictionary<string, DaxFunction>) as this =
             | VarBlock(vars, body) -> ev.TypeOf(bindVars ctx vars, body)
             | Call(name, args) ->
                 match registry.TryGetValue(upper name.Name) with
-                | true, fn when fn.Returns = Returns.Scalar -> fn.Type ev ctx args
+                | true, fn when
+                    fn.Returns = Returns.Scalar
+                    && args.Length >= fn.MinArgs
+                    && (fn.MaxArgs < 0 || args.Length <= fn.MaxArgs)
+                    ->
+                    fn.Type ev ctx args
                 | _ -> unknown
             | _ -> unknown
 

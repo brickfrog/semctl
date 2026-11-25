@@ -218,7 +218,11 @@ module Credentials =
                         $"{Var.auth}={mode} only works with powerbi:// and asazure:// servers, not {server}"
                 )
 
-        let require (found: Result<XmlaCredential option, SemctlError>) = found |> Result.map Option.get
+        let require (found: Result<XmlaCredential option, SemctlError>) =
+            found
+            |> Result.bind (function
+                | Some c -> Ok c
+                | None -> Error(InvalidCredentials "no credentials configured"))
 
         match (env.GetEnv Var.auth |> Option.defaultValue "auto").Trim().ToLowerInvariant() with
         | "token" -> cloudOnly "token" (fun () -> require (token env true))

@@ -22,7 +22,7 @@ let find (db: Database) (name: string) : Result<Perspective, SemctlError> =
     match
         all
         |> List.tryFind (fun p -> p.Name = name)
-        |> Option.orElse (all |> List.tryFind (fun p -> eqCi p.Name name))
+        |> Option.orElseWith (fun () -> all |> List.tryFind (fun p -> eqCi p.Name name))
     with
     | Some p -> Ok p
     | None ->

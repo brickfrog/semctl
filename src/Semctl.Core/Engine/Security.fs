@@ -615,8 +615,8 @@ module Security =
                         let expr =
                             match DaxParser.parseExpression text with
                             | Ok e -> e
-                            | Error errors ->
-                                let e = errors.Head
+                            | Error [] -> raise (EngineException(DaxSyntax(source.Label, 1, 1, "syntax error")))
+                            | Error(e :: _) ->
                                 raise (EngineException(DaxSyntax(source.Label, e.Line, e.Column, e.Message)))
 
                         let verdict = evaluateFilter ev model identity bt source expr

@@ -1114,13 +1114,15 @@ and [<Sealed; AllowNullLiteral>] RelConfig(model: Model, active: bool array, bot
     member _.Active = active
     member _.Both = both
 
-    member val Key =
+    static member KeyOf(active: bool array, both: bool array) =
         String(
             Array.init active.Length (fun i ->
                 if not active.[i] then '0'
                 elif both.[i] then '2'
                 else '1')
         )
+
+    member val Key = RelConfig.KeyOf(active, both)
 
     /// The active relationships in which the table is the many side (its `From`), limited ones
     /// included.
@@ -1293,8 +1295,8 @@ and [<Sealed; AllowNullLiteral>] Model(collation: Collation) =
     member val Incremental = IncrementalStats() with get
 
     member this.Config(active: bool array, both: bool array) : RelConfig =
-        let c = RelConfig(this, active, both)
-        configs.GetOrAdd(c.Key, c)
+        let key = RelConfig.KeyOf(active, both)
+        configs.GetOrAdd(key, fun _ -> RelConfig(this, active, both))
 
     member this.DefaultConfig: RelConfig =
         if isNull defaultConfig then

@@ -315,12 +315,19 @@ let collect (db: Database) (loaded: Fixture.Loaded) : Stats =
                             | _ -> None)
                     |> List.ofSeq
 
+                let levels =
+                    List.foldBack
+                        (fun item acc ->
+                            match item, acc with
+                            | Some x, Some xs -> Some(x :: xs)
+                            | _ -> None)
+                        levels
+                        (Some [])
+
                 let size =
-                    if levels |> List.exists Option.isNone || levels.IsEmpty then
-                        None
-                    else
-                        let levels = levels |> List.map Option.get
-                        let rows = levels.Head.Length
+                    match levels with
+                    | Some(first :: _ as levels) ->
+                        let rows = first.Length
                         let seen = HashSet<int64 list>(HashIdentity.Structural)
 
                         let combos = [
@@ -335,6 +342,7 @@ let collect (db: Database) (loaded: Fixture.Loaded) : Stats =
                         ]
 
                         Some(Estimate.userHierarchySize combos)
+                    | _ -> None
 
                 {
                     Table = t.Name

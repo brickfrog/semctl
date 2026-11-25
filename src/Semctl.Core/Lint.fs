@@ -432,58 +432,61 @@ let private qualificationRules (ctx: Context) (dax: string) (code: Token array) 
         match r.Target, r.Start, r.Length with
         | Deps.Resolved target, Some start, Some length when not (inNameof start) ->
             let tokens = tokenize (dax.Substring(start, length)) |> significant
-            let last = List.last tokens
-            let bracketText = dax.Substring(start + last.Start, last.Length)
-            let qualified = tokens.Length > 1
 
-            match target.Kind with
-            | ObjectKind.Measure when qualified -> {
-                RuleId = "DI003"
-                Offset = start
-                Message = $"{r.Text} is a measure: write it without its table, as {bracketText}"
-                Fix =
-                    Some(
-                        [
-                            {
-                                Start = start
-                                Length = length
-                                Text = bracketText
-                            }
-                        ],
-                        SameReferences
-                    )
-              }
-            | ObjectKind.Column when not qualified ->
-                match ObjectRef.tableName target with
-                | Some table ->
-                    let full = quoteTable table + bracketText
-                    let ambiguous = ctx.MeasureNames.Contains(ObjectRef.name target)
+            match List.tryLast tokens with
+            | None -> ()
+            | Some last ->
+                let bracketText = dax.Substring(start + last.Start, last.Length)
+                let qualified = tokens.Length > 1
 
-                    {
-                        RuleId = "DI004"
-                        Offset = start
-                        Message =
-                            if ambiguous then
-                                $"{r.Text} is a column: write it with its table, as {full} (not fixed automatically: a measure has the same name)"
-                            else
-                                $"{r.Text} is a column: write it with its table, as {full}"
-                        Fix =
-                            if ambiguous then
-                                None
-                            else
-                                Some(
-                                    [
-                                        {
-                                            Start = start
-                                            Length = length
-                                            Text = full
-                                        }
-                                    ],
-                                    SameReferences
-                                )
-                    }
-                | None -> ()
-            | _ -> ()
+                match target.Kind with
+                | ObjectKind.Measure when qualified -> {
+                    RuleId = "DI003"
+                    Offset = start
+                    Message = $"{r.Text} is a measure: write it without its table, as {bracketText}"
+                    Fix =
+                        Some(
+                            [
+                                {
+                                    Start = start
+                                    Length = length
+                                    Text = bracketText
+                                }
+                            ],
+                            SameReferences
+                        )
+                  }
+                | ObjectKind.Column when not qualified ->
+                    match ObjectRef.tableName target with
+                    | Some table ->
+                        let full = quoteTable table + bracketText
+                        let ambiguous = ctx.MeasureNames.Contains(ObjectRef.name target)
+
+                        {
+                            RuleId = "DI004"
+                            Offset = start
+                            Message =
+                                if ambiguous then
+                                    $"{r.Text} is a column: write it with its table, as {full} (not fixed automatically: a measure has the same name)"
+                                else
+                                    $"{r.Text} is a column: write it with its table, as {full}"
+                            Fix =
+                                if ambiguous then
+                                    None
+                                else
+                                    Some(
+                                        [
+                                            {
+                                                Start = start
+                                                Length = length
+                                                Text = full
+                                            }
+                                        ],
+                                        SameReferences
+                                    )
+                        }
+                    | None -> ()
+                | _ -> ()
         | _ -> ()
 ]
 

@@ -549,7 +549,7 @@ let private resolveSource (index: Index) (s: DaxSource) : Reference list =
                     s.ContextTable |> Option.bind (fun table -> index.Member table.Name t.Text)
 
                 let target =
-                    match inContext |> Option.orElse (index.Measure t.Text) with
+                    match inContext |> Option.orElseWith (fun () -> index.Measure t.Text) with
                     | Some e -> resolved e
                     | None -> Unresolved(s.Dax.Substring(t.Start, t.Length))
 

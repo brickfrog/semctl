@@ -88,7 +88,7 @@ module Eol =
     /// git), else what the source uses (a Windows user's CRLF model stays CRLF), else LF.
     let resolveAuto (source: string) (destination: string) =
         detectAt destination
-        |> Option.orElse (detectAt source)
+        |> Option.orElseWith (fun () -> detectAt source)
         |> Option.defaultValue Lf
 
 type SaveOptions = {

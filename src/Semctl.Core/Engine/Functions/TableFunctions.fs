@@ -1255,7 +1255,9 @@ module TableFunctions =
                 |> Array.ofList
 
             Tables.addColumns header (extensions |> Array.map fst) (extensions |> Array.map snd))
-        |> Fn.withCheck (fun args -> checkHelpers "SUMMARIZE" args |> Option.orElse (checkGrouped "SUMMARIZE" args))
+        |> Fn.withCheck (fun args ->
+            checkHelpers "SUMMARIZE" args
+            |> Option.orElseWith (fun () -> checkGrouped "SUMMARIZE" args))
 
         // SUMMARIZECOLUMNS: see `summarizeColumns`.
         Fn.table "SUMMARIZECOLUMNS" "Table manipulation" (1, -1) summarizeColumns

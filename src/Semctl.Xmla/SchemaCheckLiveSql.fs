@@ -83,16 +83,20 @@ type private Describer(address: SqlAddress, env: Credentials.Environment) =
             let c =
                 new SqlConnection(connectionString address credential (trustServerCertificate env))
 
-            match credential with
-            | SqlCredential.AccessToken token -> c.AccessToken <- token
-            | SqlCredential.ServicePrincipal(clientId, tenantId, secret) ->
-                let token = servicePrincipalToken address.Server clientId tenantId secret
-                known <- token :: known
-                c.AccessToken <- token
-            | _ -> ()
+            try
+                match credential with
+                | SqlCredential.AccessToken token -> c.AccessToken <- token
+                | SqlCredential.ServicePrincipal(clientId, tenantId, secret) ->
+                    let token = servicePrincipalToken address.Server clientId tenantId secret
+                    known <- token :: known
+                    c.AccessToken <- token
+                | _ -> ()
 
-            c.Open()
-            c
+                c.Open()
+                c
+            with _ ->
+                c.Dispose()
+                reraise ()
         with
         | :? MsalException as e ->
             fail (
@@ -146,7 +150,9 @@ type private Describer(address: SqlAddress, env: Credentials.Environment) =
 
                 let columns = [
                     while reader.Read() do
-                        if not (reader.GetBoolean hidden) then
+                        let isHidden = not (reader.IsDBNull hidden) && reader.GetBoolean hidden
+
+                        if not isHidden then
                             {
                                 Name =
                                     if reader.IsDBNull name then

@@ -76,8 +76,6 @@ module RelationshipSpec =
         CrossFilter = None
     }
 
-/// What to create; the case decides the kind, which must match the reference's.
-[<RequireQualifiedAccess>]
 /// One category of a calendar: the time unit, the column that is its primary column, and its
 /// associated columns ("Each category has a primary column and can have zero or more associated
 /// columns", Microsoft Learn).
@@ -87,6 +85,8 @@ type CalendarCategory = {
     Associated: string list
 }
 
+/// What to create; the case decides the kind, which must match the reference's.
+[<RequireQualifiedAccess>]
 type Details =
     | Measure of expression: string
     | Column of ColumnSource
@@ -293,7 +293,7 @@ let private pick (items: 'T seq) (nameOf: 'T -> string) (wanted: string) =
 
     items
     |> List.tryFind (fun x -> nameOf x = wanted)
-    |> Option.orElse (items |> List.tryFind (fun x -> eqCi (nameOf x) wanted))
+    |> Option.orElseWith (fun () -> items |> List.tryFind (fun x -> eqCi (nameOf x) wanted))
 
 let private notFound (input: ObjectRef) (candidates: ObjectRef list) =
     match similar (candidates |> List.map ObjectRef.name) (ObjectRef.name input) with
@@ -1127,7 +1127,7 @@ let private addPartition (db: Database) entries (spec: AddSpec) (table: string) 
 
                     let mode =
                         mode
-                        |> Option.orElse (t.Partitions |> Seq.tryHead |> Option.map (fun p -> p.Mode))
+                        |> Option.orElseWith (fun () -> t.Partitions |> Seq.tryHead |> Option.map (fun p -> p.Mode))
                         |> Option.defaultValue ModeType.Import
 
                     let p =
@@ -1269,7 +1269,7 @@ let private addCalendar
                                 Some $"the column '{col}' is given more than once"
                             else
                                 None)
-                        |> Option.orElse (
+                        |> Option.orElseWith (fun () ->
                             tagged
                             |> List.groupBy (fun (c, _) -> c.Name)
                             |> List.tryPick (fun (_, uses) ->
@@ -1277,9 +1277,8 @@ let private addCalendar
                                 | a :: b :: _ ->
                                     let c = fst uses.Head
                                     Some $"the column '{c.Name}' would have two categories, {a} and {b}{sortedBy c}"
-                                | _ -> None)
-                        )
-                        |> Option.orElse (
+                                | _ -> None))
+                        |> Option.orElseWith (fun () ->
                             tagged
                             |> List.tryPick (fun (c, u) ->
                                 match existingCategories.TryGetValue c with
@@ -1291,9 +1290,8 @@ let private addCalendar
                                     | true, cal ->
                                         Some
                                             $"the calendar '{cal}' has the column '{c.Name}' as time-related{sortedBy c}; a column can't also have a category"
-                                    | _ -> None)
-                        )
-                        |> Option.orElse (
+                                    | _ -> None))
+                        |> Option.orElseWith (fun () ->
                             relatedWithSortBy
                             |> List.tryPick (fun c ->
                                 if tagged |> List.exists (fun (x, _) -> obj.ReferenceEquals(x, c)) then
@@ -1304,8 +1302,7 @@ let private addCalendar
                                     | true, (u, cal) ->
                                         Some
                                             $"the calendar '{cal}' gives the column '{c.Name}' the category {u}{sortedBy c}, so it can't be time-related"
-                                    | _ -> None)
-                        )
+                                    | _ -> None))
 
                     do!
                         match problem with

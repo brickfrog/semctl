@@ -758,33 +758,37 @@ let private parse (toks: Tok array) (sep: string) : Tree =
     let query () =
         let statements = ResizeArray<Statement>()
 
-        while not (atEnd ()) do
-            let t = peek () |> Option.get
+        let rec loop () =
+            match peek () with
+            | None -> ()
+            | Some t ->
+                if isKw "DEFINE" t then
+                    next () |> ignore
+                    let defs = ResizeArray<Def>()
 
-            if isKw "DEFINE" t then
-                next () |> ignore
-                let defs = ResizeArray<Def>()
+                    while at (fun x -> List.exists (fun w -> isKw w x) definitionKeywords) do
+                        defs.Add(definition true)
 
-                while at (fun x -> List.exists (fun w -> isKw w x) definitionKeywords) do
-                    defs.Add(definition true)
+                    if defs.Count = 0 then
+                        fail (peek ()) "expected MEASURE, VAR, TABLE, COLUMN, FUNCTION or MPARAMETER after DEFINE"
 
-                if defs.Count = 0 then
-                    fail (peek ()) "expected MEASURE, VAR, TABLE, COLUMN, FUNCTION or MPARAMETER after DEFINE"
+                    statements.Add(Define(t, List.ofSeq defs))
+                elif isKw "EVALUATE" t then
+                    next () |> ignore
 
-                statements.Add(Define(t, List.ofSeq defs))
-            elif isKw "EVALUATE" t then
-                next () |> ignore
+                    match expr true with
+                    | Some e -> statements.Add(Evaluate(t, e))
+                    | None -> fail (peek ()) "expected an expression after EVALUATE"
+                elif statementAt 0 && (isKw "ORDER" t || isKw "START" t) then
+                    let k1 = next ()
+                    let k2 = next ()
+                    statements.Add(Clause([ k1; k2 ], items true))
+                else
+                    fail (Some t) $"unexpected '{t.Text}'"
 
-                match expr true with
-                | Some e -> statements.Add(Evaluate(t, e))
-                | None -> fail (peek ()) "expected an expression after EVALUATE"
-            elif statementAt 0 && (isKw "ORDER" t || isKw "START" t) then
-                let k1 = next ()
-                let k2 = next ()
-                statements.Add(Clause([ k1; k2 ], items true))
-            else
-                fail (Some t) $"unexpected '{t.Text}'"
+                loop ()
 
+        loop ()
         List.ofSeq statements
 
     if toks.Length = 0 then
@@ -1343,8 +1347,15 @@ let private layout (opts: FormatOptions) (nl: string) (tree: Tree) (tail: Commen
             |> List.forall (fun it -> it.Sep |> Option.forall (fun s -> s.Leading.IsEmpty && s.Trailing.IsEmpty))
 
         let total =
-            if widths |> List.forall Option.isSome && separatorsPlain then
-                Some((widths |> List.sumBy Option.get) + 2 * (items.Length - 1))
+            if separatorsPlain then
+                widths
+                |> List.fold
+                    (fun acc w ->
+                        match acc, w with
+                        | Some s, Some n -> Some(s + n)
+                        | _ -> None)
+                    (Some 0)
+                |> Option.map (fun sum -> sum + 2 * (items.Length - 1))
             else
                 None
 

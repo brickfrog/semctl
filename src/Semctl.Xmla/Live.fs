@@ -222,12 +222,13 @@ type private LiveSession(request: ConnectionRequest) =
         member _.ExecuteTraced(script: string, onEvent: XmlaTraceEvent -> unit) =
             // The session trace is the client library's public way to watch one's own session
             // (Server.SessionTrace): events come on a thread of the library's while Execute blocks.
-            let failure: string option ref = ref None
+            let gate = obj ()
+            let mutable failure: string option = None
 
             let failed (what: string) (e: exn) =
-                lock failure (fun () ->
-                    if failure.Value.IsNone then
-                        failure.Value <- Some(what + ": " + (Failures.messages e |> String.concat ": ")))
+                lock gate (fun () ->
+                    if failure.IsNone then
+                        failure <- Some(what + ": " + (Failures.messages e |> String.concat ": ")))
 
             let onTraceEvent =
                 Microsoft.AnalysisServices.Tabular.TraceEventHandler(fun _ e ->
@@ -241,13 +242,25 @@ type private LiveSession(request: ConnectionRequest) =
                     if not (isNull e.Exception) then
                         failed "the trace stopped" e.Exception)
 
+            let detach (t: Microsoft.AnalysisServices.Tabular.SessionTrace) =
+                try
+                    t.OnEvent.RemoveHandler onTraceEvent
+                    t.remove_Stopped onStopped
+                with _ ->
+                    ()
+
             let trace =
                 try
                     let t = server.SessionTrace
                     t.OnEvent.AddHandler onTraceEvent
                     t.add_Stopped onStopped
-                    t.Start()
-                    Some t
+
+                    try
+                        t.Start()
+                        Some t
+                    with _ ->
+                        detach t
+                        reraise ()
                 with e ->
                     failed "the trace couldn't be started" e
                     None
@@ -262,11 +275,7 @@ type private LiveSession(request: ConnectionRequest) =
                         with e ->
                             failed "the trace couldn't be stopped" e
                     finally
-                        try
-                            t.OnEvent.RemoveHandler onTraceEvent
-                            t.remove_Stopped onStopped
-                        with _ ->
-                            ()
+                        detach t
 
             let messages =
                 try
@@ -276,7 +285,7 @@ type private LiveSession(request: ConnectionRequest) =
 
             {
                 Messages = messages
-                TraceFailure = lock failure (fun () -> failure.Value)
+                TraceFailure = lock gate (fun () -> failure)
             }
 
         member _.Query(database: string, dax: string, maxRows: int option) =

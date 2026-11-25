@@ -127,10 +127,19 @@ let private writeJson (file: string) (o: JsonObject) : Result<unit, SemctlError>
         | null -> ()
         | dir -> Directory.CreateDirectory dir |> ignore
 
-        let tmp = file + ".tmp"
-        File.WriteAllText(tmp, o.ToJsonString(JsonSerializerOptions(WriteIndented = true)) + "\n")
-        File.Move(tmp, file, true)
-        Ok()
+        let tmp = $"{file}.{Guid.NewGuid():N}.tmp"
+
+        try
+            File.WriteAllText(tmp, o.ToJsonString(JsonSerializerOptions(WriteIndented = true)) + "\n")
+            File.Move(tmp, file, true)
+            Ok()
+        with _ ->
+            try
+                File.Delete tmp
+            with _ ->
+                ()
+
+            reraise ()
     with e ->
         Error(InvalidConfig(file, e.Message))
 

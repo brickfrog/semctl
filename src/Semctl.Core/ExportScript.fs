@@ -29,7 +29,7 @@ let groupColumn (t: Table) : Column option =
         match c with
         | :? DataColumn as d -> eqCi d.SourceColumn "Name"
         | _ -> false)
-    |> Option.orElse (columns |> List.tryFind (fun c -> not (eqCi c.Name "Ordinal")))
+    |> Option.orElseWith (fun () -> columns |> List.tryFind (fun c -> not (eqCi c.Name "Ordinal")))
 
 /// The DAX of a calculated table (its calculated partition).
 let calculatedSource (t: Table) : CalculatedPartitionSource option =

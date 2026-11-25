@@ -18,7 +18,7 @@ let private pick (items: 'T seq) (nameOf: 'T -> string) (wanted: string) =
 
     items
     |> List.tryFind (fun x -> nameOf x = wanted)
-    |> Option.orElse (items |> List.tryFind (fun x -> eqCi (nameOf x) wanted))
+    |> Option.orElseWith (fun () -> items |> List.tryFind (fun x -> eqCi (nameOf x) wanted))
 
 /// Expressions are the same if they differ only in line breaks (\r\n or \n) and in leading and
 /// trailing whitespace, which a script doesn't keep.

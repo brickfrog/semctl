@@ -220,19 +220,21 @@ let private rewrite (target: ObjectEntry) (newName: string) (dax: string) (refs:
                     |> significant
                     |> List.map (fun t -> { t with Start = t.Start + start })
 
-                let first, last = List.head tokens, List.last tokens
-                let qualified = tokens.Length > 1 && last.Kind = TokenKind.Bracketed
+                match tokens, List.tryLast tokens with
+                | first :: _, Some last ->
+                    let qualified = tokens.Length > 1 && last.Kind = TokenKind.Bracketed
 
-                match target.Ref.Kind with
-                | ObjectKind.Measure
-                | ObjectKind.Column when isTarget r -> Some(last.Start, last.Length, bracket newName)
-                // 'Old'[X]: the table part names the table whatever X resolves to (or doesn't).
-                | ObjectKind.Table when qualified && Token.isName first && eqCi first.Text oldName ->
-                    Some(first.Start, first.Length, tableText first)
-                | ObjectKind.Table
-                | ObjectKind.Calendar when not qualified && isTarget r ->
-                    Some(first.Start, first.Length, tableText first)
-                | ObjectKind.Function when isTarget r -> Some(first.Start, first.Length, newName)
+                    match target.Ref.Kind with
+                    | ObjectKind.Measure
+                    | ObjectKind.Column when isTarget r -> Some(last.Start, last.Length, bracket newName)
+                    // 'Old'[X]: the table part names the table whatever X resolves to (or doesn't).
+                    | ObjectKind.Table when qualified && Token.isName first && eqCi first.Text oldName ->
+                        Some(first.Start, first.Length, tableText first)
+                    | ObjectKind.Table
+                    | ObjectKind.Calendar when not qualified && isTarget r ->
+                        Some(first.Start, first.Length, tableText first)
+                    | ObjectKind.Function when isTarget r -> Some(first.Start, first.Length, newName)
+                    | _ -> None
                 | _ -> None
             | _ -> None)
         |> List.sortByDescending (fun (start, _, _) -> start)

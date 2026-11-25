@@ -77,7 +77,7 @@ module ObjectKind =
 
         all
         |> List.tryFind (fun k -> token k = s)
-        |> Option.orElse (aliases |> List.tryFind (fun (a, _) -> a = s) |> Option.map snd)
+        |> Option.orElseWith (fun () -> aliases |> List.tryFind (fun (a, _) -> a = s) |> Option.map snd)
 
     /// PascalCase type name, as the Tabular Editor CLI's JSON uses (Measure, NamedExpression, ...).
     let typeName =

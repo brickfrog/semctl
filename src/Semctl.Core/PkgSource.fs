@@ -104,15 +104,16 @@ let private zipEntries (path: string) : LocalEntry list * (string * string) list
     | Ok(b, prefixes) ->
         let results = [
             for prefix in prefixes ->
-                let entry = {
-                    Manifest = Unchecked.defaultof<Manifest>
-                    Path = path
-                    ZipPrefix = Some prefix
-                }
+                let label = if prefix = "" then path else $"{path}!{prefix}"
 
-                match readZipManifestAt (display entry) b prefix with
-                | Ok m -> Ok { entry with Manifest = m }
-                | Error e -> Error(display entry, SemctlError.message e)
+                match readZipManifestAt label b prefix with
+                | Ok m ->
+                    Ok {
+                        Manifest = m
+                        Path = path
+                        ZipPrefix = Some prefix
+                    }
+                | Error e -> Error(label, SemctlError.message e)
         ]
 
         (results
