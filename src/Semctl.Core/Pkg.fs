@@ -25,6 +25,7 @@ open System.Security.Cryptography
 open System.Text
 open System.Text.Json
 open System.Text.Json.Nodes
+open Semctl.Prelude
 open Microsoft.AnalysisServices.Tabular
 open Microsoft.AnalysisServices.Tabular.Serialization
 
@@ -739,12 +740,9 @@ let private isModified (f: Function) =
     | Some hash when hash.Trim() <> "" -> not (unchanged f.Expression (hash.Trim()))
     | _ -> false
 
-let private plural (n: int) (one: string) (many: string) =
-    if n = 1 then $"1 {one}" else $"{n} {many}"
-
 let private joined (parts: string list) = String.concat ", " parts
 
-let private functionCount (n: int) = plural n "function" "functions"
+let private functionCount (n: int) = pluralOf n "function" "functions"
 
 /// The key for a new install: past the sequence number, every key in the table and every key a
 /// function carries, so it never collides whichever way Seq was kept.
@@ -767,32 +765,34 @@ let private nextKey (db: Database) (table: JsonObject) =
 /// package function's name is taken (unless OnConflict says otherwise), or when a dependency isn't
 /// installed (unless IgnoreDependencies).
 let install (db: Database) (pkg: Package) (opts: InstallOptions) : Result<Mutation.Effect, SemctlError> =
-    requireLevel db
-    |> Result.bind (fun () -> state db)
-    |> Result.bind (fun st ->
+    result {
+        do! requireLevel db
+        let! st = state db
         let m = pkg.Manifest
 
         match findInstalled st m.Id with
         | Some i ->
-            Error(
-                PackageConflict(
-                    m.Id,
-                    $"version {i.Version} is installed already; `sm pkg update` changes the version",
-                    []
+            return!
+                Error(
+                    PackageConflict(
+                        m.Id,
+                        $"version {i.Version} is installed already; `sm pkg update` changes the version",
+                        []
+                    )
                 )
-            )
         | None ->
             let missing =
                 m.Dependencies |> List.filter (fun d -> (findInstalled st d.Id).IsNone)
 
             if not missing.IsEmpty && not opts.IgnoreDependencies then
-                Error(
-                    PackageConflict(
-                        m.Id,
-                        "it depends on packages the model doesn't have; install them first, or pass --ignore-dependencies",
-                        missing |> List.map (fun d -> $"{d.Id} {d.Version}")
+                return!
+                    Error(
+                        PackageConflict(
+                            m.Id,
+                            "it depends on packages the model doesn't have; install them first, or pass --ignore-dependencies",
+                            missing |> List.map (fun d -> $"{d.Id} {d.Version}")
+                        )
                     )
-                )
             else
                 let taken =
                     pkg.Functions
@@ -801,77 +801,75 @@ let install (db: Database) (pkg: Package) (opts: InstallOptions) : Result<Mutati
 
                 match opts.OnConflict, taken with
                 | RefuseConflicts, _ :: _ ->
-                    Error(
-                        PackageConflict(
-                            m.Id,
-                            "the model already has functions of these names; pass --overwrite to replace them or --skip-existing to keep them",
-                            taken
-                        )
-                    )
-                | _ ->
-                    readTable db
-                    |> Result.map (fun table ->
-                        let key = nextKey db table
-                        let mutable added = 0
-                        let mutable replaced = 0
-                        let mutable skipped = []
-
-                        for source in pkg.Functions do
-                            match db.Model.Functions.Find source.Name with
-                            | null ->
-                                let f = copyOf source
-                                db.Model.Functions.Add f
-                                link f key
-                                added <- added + 1
-                            | existing when opts.OnConflict = OverwriteConflicts ->
-                                overwrite existing source
-                                link existing key
-                                replaced <- replaced + 1
-                            | existing -> skipped <- existing.Name :: skipped
-
-                        table.[string key] <-
-                            JsonObject(
-                                [
-                                    Collections.Generic.KeyValuePair<string, JsonNode>(
-                                        "Provider",
-                                        JsonValue.Create opts.Provider
-                                    )
-                                    Collections.Generic.KeyValuePair<string, JsonNode>(
-                                        "PackageId",
-                                        JsonValue.Create m.Id
-                                    )
-                                    Collections.Generic.KeyValuePair<string, JsonNode>(
-                                        "Version",
-                                        JsonValue.Create m.Version
-                                    )
-                                ]
+                    return!
+                        Error(
+                            PackageConflict(
+                                m.Id,
+                                "the model already has functions of these names; pass --overwrite to replace them or --skip-existing to keep them",
+                                taken
                             )
+                        )
+                | _ ->
+                    let! table = readTable db
+                    let key = nextKey db table
+                    let mutable added = 0
+                    let mutable replaced = 0
+                    let mutable skipped = []
 
-                        writeTable db table
-                        setString (ofModel db.Model) seqProperty (string (key + 1))
+                    for source in pkg.Functions do
+                        match db.Model.Functions.Find source.Name with
+                        | null ->
+                            let f = copyOf source
+                            db.Model.Functions.Add f
+                            link f key
+                            added <- added + 1
+                        | existing when opts.OnConflict = OverwriteConflicts ->
+                            overwrite existing source
+                            link existing key
+                            replaced <- replaced + 1
+                        | existing -> skipped <- existing.Name :: skipped
 
-                        let details = [
-                            plural added "function added" "functions added"
-                            if replaced > 0 then
-                                plural replaced "existing function replaced" "existing functions replaced"
-                            if not skipped.IsEmpty then
-                                plural skipped.Length "existing function kept" "existing functions kept"
-                        ]
+                    table.[string key] <-
+                        JsonObject(
+                            [
+                                Collections.Generic.KeyValuePair<string, JsonNode>(
+                                    "Provider",
+                                    JsonValue.Create opts.Provider
+                                )
+                                Collections.Generic.KeyValuePair<string, JsonNode>("PackageId", JsonValue.Create m.Id)
+                                Collections.Generic.KeyValuePair<string, JsonNode>(
+                                    "Version",
+                                    JsonValue.Create m.Version
+                                )
+                            ]
+                        )
 
-                        {
-                            Mutation.Effect.none with
-                                Notes = [ $"Installed {m.Id} {m.Version} ({joined details})" ]
-                                Warnings = [
-                                    if not skipped.IsEmpty then
-                                        "kept the model's own "
-                                        + (List.rev skipped |> String.concat ", ")
-                                        + $": {m.Id} {m.Version} may expect its own version of them"
-                                    if not missing.IsEmpty then
-                                        $"{m.Id} depends on "
-                                        + (missing |> List.map (fun d -> $"{d.Id} {d.Version}") |> String.concat ", ")
-                                        + ", which the model doesn't have"
-                                ]
-                        }))
+                    writeTable db table
+                    setString (ofModel db.Model) seqProperty (string (key + 1))
+
+                    let details = [
+                        pluralOf added "function added" "functions added"
+                        if replaced > 0 then
+                            pluralOf replaced "existing function replaced" "existing functions replaced"
+                        if not skipped.IsEmpty then
+                            pluralOf skipped.Length "existing function kept" "existing functions kept"
+                    ]
+
+                    return {
+                        Mutation.Effect.none with
+                            Notes = [ $"Installed {m.Id} {m.Version} ({joined details})" ]
+                            Warnings = [
+                                if not skipped.IsEmpty then
+                                    "kept the model's own "
+                                    + (List.rev skipped |> String.concat ", ")
+                                    + $": {m.Id} {m.Version} may expect its own version of them"
+                                if not missing.IsEmpty then
+                                    $"{m.Id} depends on "
+                                    + (missing |> List.map (fun d -> $"{d.Id} {d.Version}") |> String.concat ", ")
+                                    + ", which the model doesn't have"
+                            ]
+                    }
+    }
 
 /// Functions of an installed package changed since they were installed (names).
 let modifiedFunctions (db: Database) (key: int) =
@@ -903,15 +901,15 @@ let update
     (onConflict: OnConflict)
     (force: bool)
     : Result<Mutation.Effect, SemctlError> =
-    requireLevel db
-    |> Result.bind (fun () -> state db)
-    |> Result.bind (fun st ->
+    result {
+        do! requireLevel db
+        let! st = state db
         let m = pkg.Manifest
 
         match findInstalled st m.Id with
-        | None -> Error(notInstalled st m.Id)
+        | None -> return! Error(notInstalled st m.Id)
         | Some installed when Version.same installed.Version m.Version ->
-            Ok {
+            return {
                 Mutation.Effect.none with
                     Notes = [ $"{m.Id} {m.Version} is installed already" ]
             }
@@ -932,89 +930,91 @@ let update
 
             match onModified, modified, onConflict, taken with
             | RefuseModified, _ :: _, _, _ ->
-                Error(
-                    PackageConflict(
-                        m.Id,
-                        "these functions were changed since they were installed; pass --discard-changes to overwrite them or --keep-changes to leave them as they are",
-                        modified
+                return!
+                    Error(
+                        PackageConflict(
+                            m.Id,
+                            "these functions were changed since they were installed; pass --discard-changes to overwrite them or --keep-changes to leave them as they are",
+                            modified
+                        )
                     )
-                )
             | _, _, RefuseConflicts, _ :: _ ->
-                Error(
-                    PackageConflict(
-                        m.Id,
-                        $"version {m.Version} adds functions the model already has; pass --overwrite to replace them or --skip-existing to keep them",
-                        taken
+                return!
+                    Error(
+                        PackageConflict(
+                            m.Id,
+                            $"version {m.Version} adds functions the model already has; pass --overwrite to replace them or --skip-existing to keep them",
+                            taken
+                        )
                     )
-                )
             | _ ->
-                readTable db
-                |> Result.bind (fun table ->
-                    let keep (f: Function) =
-                        onModified = KeepModified && List.contains f.Name modified
+                let! table = readTable db
 
-                    let mutable updated = 0
-                    let mutable added = 0
-                    let kept = ResizeArray<string>()
+                let keep (f: Function) =
+                    onModified = KeepModified && List.contains f.Name modified
 
-                    for source in pkg.Functions do
-                        match db.Model.Functions.Find source.Name with
-                        | null ->
-                            let f = copyOf source
-                            db.Model.Functions.Add f
-                            link f key
-                            added <- added + 1
-                        | existing when functionHandle existing |> Option.bind parseInt = Some key ->
-                            if keep existing then
-                                kept.Add existing.Name
-                            else
-                                overwrite existing source
-                                link existing key
-                                updated <- updated + 1
-                        | existing when onConflict = OverwriteConflicts ->
+                let mutable updated = 0
+                let mutable added = 0
+                let kept = ResizeArray<string>()
+
+                for source in pkg.Functions do
+                    match db.Model.Functions.Find source.Name with
+                    | null ->
+                        let f = copyOf source
+                        db.Model.Functions.Add f
+                        link f key
+                        added <- added + 1
+                    | existing when functionHandle existing |> Option.bind parseInt = Some key ->
+                        if keep existing then
+                            kept.Add existing.Name
+                        else
                             overwrite existing source
                             link existing key
-                            added <- added + 1
-                        | _ -> ()
+                            updated <- updated + 1
+                    | existing when onConflict = OverwriteConflicts ->
+                        overwrite existing source
+                        link existing key
+                        added <- added + 1
+                    | _ -> ()
 
-                    // Dropped by the new version: removed after the rest is updated, so only DAX
-                    // outside the package (or your changes) can still call them.
-                    let dropped = old |> List.filter (fun f -> not (incoming.Contains f.Name))
+                // Dropped by the new version: removed after the rest is updated, so only DAX
+                // outside the package (or your changes) can still call them.
+                let dropped = old |> List.filter (fun f -> not (incoming.Contains f.Name))
 
-                    for f in dropped do
-                        if keep f then
-                            unlink f
-                            kept.Add f.Name
+                for f in dropped do
+                    if keep f then
+                        unlink f
+                        kept.Add f.Name
 
-                    let removing = dropped |> List.filter (fun f -> not (keep f))
+                let removing = dropped |> List.filter (fun f -> not (keep f))
+                let! removalWarnings = dropFunctions db removing force
 
-                    dropFunctions db removing force
-                    |> Result.map (fun removalWarnings ->
-                        match table.[string key] with
-                        | :? JsonObject as entry -> entry.["Version"] <- JsonValue.Create m.Version
-                        | _ -> ()
+                match table.[string key] with
+                | :? JsonObject as entry -> entry.["Version"] <- JsonValue.Create m.Version
+                | _ -> ()
 
-                        writeTable db table
+                writeTable db table
 
-                        let details = [
-                            plural updated "function updated" "functions updated"
-                            if added > 0 then
-                                plural added "added" "added"
-                            if not removing.IsEmpty then
-                                plural removing.Length "removed" "removed"
+                let details = [
+                    pluralOf updated "function updated" "functions updated"
+                    if added > 0 then
+                        pluralOf added "added" "added"
+                    if not removing.IsEmpty then
+                        pluralOf removing.Length "removed" "removed"
+                ]
+
+                return {
+                    Mutation.Effect.none with
+                        Notes = [ $"Updated {m.Id} {installed.Version} -> {m.Version} ({joined details})" ]
+                        Warnings = [
+                            if kept.Count > 0 then
+                                "kept your changes to "
+                                + String.concat ", " kept
+                                + $": they may not work with {m.Id} {m.Version}"
+                            yield! removalWarnings
                         ]
-
-                        {
-                            Mutation.Effect.none with
-                                Notes = [ $"Updated {m.Id} {installed.Version} -> {m.Version} ({joined details})" ]
-                                Warnings = [
-                                    if kept.Count > 0 then
-                                        "kept your changes to "
-                                        + String.concat ", " kept
-                                        + $": they may not work with {m.Id} {m.Version}"
-                                    yield! removalWarnings
-                                ]
-                        })))
+                }
+    }
 
 /// Remove an installed package and its functions. Functions changed since they were installed are
 /// refused unless OnModified says otherwise (KeepModified leaves them in the model, no longer

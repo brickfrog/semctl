@@ -305,8 +305,9 @@ let private display (reportDir: string) (file: string) =
 let private mentionsWith (read: string -> byte array) (name: string) (file: string) =
     try
         Encoding.UTF8.GetString(read file).Contains(name, StringComparison.OrdinalIgnoreCase)
-    with _ ->
-        false
+    with
+    | :? IOException
+    | :? UnauthorizedAccessException -> false
 
 /// `plan`, reading files through `read` (sm interactive and sm mcp read staged, unsaved
 /// report edits this way, so several renames compose before anything is written).

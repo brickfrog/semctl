@@ -65,8 +65,9 @@ let private jsonString (read: string -> byte array) (file: string) (path: string
                     | _ -> None
 
             walk doc.RootElement path
-    with _ ->
-        None
+    with
+    | :? JsonException
+    | :? IOException -> None
 
 /// Where in the report a file is: its page and visual, from definition/pages/<p>/visuals/<v>/...
 let private locate (read: string -> byte array) (reportDir: string) (file: string) =
@@ -94,8 +95,9 @@ let private reportName (reportDir: string) =
 let private mentions (read: string -> byte array) (name: string) (file: string) =
     try
         Encoding.UTF8.GetString(body (read file)).Contains(name, StringComparison.OrdinalIgnoreCase)
-    with _ ->
-        false
+    with
+    | :? IOException
+    | :? UnauthorizedAccessException -> false
 
 /// The report files (of these report folders) that use the object, reading files through `read`.
 let usagesWith (read: string -> byte array) (reportDirs: string list) (r: ObjectRef) : Usage list =

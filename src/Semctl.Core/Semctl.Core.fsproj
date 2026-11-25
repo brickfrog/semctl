@@ -6,8 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Prelude.fs" />
     <Compile Include="Suggest.fs" />
     <Compile Include="Errors.fs" />
+    <Compile Include="TomHelpers.fs" />
     <Compile Include="SaveJournal.fs" />
     <Compile Include="ObjectRef.fs" />
     <Compile Include="FolderFormat.fs" />

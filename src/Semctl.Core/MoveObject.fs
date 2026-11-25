@@ -5,6 +5,7 @@ module Semctl.MoveObject
 
 open System
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Dax
 open Semctl.Inventory
 
@@ -16,12 +17,6 @@ type MoveSpec = {
     /// Also set its display folder.
     DisplayFolder: string option
 }
-
-let private plural n (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
-
-let private eqCi (a: string) (b: string) =
-    String.Equals(a, b, StringComparison.OrdinalIgnoreCase)
 
 /// Rewrite the qualified references to the measure in one expression, right to left.
 let private rewrite

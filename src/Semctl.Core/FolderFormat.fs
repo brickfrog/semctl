@@ -27,6 +27,7 @@ open System.Text
 open System.Text.Json
 open System.Text.Json.Nodes
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 
 let databaseJsonFileName = "database.json"
 
@@ -44,26 +45,9 @@ module SafeName =
 
     let isInvalidChar (c: char) = invalidChars.Contains c
 
-    /// Windows device names. TE2 knows CON..LPT9; Windows also reserves COM0/LPT0 and the
-    /// superscript-digit forms.
-    let private reservedNames =
-        let numbered = [
-            for prefix in [ "COM"; "LPT" ] do
-                for suffix in [ for d in 0..9 -> string d ] @ [ "\u00B9"; "\u00B2"; "\u00B3" ] do
-                    yield prefix + suffix
-        ]
-
-        HashSet<string>([ "CON"; "PRN"; "AUX"; "NUL" ] @ numbered, StringComparer.OrdinalIgnoreCase)
-
     /// A device name, alone or with an extension (Windows treats `NUL.txt` and `nul.a.b` as NUL;
     /// TE2 checks the whole name only).
-    let isReserved (name: string) =
-        let stem =
-            match name.IndexOf '.' with
-            | -1 -> name
-            | i -> name.Substring(0, i)
-
-        reservedNames.Contains(stem.TrimEnd ' ')
+    let isReserved (name: string) = WindowsFileName.isReserved name
 
     let private hex (c: char) =
         "%" + (int c).ToString("x2", CultureInfo.InvariantCulture)
@@ -336,48 +320,66 @@ module FolderOptions =
 
                 let flag (key: string) (fallback: bool) =
                     match find key with
-                    | Some(:? JsonValue as v) when v.GetValueKind() = JsonValueKind.True -> true
-                    | Some(:? JsonValue as v) when v.GetValueKind() = JsonValueKind.False -> false
-                    | None -> fallback
-                    | Some _ -> failwith $"{key} is not true or false"
+                    | Some(:? JsonValue as v) when v.GetValueKind() = JsonValueKind.True -> Ok true
+                    | Some(:? JsonValue as v) when v.GetValueKind() = JsonValueKind.False -> Ok false
+                    | None -> Ok fallback
+                    | Some _ -> Error $"{key} is not true or false"
 
-                let levels =
+                let levelsResult =
                     match find "Levels" with
-                    | None -> []
+                    | None -> Ok []
                     | Some(:? JsonArray as a) ->
-                        [
-                            for v in a ->
-                                match v with
-                                | :? JsonValue as s when s.GetValueKind() = JsonValueKind.String ->
-                                    // TE normalizes an old misspelling of this level the same way.
-                                    s.GetValue<string>().Replace("Tables/CalculationItems", "Tables/Calculation Items")
-                                | _ -> failwith "Levels holds something other than names"
-                        ]
-                        |> List.distinct
-                    | Some _ -> failwith "Levels is not a list"
+                        a
+                        |> Seq.toList
+                        |> resultTraverse (function
+                            | :? JsonValue as s when s.GetValueKind() = JsonValueKind.String ->
+                                // TE normalizes an old misspelling of this level the same way.
+                                Ok(s.GetValue<string>().Replace("Tables/CalculationItems", "Tables/Calculation Items"))
+                            | _ -> Error "Levels holds something other than names")
+                        |> Result.map List.distinct
+                    | Some _ -> Error "Levels is not a list"
 
-                let e = empty
+                result {
+                    let e = empty
+                    let! ignoreInferredObjects = flag "IgnoreInferredObjects" e.IgnoreInferredObjects
 
-                Ok {
-                    IgnoreInferredObjects = flag "IgnoreInferredObjects" e.IgnoreInferredObjects
-                    IgnoreInferredProperties = flag "IgnoreInferredProperties" e.IgnoreInferredProperties
-                    IgnoreTimestamps = flag "IgnoreTimestamps" e.IgnoreTimestamps
-                    SplitMultilineStrings = flag "SplitMultilineStrings" e.SplitMultilineStrings
-                    IgnoreLineageTags = flag "IgnoreLineageTags" e.IgnoreLineageTags
-                    IgnorePrivacySettings = flag "IgnorePrivacySettings" e.IgnorePrivacySettings
-                    IgnoreIncrementalRefreshPartitions =
+                    let! ignoreInferredProperties =
+                        flag "IgnoreInferredProperties" e.IgnoreInferredProperties
+
+                    let! ignoreTimestamps = flag "IgnoreTimestamps" e.IgnoreTimestamps
+                    let! splitMultilineStrings = flag "SplitMultilineStrings" e.SplitMultilineStrings
+                    let! ignoreLineageTags = flag "IgnoreLineageTags" e.IgnoreLineageTags
+                    let! ignorePrivacySettings = flag "IgnorePrivacySettings" e.IgnorePrivacySettings
+
+                    let! ignoreIncrementalRefreshPartitions =
                         flag "IgnoreIncrementalRefreshPartitions" e.IgnoreIncrementalRefreshPartitions
-                    PrefixFilenames = flag "PrefixFilenames" e.PrefixFilenames
-                    LocalTranslations = flag "LocalTranslations" e.LocalTranslations
-                    LocalPerspectives = flag "LocalPerspectives" e.LocalPerspectives
-                    LocalRelationships = flag "LocalRelationships" e.LocalRelationships
-                    SortArrays = flag "SortArrays" e.SortArrays
-                    Levels = levels
+
+                    let! prefixFilenames = flag "PrefixFilenames" e.PrefixFilenames
+                    let! localTranslations = flag "LocalTranslations" e.LocalTranslations
+                    let! localPerspectives = flag "LocalPerspectives" e.LocalPerspectives
+                    let! localRelationships = flag "LocalRelationships" e.LocalRelationships
+                    let! sortArrays = flag "SortArrays" e.SortArrays
+                    let! levels = levelsResult
+
+                    return {
+                        IgnoreInferredObjects = ignoreInferredObjects
+                        IgnoreInferredProperties = ignoreInferredProperties
+                        IgnoreTimestamps = ignoreTimestamps
+                        SplitMultilineStrings = splitMultilineStrings
+                        IgnoreLineageTags = ignoreLineageTags
+                        IgnorePrivacySettings = ignorePrivacySettings
+                        IgnoreIncrementalRefreshPartitions = ignoreIncrementalRefreshPartitions
+                        PrefixFilenames = prefixFilenames
+                        LocalTranslations = localTranslations
+                        LocalPerspectives = localPerspectives
+                        LocalRelationships = localRelationships
+                        SortArrays = sortArrays
+                        Levels = levels
+                    }
                 }
             | _ -> Error "not a JSON object"
-        with
-        | :? JsonException as e -> Error $"not valid JSON: {e.Message}"
-        | e -> Error e.Message
+        with :? JsonException as e ->
+            Error $"not valid JSON: {e.Message}"
 
     /// The annotation's JSON, keys in the order TE2's Json.NET writes them (optional keys only
     /// when set, as TE2's ShouldSerialize methods do).
@@ -639,160 +641,182 @@ let rec private incrementalRefreshPartitions (node: JsonNode) =
 /// Files come back sorted by path.
 let split (o: FolderOptions) (eol: string) (bimJson: string) : Result<FolderFile list, string> =
     try
-        let root = JsonText.parse bimJson :?> JsonObject
-        let files = ResizeArray<FolderFile>()
+        match JsonText.parse bimJson with
+        | :? JsonObject as root ->
+            let files = ResizeArray<FolderFile>()
 
-        let write (path: string) (node: JsonNode) =
-            files.Add {
-                Path = path
-                Text = JsonText.write eol node
-            }
+            let write (path: string) (node: JsonNode) =
+                files.Add {
+                    Path = path
+                    Text = JsonText.write eol node
+                }
 
-        let named (what: string) (node: JsonNode) =
-            match nameOf node with
-            | Some n -> n
-            | None -> failwith $"a {what} has no name"
+            let named (what: string) (node: JsonNode) =
+                match nameOf node with
+                | Some n -> Ok n
+                | None -> Error $"a {what} has no name"
 
-        let prefixed (i: int) (name: string) =
-            if o.PrefixFilenames then
-                (i.ToString("D3", CultureInfo.InvariantCulture)) + " " + name
-            else
-                name
-
-        let outArray (folder: string) (arrayName: string) (items: JsonNode list) =
-            let names =
-                items
-                |> List.mapi (fun i item -> prefixed i (SafeName.escape false (named arrayName item)))
-                |> SafeName.uniqueIn ".json"
-
-            for name, item in List.zip names items do
-                write $"{folder}{arrayName}/{name}.json" item
-
-        if o.IgnoreLineageTags then
-            removeProperty "lineageTag" root
-
-        if o.IgnorePrivacySettings then
-            removeProperty "PrivacySetting" root
-
-        if o.IgnoreIncrementalRefreshPartitions then
-            match incrementalRefreshPartitions root with
-            | [] -> ()
-            | names ->
-                // TE2 drops these partitions and TE3 swaps in a placeholder; either loses the model's
-                // incremental refresh partitions, so semctl refuses instead.
-                let list = String.Join(", ", names)
-
-                failwith
-                    $"the model's {FolderOptions.annotationName} sets IgnoreIncrementalRefreshPartitions, which would drop its incremental refresh partitions ({list}); semctl won't write that"
-
-        match root.["model"] with
-        | :? JsonObject as model ->
-            if o.SortArrays then
-                sortArrays o model
-
-            let level (name: string) (array: string) (also: bool) =
-                if has name o || also then popArray model array else None
-
-            let dataSources = level "Data Sources" "dataSources" false
-            let expressions = level "Shared Expressions" "expressions" false
-            let functions = level "Functions" "functions" false
-            let tables = level "Tables" "tables" false
-            let relationships = level "Relationships" "relationships" o.LocalRelationships
-
-            let cultures =
-                if o.LocalTranslations then
-                    // The translations are on the objects now. A culture with nothing else (just a
-                    // name) is in the TabularEditor_Cultures annotation; one with more (linguistic
-                    // metadata, annotations) stays a culture, without its translations. TE2 drops
-                    // those cultures, and their linguistic metadata with them.
-                    match model.["cultures"] with
-                    | :? JsonArray as a ->
-                        for c in a do
-                            match c with
-                            | :? JsonObject as co -> co.Remove "translations" |> ignore
-                            | _ -> ()
-
-                        let bare =
-                            a
-                            |> Seq.forall (fun c ->
-                                match c with
-                                | :? JsonObject as co -> co.Count = 1 && co.ContainsKey "name"
-                                | _ -> false)
-
-                        let listed = annotation model Annotations.cultures false |> Option.isSome
-
-                        if bare && listed then
-                            popArray model "cultures" |> ignore
-                            None
-                        elif has "Translations" o then
-                            popArray model "cultures"
-                        else
-                            None
-                    | _ -> None
+            let prefixed (i: int) (name: string) =
+                if o.PrefixFilenames then
+                    (i.ToString("D3", CultureInfo.InvariantCulture)) + " " + name
                 else
-                    level "Translations" "cultures" false
+                    name
 
-            let perspectives = level "Perspectives" "perspectives" o.LocalPerspectives
-            let roles = level "Roles" "roles" false
+            let outArray (folder: string) (arrayName: string) (items: JsonNode list) =
+                result {
+                    let! rawNames = items |> resultTraverse (named arrayName)
 
-            write databaseJsonFileName root
+                    let names =
+                        rawNames
+                        |> List.mapi (fun i n -> prefixed i (SafeName.escape false n))
+                        |> SafeName.uniqueIn ".json"
 
-            match relationships with
-            | Some items when not o.LocalRelationships -> outArray "" "relationships" items
-            | _ -> ()
+                    for name, item in List.zip names items do
+                        write $"{folder}{arrayName}/{name}.json" item
+                }
 
-            match perspectives with
-            | Some items when not o.LocalPerspectives -> outArray "" "perspectives" items
-            | _ -> ()
+            if o.IgnoreLineageTags then
+                removeProperty "lineageTag" root
 
-            cultures |> Option.iter (outArray "" "cultures")
-            dataSources |> Option.iter (outArray "" "dataSources")
-            expressions |> Option.iter (outArray "" "expressions")
-            functions |> Option.iter (outArray "" "functions")
-            roles |> Option.iter (outArray "" "roles")
+            if o.IgnorePrivacySettings then
+                removeProperty "PrivacySetting" root
 
-            match tables with
-            | Some items ->
-                let tableNames = items |> List.map (named "table")
+            result {
+                if o.IgnoreIncrementalRefreshPartitions then
+                    match incrementalRefreshPartitions root with
+                    | [] -> ()
+                    | names ->
+                        // TE2 drops these partitions and TE3 swaps in a placeholder; either loses the model's
+                        // incremental refresh partitions, so semctl refuses instead.
+                        let list = String.Join(", ", names)
 
-                let folders =
-                    tableNames
-                    |> List.mapi (fun i n -> prefixed i (SafeName.escape true n))
-                    |> SafeName.uniqueIn ""
+                        return!
+                            Error
+                                $"the model's {FolderOptions.annotationName} sets IgnoreIncrementalRefreshPartitions, which would drop its incremental refresh partitions ({list}); semctl won't write that"
 
-                for (folder, name), item in List.zip (List.zip folders tableNames) items do
-                    let t = item :?> JsonObject
+                match root.["model"] with
+                | :? JsonObject as model ->
+                    if o.SortArrays then
+                        sortArrays o model
 
-                    let pop (lvl: string) (path: string) =
-                        if has lvl o then popArray t path else None
+                    let level (name: string) (array: string) (also: bool) =
+                        if has name o || also then popArray model array else None
 
-                    let columns = pop "Tables/Columns" "columns"
-                    let partitions = pop "Tables/Partitions" "partitions"
-                    let measures = pop "Tables/Measures" "measures"
-                    let hierarchies = pop "Tables/Hierarchies" "hierarchies"
-                    let annotations = pop "Tables/Annotations" "annotations"
+                    let dataSources = level "Data Sources" "dataSources" false
+                    let expressions = level "Shared Expressions" "expressions" false
+                    let functions = level "Functions" "functions" false
+                    let tables = level "Tables" "tables" false
+                    let relationships = level "Relationships" "relationships" o.LocalRelationships
 
-                    let calculationItems =
-                        pop "Tables/Calculation Items" "calculationGroup.calculationItems"
+                    let cultures =
+                        if o.LocalTranslations then
+                            // The translations are on the objects now. A culture with nothing else (just a
+                            // name) is in the TabularEditor_Cultures annotation; one with more (linguistic
+                            // metadata, annotations) stays a culture, without its translations. TE2 drops
+                            // those cultures, and their linguistic metadata with them.
+                            match model.["cultures"] with
+                            | :? JsonArray as a ->
+                                for c in a do
+                                    match c with
+                                    | :? JsonObject as co -> co.Remove "translations" |> ignore
+                                    | _ -> ()
 
-                    let tablePath = $"tables/{folder}/"
-                    write $"{tablePath}{SafeName.escape false name}.json" t
-                    measures |> Option.iter (outArray tablePath "measures")
-                    columns |> Option.iter (outArray tablePath "columns")
-                    hierarchies |> Option.iter (outArray tablePath "hierarchies")
-                    partitions |> Option.iter (outArray tablePath "partitions")
-                    annotations |> Option.iter (outArray tablePath "annotations")
-                    calculationItems |> Option.iter (outArray tablePath "calculationItems")
-            | None -> ()
-        | _ -> write databaseJsonFileName root
+                                let bare =
+                                    a
+                                    |> Seq.forall (fun c ->
+                                        match c with
+                                        | :? JsonObject as co -> co.Count = 1 && co.ContainsKey "name"
+                                        | _ -> false)
 
-        Ok(
-            files
-            |> Seq.sortWith (fun a b -> String.CompareOrdinal(a.Path, b.Path))
-            |> List.ofSeq
-        )
-    with e ->
-        Error e.Message
+                                let listed = annotation model Annotations.cultures false |> Option.isSome
+
+                                if bare && listed then
+                                    popArray model "cultures" |> ignore
+                                    None
+                                elif has "Translations" o then
+                                    popArray model "cultures"
+                                else
+                                    None
+                            | _ -> None
+                        else
+                            level "Translations" "cultures" false
+
+                    let perspectives = level "Perspectives" "perspectives" o.LocalPerspectives
+                    let roles = level "Roles" "roles" false
+
+                    write databaseJsonFileName root
+
+                    match relationships with
+                    | Some items when not o.LocalRelationships -> do! outArray "" "relationships" items
+                    | _ -> ()
+
+                    match perspectives with
+                    | Some items when not o.LocalPerspectives -> do! outArray "" "perspectives" items
+                    | _ -> ()
+
+                    for arrName, opt in
+                        [
+                            "cultures", cultures
+                            "dataSources", dataSources
+                            "expressions", expressions
+                            "functions", functions
+                            "roles", roles
+                        ] do
+                        match opt with
+                        | Some items -> do! outArray "" arrName items
+                        | None -> ()
+
+                    match tables with
+                    | Some items ->
+                        let! tableNames = items |> resultTraverse (named "table")
+
+                        let folders =
+                            tableNames
+                            |> List.mapi (fun i n -> prefixed i (SafeName.escape true n))
+                            |> SafeName.uniqueIn ""
+
+                        for (folder, name), item in List.zip (List.zip folders tableNames) items do
+                            match item with
+                            | :? JsonObject as t ->
+                                let pop (lvl: string) (path: string) =
+                                    if has lvl o then popArray t path else None
+
+                                let columns = pop "Tables/Columns" "columns"
+                                let partitions = pop "Tables/Partitions" "partitions"
+                                let measures = pop "Tables/Measures" "measures"
+                                let hierarchies = pop "Tables/Hierarchies" "hierarchies"
+                                let annotations = pop "Tables/Annotations" "annotations"
+
+                                let calculationItems =
+                                    pop "Tables/Calculation Items" "calculationGroup.calculationItems"
+
+                                let tablePath = $"tables/{folder}/"
+                                write $"{tablePath}{SafeName.escape false name}.json" t
+
+                                for arrName, opt in
+                                    [
+                                        "measures", measures
+                                        "columns", columns
+                                        "hierarchies", hierarchies
+                                        "partitions", partitions
+                                        "annotations", annotations
+                                        "calculationItems", calculationItems
+                                    ] do
+                                    match opt with
+                                    | Some subItems -> do! outArray tablePath arrName subItems
+                                    | None -> ()
+                            | _ -> return! Error "a table entry is not a JSON object"
+                    | None -> ()
+                | _ -> write databaseJsonFileName root
+
+                return
+                    files
+                    |> Seq.sortWith (fun a b -> String.CompareOrdinal(a.Path, b.Path))
+                    |> List.ofSeq
+            }
+        | _ -> Error "not a JSON object"
+    with :? JsonException as e ->
+        Error $"not valid JSON ({e.Message})"
 
 // ---- Reading ----------------------------------------------------------------------------------------
 
@@ -831,39 +855,44 @@ let private jsonFiles (dir: string) =
     |> Array.filter (fun f -> f.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
     |> ordinal
 
-let private parseFile (path: string) : JsonObject =
-    let node =
-        try
-            JsonText.parse (File.ReadAllText path)
-        with :? JsonException as e ->
-            failwith $"{path}: not valid JSON ({e.Message})"
-
-    match node with
-    | :? JsonObject as o -> o
-    | _ -> failwith $"{path}: not a JSON object"
+let private parseFile (path: string) : Result<JsonObject, string> =
+    try
+        match JsonText.parse (File.ReadAllText path) with
+        | :? JsonObject as o -> Ok o
+        | _ -> Error $"{path}: not a JSON object"
+    with
+    | :? JsonException as e -> Error $"{path}: not valid JSON ({e.Message})"
+    | :? IOException
+    | :? UnauthorizedAccessException as e -> Error e.Message
 
 /// Add the objects in <dir>/<array name>/*.json (in file name order) to the array at a dotted path.
-let private inArray (dir: string) (path: string) (target: JsonObject) =
+let private inArray (dir: string) (path: string) (target: JsonObject) : Result<unit, string> =
     let parts = path.Split '.'
     let arrayName = parts.[parts.Length - 1]
     let folder = Path.Combine(dir, arrayName)
 
-    if Directory.Exists folder then
-        let items = jsonFiles folder |> Array.map parseFile
+    if not (Directory.Exists folder) then
+        Ok()
+    else
+        result {
+            let! items = jsonFiles folder |> Array.toList |> resultTraverse parseFile
 
-        let parent =
-            parts.[0 .. parts.Length - 2]
-            |> Array.fold
-                (fun (o: JsonObject) key ->
+            let rec findParent (o: JsonObject) (idx: int) =
+                if idx >= parts.Length - 1 then
+                    Ok o
+                else
+                    let key = parts.[idx]
+
                     match o.[key] with
-                    | :? JsonObject as child -> child
-                    | _ -> failwith $"{folder} holds {arrayName}, but {key} is missing from its parent's file")
-                target
+                    | :? JsonObject as child -> findParent child (idx + 1)
+                    | _ -> Error $"{folder} holds {arrayName}, but {key} is missing from its parent's file"
 
-        let array = getOrCreateArray parent arrayName
+            let! parent = findParent target 0
+            let array = getOrCreateArray parent arrayName
 
-        for item in items do
-            array.Add item
+            for item in items do
+                array.Add item
+        }
 
 /// Find or add the object called `name` in an array.
 let private getOrCreateIn (o: JsonObject) (arrayName: string) (name: string) =
@@ -877,207 +906,235 @@ let private getOrCreateIn (o: JsonObject) (arrayName: string) (name: string) =
         array.Add created
         created
 
-let private stringSet (json: string option) =
+let private stringSet (json: string option) : Result<HashSet<string>, string> =
     match json with
-    | None -> HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    | None -> Ok(HashSet<string>(StringComparer.OrdinalIgnoreCase))
     | Some text ->
-        match JsonText.parse text with
-        | :? JsonArray as a -> HashSet<string>(a |> Seq.choose str, StringComparer.OrdinalIgnoreCase)
-        | _ -> failwith $"not a list of names: {text}"
+        try
+            match JsonText.parse text with
+            | :? JsonArray as a -> Ok(HashSet<string>(a |> Seq.choose str, StringComparer.OrdinalIgnoreCase))
+            | _ -> Error $"not a list of names: {text}"
+        with :? JsonException as e ->
+            Error $"not valid JSON ({e.Message})"
 
 /// TE's annotation-stored translations, perspectives and relationships, put back where TOM keeps them
 /// (SplitModelSerializer.ResolveAnnotations).
-let private resolveAnnotations (model: JsonObject) =
-    // Relationships, from each table.
-    let fromTables = [
-        for t in objects model "tables" do
-            match annotation t Annotations.relationships true with
-            | Some json ->
-                match JsonText.parse json with
-                | :? JsonArray as a -> yield! detach a
-                | _ -> failwith $"table {nameOf t}: {Annotations.relationships} is not a list"
-            | None -> ()
-    ]
-
-    if not fromTables.IsEmpty then
-        // TE2 replaces the model's relationships with these; semctl adds them.
-        let rels = getOrCreateArray model "relationships"
-
-        for r in fromTables do
-            rels.Add r
-
-    // Perspectives (without members).
-    match annotation model Annotations.perspectives true with
-    | Some json ->
-        match JsonText.parse json with
-        | :? JsonArray as a ->
-            for p in a do
-                match p with
-                | :? JsonObject as sp ->
-                    let field (key: string) =
-                        sp
-                        |> Seq.tryFind (fun kv -> String.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase))
-                        |> Option.map (fun kv -> kv.Value)
-
-                    let name =
-                        field "Name"
-                        |> Option.bind str
-                        |> Option.defaultWith (fun () -> failwith "a perspective has no name")
-
-                    let target = getOrCreateIn model "perspectives" name
-
-                    match field "Description" |> Option.bind str with
-                    | Some d -> target.["description"] <- JsonValue.Create d
-                    | None -> ()
-
-                    match field "Annotations" with
-                    | Some(:? JsonObject as anns) when anns.Count > 0 ->
-                        let target = getOrCreateArray target "annotations"
-
-                        for KeyValue(k, v) in anns do
-                            let a = JsonObject()
-                            a.["name"] <- JsonValue.Create k
-                            a.["value"] <- JsonValue.Create(str v |> Option.defaultValue "")
-                            target.Add a
-                    | _ -> ()
-
-                    match field "ExtendedProperties" with
-                    | Some(:? JsonObject as props) when props.Count > 0 ->
-                        let target = getOrCreateArray target "extendedProperties"
-
-                        for KeyValue(k, v) in props do
-                            let text = str v |> Option.defaultValue ""
-                            let e = JsonObject()
-                            e.["name"] <- JsonValue.Create k
-
-                            match
-                                (try
-                                    Some(JsonText.parse text)
-                                 with _ ->
-                                     None)
-                            with
-                            | Some parsed when not (isNull parsed) ->
-                                e.["type"] <- JsonValue.Create "json"
-                                e.["value"] <- parsed
-                            | _ -> e.["value"] <- JsonValue.Create text
-
-                            target.Add e
-                    | _ -> ()
-                | _ -> ()
-        | _ -> failwith $"{Annotations.perspectives} is not a list"
-    | None -> ()
-
-    // Cultures (without translations).
-    match annotation model Annotations.cultures true with
-    | Some json ->
-        for c in stringSet (Some json) |> Seq.sortWith (fun a b -> String.CompareOrdinal(a, b)) do
-            getOrCreateIn model "cultures" c |> ignore
-    | None -> ()
-
-    // Perspective membership.
-    let perspectives = objects model "perspectives"
-
-    for t in objects model "tables" do
-        let inPerspectives = stringSet (annotation t Annotations.inPerspective true)
-        let tableName = nameOf t |> Option.defaultValue ""
-
-        let members = [
-            for p in perspectives do
-                match nameOf p with
-                | Some pn when inPerspectives.Contains pn ->
-                    let pt = JsonObject()
-                    pt.["name"] <- JsonValue.Create tableName
-                    (getOrCreateArray p "tables").Add pt
-                    pn, pt
-                | _ -> ()
-        ]
-
-        if not members.IsEmpty then
-            for collection in [ "measures"; "columns"; "hierarchies" ] do
-                for item in objects t collection do
-                    let objPerspectives = stringSet (annotation item Annotations.inPerspective true)
-
-                    for pn, pt in members do
-                        if objPerspectives.Contains pn then
-                            let po = JsonObject()
-                            po.["name"] <- item.["name"].DeepClone()
-                            (getOrCreateArray pt collection).Add po
-
-    // Translations.
-    if model.ContainsKey "cultures" then
-        let modelTranslation (culture: string) =
-            let c = getOrCreateIn model "cultures" culture
-
-            let translations =
-                match c.["translations"] with
-                | :? JsonObject as t -> t
-                | _ ->
-                    let t = JsonObject()
-                    c.["translations"] <- t
-                    t
-
-            match translations.["model"] with
-            | :? JsonObject as m -> m
-            | _ ->
-                let m = JsonObject()
-                m.["name"] <- JsonValue.Create(nameOf model |> Option.defaultValue "Model")
-                translations.["model"] <- m
-                m
-
-        let apply (o: JsonObject) (target: string -> JsonObject) =
-            for annotationName, property in
-                [
-                    Annotations.translatedNames, "translatedCaption"
-                    Annotations.translatedDescriptions, "translatedDescription"
-                    Annotations.translatedDisplayFolders, "translatedDisplayFolder"
-                ] do
-                match annotation o annotationName true with
+let private resolveAnnotations (model: JsonObject) : Result<unit, string> =
+    result {
+        // Relationships, from each table.
+        let! fromTableChunks =
+            objects model "tables"
+            |> resultTraverse (fun t ->
+                match annotation t Annotations.relationships true with
+                | None -> Ok []
                 | Some json ->
-                    let pairs =
+                    try
                         match JsonText.parse json with
-                        // An old TE2 build wrote [{"Key": ..., "Value": ...}] instead of an object.
-                        | :? JsonArray as a -> [
-                            for kv in a do
-                                match kv with
-                                | :? JsonObject as p -> str p.["Key"] |> Option.defaultValue "", str p.["Value"]
-                                | _ -> ()
-                          ]
-                        | :? JsonObject as m -> [ for KeyValue(k, v) in m -> k, str v ]
-                        | _ -> failwith $"{annotationName} is not an object"
+                        | :? JsonArray as a -> Ok(detach a)
+                        | _ -> Error $"table {nameOf t}: {Annotations.relationships} is not a list"
+                    with :? JsonException as e ->
+                        Error $"table {nameOf t}: {Annotations.relationships}: {e.Message}")
 
-                    for culture, value in pairs do
-                        match value with
-                        | Some v -> (target culture).[property] <- JsonValue.Create v
+        let fromTables = List.concat fromTableChunks
+
+        if not fromTables.IsEmpty then
+            // TE2 replaces the model's relationships with these; semctl adds them.
+            let rels = getOrCreateArray model "relationships"
+
+            for r in fromTables do
+                rels.Add r
+
+        // Perspectives (without members).
+        match annotation model Annotations.perspectives true with
+        | Some json ->
+            let! parsed =
+                try
+                    Ok(JsonText.parse json)
+                with :? JsonException as e ->
+                    Error $"{Annotations.perspectives}: {e.Message}"
+
+            match parsed with
+            | :? JsonArray as a ->
+                for p in a do
+                    match p with
+                    | :? JsonObject as sp ->
+                        let field (key: string) =
+                            sp
+                            |> Seq.tryFind (fun kv -> String.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase))
+                            |> Option.map (fun kv -> kv.Value)
+
+                        let! name =
+                            match field "Name" |> Option.bind str with
+                            | Some n -> Ok n
+                            | None -> Error "a perspective has no name"
+
+                        let target = getOrCreateIn model "perspectives" name
+
+                        match field "Description" |> Option.bind str with
+                        | Some d -> target.["description"] <- JsonValue.Create d
                         | None -> ()
-                | None -> ()
 
-        let name (o: JsonObject) = nameOf o |> Option.defaultValue ""
+                        match field "Annotations" with
+                        | Some(:? JsonObject as anns) when anns.Count > 0 ->
+                            let target = getOrCreateArray target "annotations"
 
-        apply model modelTranslation
+                            for KeyValue(k, v) in anns do
+                                let a = JsonObject()
+                                a.["name"] <- JsonValue.Create k
+                                a.["value"] <- JsonValue.Create(str v |> Option.defaultValue "")
+                                target.Add a
+                        | _ -> ()
 
-        for p in objects model "perspectives" do
-            apply p (fun c -> getOrCreateIn (modelTranslation c) "perspectives" (name p))
+                        match field "ExtendedProperties" with
+                        | Some(:? JsonObject as props) when props.Count > 0 ->
+                            let target = getOrCreateArray target "extendedProperties"
+
+                            for KeyValue(k, v) in props do
+                                let text = str v |> Option.defaultValue ""
+                                let e = JsonObject()
+                                e.["name"] <- JsonValue.Create k
+
+                                match
+                                    (try
+                                        Some(JsonText.parse text)
+                                     with :? JsonException ->
+                                         None)
+                                with
+                                | Some parsed when not (isNull parsed) ->
+                                    e.["type"] <- JsonValue.Create "json"
+                                    e.["value"] <- parsed
+                                | _ -> e.["value"] <- JsonValue.Create text
+
+                                target.Add e
+                        | _ -> ()
+                    | _ -> ()
+            | _ -> return! Error $"{Annotations.perspectives} is not a list"
+        | None -> ()
+
+        // Cultures (without translations).
+        match annotation model Annotations.cultures true with
+        | Some json ->
+            let! cultures = stringSet (Some json)
+
+            for c in cultures |> Seq.sortWith (fun a b -> String.CompareOrdinal(a, b)) do
+                getOrCreateIn model "cultures" c |> ignore
+        | None -> ()
+
+        // Perspective membership.
+        let perspectives = objects model "perspectives"
 
         for t in objects model "tables" do
-            let tableT c =
-                getOrCreateIn (modelTranslation c) "tables" (name t)
+            let! inPerspectives = stringSet (annotation t Annotations.inPerspective true)
+            let tableName = nameOf t |> Option.defaultValue ""
 
-            apply t tableT
+            let members = [
+                for p in perspectives do
+                    match nameOf p with
+                    | Some pn when inPerspectives.Contains pn ->
+                        let pt = JsonObject()
+                        pt.["name"] <- JsonValue.Create tableName
+                        (getOrCreateArray p "tables").Add pt
+                        pn, pt
+                    | _ -> ()
+            ]
 
-            for m in objects t "measures" do
-                apply m (fun c -> getOrCreateIn (tableT c) "measures" (name m))
+            if not members.IsEmpty then
+                for collection in [ "measures"; "columns"; "hierarchies" ] do
+                    for item in objects t collection do
+                        let! objPerspectives = stringSet (annotation item Annotations.inPerspective true)
 
-            for col in objects t "columns" do
-                apply col (fun c -> getOrCreateIn (tableT c) "columns" (name col))
+                        for pn, pt in members do
+                            if objPerspectives.Contains pn then
+                                let po = JsonObject()
+                                po.["name"] <- item.["name"].DeepClone()
+                                (getOrCreateArray pt collection).Add po
 
-            for h in objects t "hierarchies" do
-                let hierarchyT c =
-                    getOrCreateIn (tableT c) "hierarchies" (name h)
+        // Translations.
+        if model.ContainsKey "cultures" then
+            let modelTranslation (culture: string) =
+                let c = getOrCreateIn model "cultures" culture
 
-                apply h hierarchyT
+                let translations =
+                    match c.["translations"] with
+                    | :? JsonObject as t -> t
+                    | _ ->
+                        let t = JsonObject()
+                        c.["translations"] <- t
+                        t
 
-                for l in objects h "levels" do
-                    apply l (fun c -> getOrCreateIn (hierarchyT c) "levels" (name l))
+                match translations.["model"] with
+                | :? JsonObject as m -> m
+                | _ ->
+                    let m = JsonObject()
+                    m.["name"] <- JsonValue.Create(nameOf model |> Option.defaultValue "Model")
+                    translations.["model"] <- m
+                    m
+
+            let apply (o: JsonObject) (target: string -> JsonObject) =
+                result {
+                    for annotationName, property in
+                        [
+                            Annotations.translatedNames, "translatedCaption"
+                            Annotations.translatedDescriptions, "translatedDescription"
+                            Annotations.translatedDisplayFolders, "translatedDisplayFolder"
+                        ] do
+                        match annotation o annotationName true with
+                        | Some json ->
+                            let! parsed =
+                                try
+                                    Ok(JsonText.parse json)
+                                with :? JsonException as e ->
+                                    Error $"{annotationName}: {e.Message}"
+
+                            let! pairs =
+                                match parsed with
+                                // An old TE2 build wrote [{"Key": ..., "Value": ...}] instead of an object.
+                                | :? JsonArray as a ->
+                                    Ok [
+                                        for kv in a do
+                                            match kv with
+                                            | :? JsonObject as p ->
+                                                str p.["Key"] |> Option.defaultValue "", str p.["Value"]
+                                            | _ -> ()
+                                    ]
+                                | :? JsonObject as m -> Ok [ for KeyValue(k, v) in m -> k, str v ]
+                                | _ -> Error $"{annotationName} is not an object"
+
+                            for culture, value in pairs do
+                                match value with
+                                | Some v -> (target culture).[property] <- JsonValue.Create v
+                                | None -> ()
+                        | None -> ()
+                }
+
+            let name (o: JsonObject) = nameOf o |> Option.defaultValue ""
+
+            do! apply model modelTranslation
+
+            for p in objects model "perspectives" do
+                do! apply p (fun c -> getOrCreateIn (modelTranslation c) "perspectives" (name p))
+
+            for t in objects model "tables" do
+                let tableT c =
+                    getOrCreateIn (modelTranslation c) "tables" (name t)
+
+                do! apply t tableT
+
+                for m in objects t "measures" do
+                    do! apply m (fun c -> getOrCreateIn (tableT c) "measures" (name m))
+
+                for col in objects t "columns" do
+                    do! apply col (fun c -> getOrCreateIn (tableT c) "columns" (name col))
+
+                for h in objects t "hierarchies" do
+                    let hierarchyT c =
+                        getOrCreateIn (tableT c) "hierarchies" (name h)
+
+                    do! apply h hierarchyT
+
+                    for l in objects h "levels" do
+                        do! apply l (fun c -> getOrCreateIn (hierarchyT c) "levels" (name l))
+    }
 
 /// Remove TE's object-level annotations that loading leaves (TE's ClearTabularEditorAnnotations), e.g.
 /// perspective membership of a table that's in no perspective.
@@ -1105,53 +1162,60 @@ let rec private clearObjectAnnotations (o: JsonObject) =
 /// Read a folder back into one TOM JSON (.bim) text. Files are read in fileOrder (TE2 uses the
 /// current culture's order, and the file system's order for table folders).
 let combine (dir: string) : Result<string, string> =
-    try
+    result {
         let databaseJson = Path.Combine(dir, databaseJsonFileName)
 
         if not (File.Exists databaseJson) then
-            failwith $"no {databaseJsonFileName} in {dir}"
+            return! Error $"no {databaseJsonFileName} in {dir}"
+        else
+            let! root = parseFile databaseJson
 
-        let root = parseFile databaseJson
+            match root.["model"] with
+            | :? JsonObject as model ->
+                do! inArray dir "dataSources" model
+                do! inArray dir "expressions" model
+                do! inArray dir "functions" model
 
-        match root.["model"] with
-        | :? JsonObject as model ->
-            inArray dir "dataSources" model
-            inArray dir "expressions" model
-            inArray dir "functions" model
+                let tablesDir = Path.Combine(dir, "tables")
 
-            let tablesDir = Path.Combine(dir, "tables")
+                if Directory.Exists tablesDir then
+                    let tables = getOrCreateArray model "tables"
 
-            if Directory.Exists tablesDir then
-                let tables = getOrCreateArray model "tables"
+                    let dirs =
+                        try
+                            Ok(Directory.GetDirectories tablesDir |> ordinal)
+                        with
+                        | :? IOException
+                        | :? UnauthorizedAccessException as e -> Error e.Message
 
-                for tableDir in Directory.GetDirectories tablesDir |> ordinal do
-                    match jsonFiles tableDir with
-                    | [| file |] ->
-                        let table = parseFile file
-                        inArray tableDir "columns" table
-                        inArray tableDir "partitions" table
-                        inArray tableDir "measures" table
-                        inArray tableDir "hierarchies" table
-                        inArray tableDir "annotations" table
-                        inArray tableDir "calculationGroup.calculationItems" table
-                        tables.Add table
-                    | _ -> failwith $"folder '{tableDir}' is expected to contain exactly one .json file"
+                    let! dirs = dirs
 
-            inArray dir "relationships" model
-            inArray dir "cultures" model
-            inArray dir "perspectives" model
-            inArray dir "roles" model
-            resolveAnnotations model
+                    for tableDir in dirs do
+                        match jsonFiles tableDir with
+                        | [| file |] ->
+                            let! table = parseFile file
+                            do! inArray tableDir "columns" table
+                            do! inArray tableDir "partitions" table
+                            do! inArray tableDir "measures" table
+                            do! inArray tableDir "hierarchies" table
+                            do! inArray tableDir "annotations" table
+                            do! inArray tableDir "calculationGroup.calculationItems" table
+                            tables.Add table
+                        | _ -> return! Error $"folder '{tableDir}' is expected to contain exactly one .json file"
 
-            for t in objects model "tables" do
-                clearObjectAnnotations t
+                do! inArray dir "relationships" model
+                do! inArray dir "cultures" model
+                do! inArray dir "perspectives" model
+                do! inArray dir "roles" model
+                do! resolveAnnotations model
 
-            dropEmptyAnnotations model
-        | _ -> failwith $"{databaseJson} has no model"
+                for t in objects model "tables" do
+                    clearObjectAnnotations t
 
-        Ok(JsonText.write "\n" root)
-    with e ->
-        Error e.Message
+                dropEmptyAnnotations model
+                return JsonText.write "\n" root
+            | _ -> return! Error $"{databaseJson} has no model"
+    }
 
 // ---- Local translations, perspectives and relationships --------------------------------------------
 

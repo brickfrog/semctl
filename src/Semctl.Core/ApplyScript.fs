@@ -7,10 +7,8 @@ module Semctl.ApplyScript
 
 open System
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.DaxScript
-
-let private eqCi (a: string) (b: string) =
-    String.Equals(a, b, StringComparison.OrdinalIgnoreCase)
 
 /// Exact case first, then any case (Tabular names are case-insensitive).
 let private pick (items: 'T seq) (nameOf: 'T -> string) (wanted: string) =
@@ -167,9 +165,6 @@ type private State = {
     mutable Created: int
 }
 
-let private plural n (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
-
 let private applyStatement (st: State) (s: Statement) : Result<unit, SemctlError> =
     let m = st.Db.Model
     let r = ExportScript.refOf s
@@ -295,38 +290,29 @@ let private applyStatement (st: State) (s: Statement) : Result<unit, SemctlError
                 | None, None -> needsExpression ()
                 | None, Some e -> create (AddObject.Details.CalculationItem(e, None, None)) find
 
-            target
-            |> Result.bind (fun i ->
-                s.Properties
-                |> List.fold
-                    (fun acc p ->
-                        acc
-                        |> Result.bind (fun () ->
-                            match p.Name, p.Value with
-                            | "Description", Value.String v ->
-                                setText i.Description v (fun v -> i.Description <- v)
-                                Ok()
-                            | "FormatString", Value.Expression v ->
-                                setFormatDefinition i.FormatStringDefinition v (fun d ->
-                                    i.FormatStringDefinition <- d)
+            result {
+                let! i = target
 
-                                Ok()
-                            | "Ordinal", Value.Int _ when st.Db.CompatibilityLevel < ordinalLevel ->
-                                Error(
-                                    at
-                                        p.Position
-                                        (CannotScript(
-                                            ObjectRef.format r,
-                                            $"calculation item ordinals need compatibility level {ordinalLevel} or higher (the model is at {st.Db.CompatibilityLevel})"
-                                        ))
-                                )
-                            | "Ordinal", Value.Int v ->
-                                if i.Ordinal <> v then
-                                    i.Ordinal <- v
-
-                                Ok()
-                            | _ -> Ok()))
-                    (Ok()))
+                for p in s.Properties do
+                    match p.Name, p.Value with
+                    | "Description", Value.String v -> setText i.Description v (fun v -> i.Description <- v)
+                    | "FormatString", Value.Expression v ->
+                        setFormatDefinition i.FormatStringDefinition v (fun d -> i.FormatStringDefinition <- d)
+                    | "Ordinal", Value.Int _ when st.Db.CompatibilityLevel < ordinalLevel ->
+                        return!
+                            Error(
+                                at
+                                    p.Position
+                                    (CannotScript(
+                                        ObjectRef.format r,
+                                        $"calculation item ordinals need compatibility level {ordinalLevel} or higher (the model is at {st.Db.CompatibilityLevel})"
+                                    ))
+                            )
+                    | "Ordinal", Value.Int v ->
+                        if i.Ordinal <> v then
+                            i.Ordinal <- v
+                    | _ -> ()
+            }
         | _ -> refuse "its calculation group doesn't exist"
     | ObjectType.Function ->
         let find () =
@@ -354,19 +340,21 @@ let apply (source: string) (db: Database) (script: Statement list) : Result<Muta
         Created = 0
     }
 
-    script
-    |> List.fold (fun acc s -> acc |> Result.bind (fun () -> applyStatement st s)) (Ok())
-    |> Result.map (fun () ->
+    result {
+        for s in script do
+            do! applyStatement st s
+
         let objects = plural script.Length "object"
 
         if script.IsEmpty then
             st.Warnings.Add $"{source} defines no objects"
 
-        {
+        return {
             Warnings = List.ofSeq st.Warnings
             Notes = $"Applied {objects} from {source} ({st.Created} new)" :: List.ofSeq st.Notes
             Renamed = []
-        })
+        }
+    }
 
 /// Parse a script's text and apply it.
 let applyText (source: string) (db: Database) (text: string) : Result<Mutation.Effect, SemctlError> =

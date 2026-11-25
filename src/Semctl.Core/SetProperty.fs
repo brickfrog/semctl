@@ -15,6 +15,7 @@ open System.ComponentModel
 open System.Globalization
 open System.Reflection
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Inventory
 open Semctl.PropertyCatalog
 
@@ -397,7 +398,7 @@ let private namedEntry (ctx: Ctx) (node: Node) (p: PropertyInfo) (named: Named) 
                         || (try
                                 use _ = Text.Json.JsonDocument.Parse text
                                 true
-                            with _ ->
+                            with :? Text.Json.JsonException ->
                                 false)
 
                     if not jsonOk then
@@ -817,27 +818,6 @@ let catalog (db: Database) (target: ObjectEntry) : Descriptor list =
 // ---------------------------------------------------------------------------------------------
 // Suggestions
 
-let private distance (a: string) (b: string) =
-    let a = a.ToLowerInvariant()
-    let b = b.ToLowerInvariant()
-    let d = Array2D.zeroCreate (a.Length + 1) (b.Length + 1)
-
-    for i in 0 .. a.Length do
-        d.[i, 0] <- i
-
-    for j in 0 .. b.Length do
-        d.[0, j] <- j
-
-    for i in 1 .. a.Length do
-        for j in 1 .. b.Length do
-            let cost = if a.[i - 1] = b.[j - 1] then 0 else 1
-            d.[i, j] <- min (min (d.[i - 1, j] + 1) (d.[i, j - 1] + 1)) (d.[i - 1, j - 1] + cost)
-
-            if i > 1 && j > 1 && a.[i - 1] = b.[j - 2] && a.[i - 2] = b.[j - 1] then
-                d.[i, j] <- min d.[i, j] (d.[i - 2, j - 2] + 1)
-
-    d.[a.Length, b.Length]
-
 let private suggestions (paths: string list) (input: string) =
     let leaf (p: string) =
         match p.LastIndexOf '.' with
@@ -850,11 +830,11 @@ let private suggestions (paths: string list) (input: string) =
     paths
     |> List.filter (fun p -> not (p.EndsWith "<name>"))
     |> List.choose (fun p ->
-        let full = distance p input
+        let full = Suggest.distance p input
         // "expression" on a partition: "source.expression".
         let byLeaf =
             if p.Contains '.' then
-                distance (leaf p) inputLeaf + 1
+                Suggest.distance (leaf p) inputLeaf + 1
             else
                 Int32.MaxValue
 
@@ -928,47 +908,49 @@ let private describeAssignments (target: ObjectEntry) (applied: (Descriptor * Va
 let set (db: Database) (target: ObjectEntry) (assignments: Assignment list) : Result<Mutation.Effect, SemctlError> =
     let ctx, c = build db target
 
-    let prepared =
-        assignments
-        |> List.fold
-            (fun acc a ->
-                acc
-                |> Result.bind (fun done' ->
-                    lookup ctx c a.Path
-                    |> Result.bind (fun e ->
-                        if e.Info.Writable then
-                            Ok e
-                        else
-                            Error(ReadOnlyProperty(ctx.Ref, e.Info.Path, defaultArg e.Info.Reason "read-only")))
-                    |> Result.bind (fun e ->
-                        if done' |> List.exists (fun (d: Descriptor, _, _) -> eqPath d.Path e.Info.Path) then
-                            invalid ctx e.Info.Path a.Value "this property is set more than once"
-                        else
-                            e.Prepare a.Value |> Result.map (fun w -> (e.Info, a.Value, w) :: done'))))
-            (Ok [])
-        |> Result.map List.rev
+    let rec prepare seenRev accRev =
+        function
+        | [] -> Ok(List.rev accRev)
+        | (a: Assignment) :: rest ->
+            result {
+                let! e = lookup ctx c a.Path
 
-    prepared
-    |> Result.bind (fun steps ->
-        let rec run =
-            function
-            | [] -> Ok()
-            | (info: Descriptor, value, write: Write) :: rest ->
-                write ()
-                |> Result.bind (fun () ->
-                    // TOM rejects some values only when it writes the object out.
+                if not e.Info.Writable then
+                    return! Error(ReadOnlyProperty(ctx.Ref, e.Info.Path, defaultArg e.Info.Reason "read-only"))
+                elif seenRev |> List.exists (fun p -> eqPath p e.Info.Path) then
+                    return! invalid ctx e.Info.Path a.Value "this property is set more than once"
+                else
+                    let! w = e.Prepare a.Value
+                    return! prepare (e.Info.Path :: seenRev) ((e.Info, a.Value, w) :: accRev) rest
+            }
+
+    let rec run =
+        function
+        | [] -> Ok()
+        | (info: Descriptor, value, write: Write) :: rest ->
+            result {
+                do! write ()
+
+                // TOM rejects some values only when it writes the object out.
+                do!
                     try
                         Serialize.objectJson db false target.Object |> ignore
                         Ok()
                     with e ->
-                        Error(InvalidPropertyValue(ctx.Ref, info.Path, valueText value, (unwrap e).Message)))
-                |> Result.bind (fun () -> run rest)
+                        Error(InvalidPropertyValue(ctx.Ref, info.Path, valueText value, (unwrap e).Message))
 
-        run steps
-        |> Result.map (fun () ->
-            match steps with
-            | [] -> Mutation.Effect.none
-            | steps -> {
+                return! run rest
+            }
+
+    result {
+        let! steps = prepare [] [] assignments
+        do! run steps
+
+        match steps with
+        | [] -> return Mutation.Effect.none
+        | steps ->
+            return {
                 Mutation.Effect.none with
                     Notes = [ describeAssignments target (steps |> List.map (fun (d, v, _) -> d, v)) ]
-              }))
+            }
+    }

@@ -7,6 +7,7 @@ module Semctl.AddObject
 open System
 open System.Text.Json
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Inventory
 
 /// Optional properties that several kinds share. Setting one on a kind that doesn't have it is an error.
@@ -234,54 +235,23 @@ let tryCalendarCategory (name: string) : TimeUnit option =
     calendarCategories
     |> List.tryFind (fun u -> String.Equals(squash (string u), squash name, StringComparison.OrdinalIgnoreCase))
 
-let private ci = StringComparison.OrdinalIgnoreCase
-let private eqCi (a: string) (b: string) = String.Equals(a, b, ci)
+let private check (ok: bool) (error: SemctlError) = if ok then Ok() else Error error
 
 /// Power BI's lineage tags: a lowercase, hyphenated GUID.
 let private newTag () = Guid.NewGuid().ToString()
 
-type private ResultBuilder() =
-    member _.Bind(r: Result<'a, SemctlError>, f: 'a -> Result<'b, SemctlError>) = Result.bind f r
-    member _.Return(v: 'a) : Result<'a, SemctlError> = Ok v
-    member _.ReturnFrom(r: Result<'a, SemctlError>) = r
-    member _.Zero() : Result<unit, SemctlError> = Ok()
-    member _.Delay(f: unit -> Result<'a, SemctlError>) = f
-    member _.Run(f: unit -> Result<'a, SemctlError>) = f ()
-    member _.Combine(r: Result<unit, SemctlError>, f: unit -> Result<'a, SemctlError>) = Result.bind f r
-
-    member _.For(xs: 'a seq, body: 'a -> Result<unit, SemctlError>) =
-        xs |> Seq.fold (fun acc x -> acc |> Result.bind (fun () -> body x)) (Ok())
-
-let private result = ResultBuilder()
-
-let private check (ok: bool) (error: SemctlError) = if ok then Ok() else Error error
-
 // --- finding parents ------------------------------------------------------------------------------
-
-/// Edit distance, case-insensitive (for "did you mean").
-let private distance (a: string) (b: string) =
-    let a, b = a.ToLowerInvariant(), b.ToLowerInvariant()
-
-    let d =
-        Array2D.init (a.Length + 1) (b.Length + 1) (fun i j ->
-            if i = 0 then j
-            elif j = 0 then i
-            else 0)
-
-    for i in 1 .. a.Length do
-        for j in 1 .. b.Length do
-            let cost = if a.[i - 1] = b.[j - 1] then 0 else 1
-            d.[i, j] <- min (min (d.[i - 1, j] + 1) (d.[i, j - 1] + 1)) (d.[i - 1, j - 1] + cost)
-
-    d.[a.Length, b.Length]
 
 /// Names close to `wanted`: within a third of its length (at least 2 edits), or containing it.
 let private similar (candidates: string seq) (wanted: string) =
     let limit = max 2 (wanted.Length / 3)
 
     candidates
-    |> Seq.map (fun c -> c, distance c wanted)
-    |> Seq.filter (fun (c, d) -> d <= limit || c.Contains(wanted, ci) || wanted.Contains(c, ci))
+    |> Seq.map (fun c -> c, Suggest.distance c wanted)
+    |> Seq.filter (fun (c, d) ->
+        d <= limit
+        || c.Contains(wanted, StringComparison.OrdinalIgnoreCase)
+        || wanted.Contains(c, StringComparison.OrdinalIgnoreCase))
     |> Seq.sortBy snd
     |> Seq.truncate 3
     |> Seq.map fst
@@ -457,22 +427,7 @@ let private dataColumn (name: string) (dataType: DataType) (sourceColumn: string
 
 /// Power BI lists its queries (M tables and named expressions) in this model annotation; keep it in
 /// step, as `rename` does.
-let private queryOrder = "PBI_QueryOrder"
-
-let private relaxedJson =
-    JsonSerializerOptions(Encoder = Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
-
-let private appendQueryOrder (m: Model) (name: string) =
-    match m.Annotations.Find queryOrder with
-    | null -> ()
-    | a ->
-        try
-            match JsonSerializer.Deserialize<string array>(a.Value) with
-            | null -> ()
-            | names when Array.contains name names -> ()
-            | names -> a.Value <- JsonSerializer.Serialize(Array.append names [| name |], relaxedJson)
-        with _ ->
-            ()
+let private appendQueryOrder (m: Model) (name: string) = Tom.appendQueryOrder m name
 
 /// A table and a named expression are both Power Query queries, so they can't share a name.
 let private queryClash (m: Model) (kind: ObjectKind) (name: string) =
@@ -696,13 +651,7 @@ let private addHierarchy (db: Database) entries (spec: AddSpec) (table: string) 
                             (not levels.IsEmpty)
                             (CannotAdd(ObjectRef.format r, "a hierarchy needs at least one level"))
 
-                    let! columns =
-                        levels
-                        |> List.fold
-                            (fun acc l ->
-                                acc
-                                |> Result.bind (fun cs -> findColumn t l |> Result.map (fun c -> cs @ [ c ])))
-                            (Ok [])
+                    let! columns = levels |> resultTraverse (findColumn t)
 
                     let names = columns |> List.map (fun c -> c.Name)
 
@@ -936,16 +885,12 @@ let private addRole (db: Database) entries (spec: AddSpec) (name: string) permis
         result {
             let! tables =
                 filters
-                |> List.fold
-                    (fun acc (table, dax) ->
-                        acc
-                        |> Result.bind (fun xs ->
-                            result {
-                                let! t = findTable db.Model table
-                                do! required r $"the filter on '{t.Name}'" dax
-                                return xs @ [ t, dax ]
-                            }))
-                    (Ok [])
+                |> resultTraverse (fun (table, dax) ->
+                    result {
+                        let! t = findTable db.Model table
+                        do! required r $"the filter on '{t.Name}'" dax
+                        return t, dax
+                    })
 
             let names = tables |> List.map (fun (t, _) -> t.Name)
 
@@ -971,25 +916,24 @@ let private addPerspective (db: Database) entries (spec: AddSpec) (name: string)
         result {
             let! members =
                 includes
-                |> List.fold
-                    (fun acc selector ->
-                        acc
-                        |> Result.bind (fun xs ->
-                            Selector.resolve entries selector
-                            |> Result.bind (fun e ->
-                                match e.Ref.Kind with
-                                | ObjectKind.Table
-                                | ObjectKind.Column
-                                | ObjectKind.Measure
-                                | ObjectKind.Hierarchy -> Ok(xs @ [ e.Object ])
-                                | k ->
-                                    Error(
-                                        CannotAdd(
-                                            ObjectRef.format r,
-                                            $"'{selector}' is a {ObjectKind.token k}; perspectives hold tables, columns, measures and hierarchies"
-                                        )
-                                    ))))
-                    (Ok [])
+                |> resultTraverse (fun selector ->
+                    result {
+                        let! e = Selector.resolve entries selector
+
+                        match e.Ref.Kind with
+                        | ObjectKind.Table
+                        | ObjectKind.Column
+                        | ObjectKind.Measure
+                        | ObjectKind.Hierarchy -> return e.Object
+                        | k ->
+                            return!
+                                Error(
+                                    CannotAdd(
+                                        ObjectRef.format r,
+                                        $"'{selector}' is a {ObjectKind.token k}; perspectives hold tables, columns, measures and hierarchies"
+                                    )
+                                )
+                    })
 
             let p = new Perspective(Name = name)
             applyMetadata spec.Metadata p
@@ -1216,27 +1160,14 @@ let private addCalendar
 
                     let! groups =
                         categories
-                        |> List.fold
-                            (fun acc c ->
-                                acc
-                                |> Result.bind (fun xs ->
-                                    column c.Primary
-                                    |> Result.bind (fun p ->
-                                        c.Associated
-                                        |> List.fold
-                                            (fun acc a ->
-                                                acc
-                                                |> Result.bind (fun ys ->
-                                                    column a |> Result.map (fun y -> ys @ [ y ])))
-                                            (Ok [])
-                                        |> Result.map (fun assoc -> xs @ [ c.Unit, p, assoc ]))))
-                            (Ok [])
+                        |> resultTraverse (fun c ->
+                            result {
+                                let! p = column c.Primary
+                                let! assoc = c.Associated |> resultTraverse column
+                                return c.Unit, p, assoc
+                            })
 
-                    let! related =
-                        timeRelated
-                        |> List.fold
-                            (fun acc a -> acc |> Result.bind (fun ys -> column a |> Result.map (fun y -> ys @ [ y ])))
-                            (Ok [])
+                    let! related = timeRelated |> resultTraverse column
 
                     let related = related |> List.distinctBy (fun c -> c.Name)
                     let existingCategories, existingRelated = calendarTags t

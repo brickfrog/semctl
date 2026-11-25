@@ -5,6 +5,7 @@ module Semctl.Rename
 open System
 open System.Collections.Generic
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Dax
 open Semctl.Inventory
 
@@ -46,9 +47,6 @@ module RenamePlan =
     /// Edits of calculated-table columns' sourceColumn.
     let sourceColumnEdits (p: RenamePlan) =
         p.Edits |> List.filter (fun e -> e.Property = "sourceColumn")
-
-let private ci = StringComparison.OrdinalIgnoreCase
-let private eqCi (a: string) (b: string) = String.Equals(a, b, ci)
 
 /// letters, digits and underscores, not starting with a digit: usable as an unquoted table name.
 let private isPlainIdentifier (s: string) =
@@ -249,32 +247,15 @@ let private rewrite (target: ObjectEntry) (newName: string) (dax: string) (refs:
     text, replacements.Length
 
 /// Power BI lists its queries (tables and named expressions) by name in this model annotation.
-let private queryOrder = "PBI_QueryOrder"
-
-let private relaxedJson =
-    Text.Json.JsonSerializerOptions(Encoder = Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
-
 let private queryOrderEdit (db: Database) (entries: ObjectEntry list) (oldName: string) (newName: string) =
-    match db.Model.Annotations.Find queryOrder with
-    | null -> None
-    | a ->
-        try
-            let names = Text.Json.JsonSerializer.Deserialize<string array>(a.Value)
-
-            if isNull names || not (Array.contains oldName names) then
-                None
-            else
-                let renamed = names |> Array.map (fun n -> if n = oldName then newName else n)
-
-                Some {
-                    Owner = entries |> List.find (fun e -> e.Ref.Kind = ObjectKind.Model)
-                    Property = "annotations." + queryOrder
-                    Before = a.Value
-                    After = Text.Json.JsonSerializer.Serialize(renamed, relaxedJson)
-                    References = 1
-                }
-        with _ ->
-            None
+    Tom.renameQueryOrder db.Model oldName newName
+    |> Option.map (fun (before, after) -> {
+        Owner = entries |> List.find (fun e -> e.Ref.Kind = ObjectKind.Model)
+        Property = "annotations." + Tom.queryOrderAnnotation
+        Before = before
+        After = after
+        References = 1
+    })
 
 /// Objects holding M (partitions, named expressions) that mention a name.
 let mMentions (entries: ObjectEntry list) (target: ObjectEntry) (name: string) =

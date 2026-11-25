@@ -8,6 +8,7 @@ open System
 open System.Collections.Generic
 open System.Globalization
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Dax
 open Semctl.Inventory
 
@@ -1168,22 +1169,7 @@ let ignoreAnnotation = "SemctlLint_IgnoreRules"
 /// The rule ids (upper case) an object's ignore annotation lists. TOM has no common interface for
 /// annotations, so this reads them by reflection; objects without any (calculation items) list none.
 let ignoredOn (o: MetadataObject) : Set<string> =
-    let value =
-        match o.GetType().GetProperty("Annotations") with
-        | null -> None
-        | p ->
-            match p.GetValue o with
-            | :? Collections.IEnumerable as coll ->
-                coll
-                |> Seq.cast<obj>
-                |> Seq.tryPick (fun a ->
-                    match a with
-                    | :? Annotation as a when a.Name = ignoreAnnotation && not (String.IsNullOrEmpty a.Value) ->
-                        Some a.Value
-                    | _ -> None)
-            | _ -> None
-
-    match value with
+    match Tom.tryAnnotation ignoreAnnotation o with
     | Some json ->
         BpaRules.parseIgnoreList json
         |> List.map (fun id -> id.Trim().ToUpperInvariant())

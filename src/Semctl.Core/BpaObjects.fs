@@ -10,6 +10,7 @@ open System
 open System.Collections.Generic
 open System.Collections.ObjectModel
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Inventory
 open Semctl.BpaDaxToken
 
@@ -384,14 +385,7 @@ type Context(db: Microsoft.AnalysisServices.Tabular.Database) as this =
 /// The base of every wrapper: names, annotations, dependencies, translations.
 [<AbstractClass; AllowNullLiteral>]
 type TabularObject internal (ctx: Context, tom: MetadataObject) =
-    let annotations =
-        lazy
-            (match tom.GetType().GetProperty("Annotations") with
-             | null -> []
-             | p ->
-                 match p.GetValue tom with
-                 | :? System.Collections.IEnumerable as xs -> [ for a in Seq.cast<Annotation> xs -> a.Name, a.Value ]
-                 | _ -> [])
+    let annotations = lazy [ for a in Tom.annotationSeq tom -> a.Name, a.Value ]
 
     let extendedProperties =
         lazy

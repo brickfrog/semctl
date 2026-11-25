@@ -13,6 +13,7 @@ module Semctl.SchemaCheck
 
 open System
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 
 /// One column of a source's result.
 type SourceColumn = {
@@ -387,18 +388,13 @@ let check (db: Database) (source: ISchemaSource) (tables: string list) : Result<
 
     let selected =
         tables
-        |> List.fold
-            (fun acc name ->
-                acc
-                |> Result.bind (fun found ->
-                    match all |> List.tryFind (fun t -> eqCi t.Name name) with
-                    | Some t -> Ok(found @ [ t, true ])
-                    | None ->
-                        let names = all |> List.map (fun t -> t.Name)
-                        let candidates = Suggest.closest names name
-
-                        Error(ObjectNotFoundSuggest(ObjectRef.format (ObjectRef.table name), candidates))))
-            (Ok [])
+        |> resultTraverse (fun name ->
+            match all |> List.tryFind (fun t -> eqCi t.Name name) with
+            | Some t -> Ok(t, true)
+            | None ->
+                let names = all |> List.map (fun t -> t.Name)
+                let candidates = Suggest.closest names name
+                Error(ObjectNotFoundSuggest(ObjectRef.format (ObjectRef.table name), candidates)))
         |> Result.map (fun named ->
             if tables.IsEmpty then
                 all |> List.map (fun t -> t, false)

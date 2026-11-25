@@ -4,6 +4,7 @@ module Semctl.ModelIO
 open System
 open System.IO
 open System.Text
+open Semctl.Prelude
 open Microsoft.AnalysisServices.Tabular
 open Microsoft.AnalysisServices.Tabular.Serialization
 open Microsoft.AnalysisServices.Tabular.Extensions
@@ -74,8 +75,9 @@ module Eol =
             let buffer = Array.zeroCreate<char> 65536
             let n = reader.ReadBlock(buffer, 0, buffer.Length)
             String(buffer, 0, n)
-        with _ ->
-            ""
+        with
+        | :? IOException
+        | :? UnauthorizedAccessException -> ""
 
     /// The line ending the model files at a path mostly use, if there are any.
     let detectAt (path: string) =
@@ -184,8 +186,6 @@ type SavedModel = {
     Files: string list
 }
 
-let private utf8NoBom = UTF8Encoding(false)
-
 let private catchIo (path: string) (f: unit -> 'a) : Result<'a, SemctlError> =
     try
         Ok(f ())
@@ -237,7 +237,7 @@ let private guessBimMode (json: string) =
             ->
             Microsoft.AnalysisServices.CompatibilityMode.PowerBI
         | None -> Microsoft.AnalysisServices.CompatibilityMode.AnalysisServices
-    with _ ->
+    with :? Text.Json.JsonException ->
         Microsoft.AnalysisServices.CompatibilityMode.AnalysisServices
 
 let private deserializeBim (json: string) =
@@ -714,19 +714,24 @@ let private savePbip journal (opts: SaveOptions) (item: Pbip.Item) (db: Database
     let definition = Path.Combine(dir, Pbip.definitionFolderName)
     let staleBim = Path.Combine(dir, Pbip.modelBimFileName)
 
-    catchIo dir (fun () -> SaveJournal.createDirectory journal dir)
-    |> Result.bind (fun () -> writeTmdl journal opts db definition)
-    |> Result.bind (fun () ->
-        catchIo staleBim (fun () ->
-            if File.Exists staleBim then
-                SaveJournal.deleteFile journal staleBim))
-    |> Result.bind (fun () -> Pbip.ensureSupportFilesWith journal dir (Some item) (Eol.text opts.Eol) Guid.NewGuid)
-    |> Result.map (fun () -> {
-        Format = PbipFolder
-        Path = dir
-        Eol = opts.Eol
-        Files = filesUnder dir
-    })
+    result {
+        do! catchIo dir (fun () -> SaveJournal.createDirectory journal dir)
+        do! writeTmdl journal opts db definition
+
+        do!
+            catchIo staleBim (fun () ->
+                if File.Exists staleBim then
+                    SaveJournal.deleteFile journal staleBim)
+
+        do! Pbip.ensureSupportFilesWith journal dir (Some item) (Eol.text opts.Eol) Guid.NewGuid
+
+        return {
+            Format = PbipFolder
+            Path = dir
+            Eol = opts.Eol
+            Files = filesUnder dir
+        }
+    }
 
 /// The item (displayName, description) of the PBIP a model was loaded from, if any.
 let sourceItem (source: ModelSource) =

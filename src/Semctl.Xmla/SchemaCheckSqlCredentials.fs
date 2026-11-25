@@ -80,18 +80,8 @@ let trustServerCertificate (env: Credentials.Environment) =
         v = "1" || v = "true" || v = "yes"
     | None -> false
 
-let private secret (env: Credentials.Environment) (direct: string) (file: string) : Result<string option, SemctlError> =
-    match env.GetEnv direct, env.GetEnv file with
-    | Some _, Some _ -> Error(InvalidCredentials $"set {direct} or {file}, not both")
-    | Some v, None -> Ok(Some v)
-    | None, Some path ->
-        match env.ReadSecret path with
-        | Ok v -> Ok(Some v)
-        | Error reason -> Error(InvalidCredentials $"{file}: {reason}")
-    | None, None -> Ok None
-
 let private token (env: Credentials.Environment) =
-    secret env Var.token Var.tokenFile
+    Credentials.secret env Var.token Var.tokenFile
     |> Result.map (Option.map (fun t -> SqlCredential.AccessToken(t.Trim())))
 
 /// The service principal connected mode uses: SM_XMLA_CLIENT_ID / _TENANT_ID / _CLIENT_SECRET(_FILE),
@@ -101,7 +91,7 @@ let private servicePrincipal (env: Credentials.Environment) =
 
     match env.GetEnv(fst v), env.GetEnv(snd v) with
     | Some clientId, Some tenantId ->
-        secret env Credentials.Var.clientSecret Credentials.Var.clientSecretFile
+        Credentials.secret env Credentials.Var.clientSecret Credentials.Var.clientSecretFile
         |> Result.bind (function
             | Some s -> Ok(Some(SqlCredential.ServicePrincipal(clientId, tenantId, s)))
             | None -> Ok None)
@@ -118,7 +108,7 @@ let private login (env: Credentials.Environment) =
     match env.GetEnv Var.user with
     | None -> Ok None
     | Some user ->
-        secret env Var.password Var.passwordFile
+        Credentials.secret env Var.password Var.passwordFile
         |> Result.bind (function
             | Some p -> Ok(Some(SqlCredential.SqlLogin(user, p)))
             | None -> Error(InvalidCredentials $"{Var.user} is set but {Var.password} (or {Var.passwordFile}) isn't"))
@@ -141,13 +131,11 @@ let resolve (env: Credentials.Environment) (address: SqlAddress) : Result<SqlCre
             | None -> Error(AuthenticationRequired(server, $"{Var.auth}={what}, but {hint}")))
 
     let cloudOnly (mode: string) next =
-        if cloud then
+        Credentials.cloudOnly cloud Var.auth server mode "Azure SQL and Fabric hosts" (fun () ->
             next ()
-        else
-            Error(
-                InvalidCredentials
-                    $"{Var.auth}={mode} only works with Azure SQL and Fabric hosts, not {server} (an Entra credential is never sent elsewhere)"
-            )
+            |> Result.mapError (function
+                | InvalidCredentials msg -> InvalidCredentials(msg + " (an Entra credential is never sent elsewhere)")
+                | e -> e))
 
     match (env.GetEnv Var.auth |> Option.defaultValue "auto").Trim().ToLowerInvariant() with
     | "token" -> cloudOnly "token" (fun () -> required "token" (token env))
@@ -156,16 +144,7 @@ let resolve (env: Credentials.Environment) (address: SqlAddress) : Result<SqlCre
     | "integrated" -> Ok SqlCredential.Integrated
     | "auto" ->
         if cloud then
-            let rec first attempts =
-                match attempts with
-                | [] -> Error(AuthenticationRequired(server, hint))
-                | attempt :: rest ->
-                    match attempt () with
-                    | Error e -> Error e
-                    | Ok(Some c) -> Ok c
-                    | Ok None -> first rest
-
-            first [
+            Credentials.firstOf server hint [
                 (fun () -> token env)
                 (fun () -> servicePrincipal env)
                 (fun () -> login env)

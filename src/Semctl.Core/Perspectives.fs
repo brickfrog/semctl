@@ -5,6 +5,7 @@ module Semctl.Perspectives
 
 open System
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Inventory
 
 let private eqCi (a: string) (b: string) =

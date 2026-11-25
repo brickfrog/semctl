@@ -13,6 +13,7 @@ open System
 open System.Text.Json
 open System.Text.Json.Nodes
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 
 type Options = {
     /// Replace the server's data sources with the model's.
@@ -121,8 +122,7 @@ let private hasPolicySource (t: Table) =
     | :? BasicRefreshPolicy as p -> not (String.IsNullOrEmpty p.SourceExpression)
     | _ -> false
 
-let private plural (n: int) (one: string) (many: string) =
-    if n = 1 then $"1 {one}" else $"{n} {many}"
+let private plural = pluralOf
 
 /// Roles: all from the server, or the model's with the server's members.
 let private mergeRoles (opts: Options) (model: JsonObject) (deployed: Model) (kept: ResizeArray<string>) =

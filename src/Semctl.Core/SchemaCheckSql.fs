@@ -255,7 +255,7 @@ let private connectionValue (connectionString: string) (keys: string list) =
             match b.TryGetValue k with
             | true, v when not (isNull v) && string v <> "" -> Some(string v)
             | _ -> None)
-    with _ ->
+    with :? ArgumentException ->
         None
 
 /// How a table's source is described, and with which type mapping.

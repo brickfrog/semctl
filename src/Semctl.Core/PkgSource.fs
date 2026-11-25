@@ -7,6 +7,7 @@ open System
 open System.IO
 open System.Text.Json
 open System.Text.Json.Nodes
+open Semctl.Prelude
 open Semctl.Pkg
 
 /// A package as a source lists it: its latest version (or the version found) and what it says
@@ -145,8 +146,9 @@ let private scan (root: string) =
             let files, dirs =
                 try
                     Directory.GetFiles dir |> Array.sort, Directory.GetDirectories dir |> Array.sort
-                with _ ->
-                    [||], [||]
+                with
+                | :? IOException
+                | :? UnauthorizedAccessException -> [||], [||]
 
             for f in files do
                 if isZip f then
@@ -346,57 +348,66 @@ let daxlib (get: Get) : Source =
         else
             let url = Urls.versions id
 
-            fetch url
-            |> Result.bind (function
-                | None -> Error(PackageNotFound(id, daxlibName, []))
+            result {
+                let! raw = fetch url
+
+                match raw with
+                | None -> return! Error(PackageNotFound(id, daxlibName, []))
                 | Some bytes ->
-                    parseJson url bytes
-                    |> Result.bind (fun node ->
-                        match node with
-                        | :? JsonObject as o ->
-                            match o.["versions"] with
-                            | :? JsonArray as a ->
-                                match [ for x in a -> textOf x ] |> List.choose (fun x -> x) with
-                                | [] -> Error(PackageNotFound(id, daxlibName, []))
-                                | vs -> Ok(vs |> List.sortWith (fun a b -> Version.compareStrings b a))
-                            | _ -> Error(PackageFetchFailed(string url, "the answer has no versions array"))
-                        | _ -> Error(PackageFetchFailed(string url, "the answer isn't a JSON object"))))
+                    let! node = parseJson url bytes
+
+                    match node with
+                    | :? JsonObject as o ->
+                        match o.["versions"] with
+                        | :? JsonArray as a ->
+                            match [ for x in a -> textOf x ] |> List.choose (fun x -> x) with
+                            | [] -> return! Error(PackageNotFound(id, daxlibName, []))
+                            | vs -> return vs |> List.sortWith (fun a b -> Version.compareStrings b a)
+                        | _ -> return! Error(PackageFetchFailed(string url, "the answer has no versions array"))
+                    | _ -> return! Error(PackageFetchFailed(string url, "the answer isn't a JSON object"))
+            }
 
     {
         Name = daxlibName
         IsOnline = true
         Search =
             fun text prerelease ->
-                let rec page (n: int) (acc: Summary list) =
+                let rec page (n: int) (accRev: Summary list) =
                     let url = Urls.search (text.Trim()) (n * pageSize) pageSize prerelease
 
-                    fetch url
-                    |> Result.bind (function
-                        | None -> Error(PackageFetchFailed(string url, "HTTP 404"))
-                        | Some bytes -> parseSearch url bytes)
-                    |> Result.bind (fun items ->
-                        let acc = acc @ items
+                    result {
+                        let! raw = fetch url
+
+                        let! items =
+                            match raw with
+                            | None -> Error(PackageFetchFailed(string url, "HTTP 404"))
+                            | Some bytes -> parseSearch url bytes
+
+                        let accRev = List.rev items @ accRev
 
                         if items.Length < pageSize || n + 1 >= maxPages then
-                            Ok acc
+                            return List.rev accRev
                         else
-                            page (n + 1) acc)
+                            return! page (n + 1) accRev
+                    }
 
                 page 0 []
         Versions = versions
         Get =
             fun id version ->
-                versions id
-                |> Result.bind (fun vs ->
+                result {
+                    let! vs = versions id
+
                     match vs |> List.tryFind (Version.same version) with
-                    | None -> Error(PackageVersionNotFound(id, version, vs))
+                    | None -> return! Error(PackageVersionNotFound(id, version, vs))
                     | Some v ->
                         let url = Urls.package id v
+                        let! raw = fetch url
 
-                        fetch url
-                        |> Result.bind (function
-                            | None -> Error(PackageVersionNotFound(id, version, vs))
-                            | Some bytes -> readZip (string url) bytes))
+                        match raw with
+                        | None -> return! Error(PackageVersionNotFound(id, version, vs))
+                        | Some bytes -> return! readZip (string url) bytes
+                }
         Skipped = []
     }
 

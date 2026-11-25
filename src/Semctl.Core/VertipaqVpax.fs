@@ -49,8 +49,10 @@ let private statisticsSkipped (bytes: byte array) =
                 | true, v when v.ValueKind = JsonValueKind.True -> false
                 | _ -> true
             | _ -> false
-    with _ ->
-        false
+    with
+    | :? IOException
+    | :? InvalidDataException
+    | :? JsonException -> false
 
 /// The statistics in a Dax.Metadata model.
 let toStats (origin: Origin) (estimated: bool) (riRead: bool) (m: DaxModel) : Stats =

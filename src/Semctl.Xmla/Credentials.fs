@@ -129,7 +129,7 @@ module Credentials =
 
     /// A value from a variable, or from the file another variable names. Error when the file can't
     /// be read or both are set.
-    let private secret (env: Environment) (direct: string) (file: string) : Result<string option, SemctlError> =
+    let internal secret (env: Environment) (direct: string) (file: string) : Result<string option, SemctlError> =
         match env.GetEnv direct, env.GetEnv file with
         | Some _, Some _ -> Error(InvalidCredentials $"set {direct} or {file}, not both")
         | Some v, None -> Ok(Some v)
@@ -138,6 +138,35 @@ module Credentials =
             | Ok v -> Ok(Some v)
             | Error reason -> Error(InvalidCredentials $"{file}: {reason}")
         | None, None -> Ok None
+
+    let internal cloudOnly
+        (cloud: bool)
+        (authVar: string)
+        (server: string)
+        (mode: string)
+        (what: string)
+        (next: unit -> Result<'T, SemctlError>)
+        : Result<'T, SemctlError> =
+        if cloud then
+            next ()
+        else
+            Error(InvalidCredentials $"{authVar}={mode} only works with {what}, not {server}")
+
+    let internal firstOf
+        (server: string)
+        (hint: string)
+        (attempts: (unit -> Result<'T option, SemctlError>) list)
+        : Result<'T, SemctlError> =
+        let rec go =
+            function
+            | [] -> Error(AuthenticationRequired(server, hint))
+            | attempt :: rest ->
+                match attempt () with
+                | Error e -> Error e
+                | Ok(Some c) -> Ok c
+                | Ok None -> go rest
+
+        go attempts
 
     let private hint =
         "set SM_XMLA_TOKEN (or SM_XMLA_TOKEN_FILE) to an access token; or SM_XMLA_CLIENT_ID, "
@@ -210,13 +239,7 @@ module Credentials =
         let server = XmlaAddress.server address
 
         let cloudOnly (mode: string) (next: unit -> Result<XmlaCredential, SemctlError>) =
-            if cloud then
-                next ()
-            else
-                Error(
-                    InvalidCredentials
-                        $"{Var.auth}={mode} only works with powerbi:// and asazure:// servers, not {server}"
-                )
+            cloudOnly cloud Var.auth server mode "powerbi:// and asazure:// servers" next
 
         let require (found: Result<XmlaCredential option, SemctlError>) =
             found
@@ -241,19 +264,7 @@ module Credentials =
                 Ok XmlaCredential.Integrated
         | "auto" ->
             if cloud then
-                let firstOf (attempts: (unit -> Result<XmlaCredential option, SemctlError>) list) =
-                    let rec go attempts =
-                        match attempts with
-                        | [] -> Error(AuthenticationRequired(server, hint))
-                        | attempt :: rest ->
-                            match attempt () with
-                            | Error e -> Error e
-                            | Ok(Some c) -> Ok c
-                            | Ok None -> go rest
-
-                    go attempts
-
-                firstOf [ (fun () -> token env false); (fun () -> servicePrincipal env false) ]
+                firstOf server hint [ (fun () -> token env false); (fun () -> servicePrincipal env false) ]
             else
                 basic env false |> Result.map (Option.defaultValue XmlaCredential.Integrated)
         | other ->

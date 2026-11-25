@@ -6,13 +6,8 @@ open System
 open System.IO
 open System.Text.Json
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.SchemaCheck
-
-let private eqCi (a: string) (b: string) =
-    String.Equals(a, b, StringComparison.OrdinalIgnoreCase)
-
-let private documentOptions =
-    JsonDocumentOptions(CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true)
 
 // ---- Schema file ----------------------------------------------------------------------------------
 

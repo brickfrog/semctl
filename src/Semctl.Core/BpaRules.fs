@@ -5,6 +5,7 @@ module Semctl.BpaRules
 open System
 open System.IO
 open System.Text.Json
+open Semctl.Prelude
 
 /// The kinds of object a rule applies to. Names and bit values follow TE2's RuleScope.
 [<RequireQualifiedAccess>]
@@ -189,16 +190,6 @@ let externalRulesAnnotation = "BestPracticeAnalyzer_ExternalRuleFiles"
 
 /// The per-object annotation listing rule IDs to ignore (and the older misspelling).
 let ignoreAnnotations = [ "BestPracticeAnalyzer_IgnoreRules"; "BestPractizeAnalyzer_IgnoreRules" ]
-
-type private ResultBuilder() =
-    member _.Bind(r: Result<'a, 'e>, f: 'a -> Result<'b, 'e>) = Result.bind f r
-    member _.Return(x: 'a) : Result<'a, 'e> = Ok x
-    member _.ReturnFrom(r: Result<'a, 'e>) = r
-
-let private result = ResultBuilder()
-
-let private documentOptions =
-    JsonDocumentOptions(AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip)
 
 /// A property by name, case-insensitively (TE reads rule files with Newtonsoft, which is).
 let private prop (o: JsonElement) (name: string) =

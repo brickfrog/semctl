@@ -7,6 +7,7 @@ module Semctl.RemoveObject
 open System
 open System.Collections.Generic
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Inventory
 
 type RemoveSpec = {
@@ -32,15 +33,6 @@ module RemoveSpec =
 /// TOM's own validation errors, such as a property that links to an object no longer in the model.
 let tomErrors (db: Database) =
     db.Model.Validate().Errors |> Seq.map (fun e -> e.Message) |> Set.ofSeq
-
-let private plural n (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
-
-/// Power BI lists its queries (tables and named expressions) by name in this model annotation.
-let private queryOrder = "PBI_QueryOrder"
-
-let private relaxedJson =
-    Text.Json.JsonSerializerOptions(Encoder = Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
 
 /// Take an object out of the collection that holds it.
 let private detach (m: Model) (o: MetadataObject) =
@@ -115,18 +107,17 @@ let removeWith
             | :? NamedMetadataObject as n -> n.Name
             | o -> o.GetType().Name
 
-    let resolved =
-        spec.Selectors
-        |> List.fold
-            (fun acc selector ->
-                acc
-                |> Result.bind (fun (found, skipped) ->
-                    match Selector.resolve entries selector with
-                    | Ok e -> Ok(found @ [ e ], skipped)
-                    | Error(ObjectNotFound _) when spec.IfExists -> Ok(found, skipped @ [ selector ])
-                    | Error(ObjectNotFoundSuggest _) when spec.IfExists -> Ok(found, skipped @ [ selector ])
-                    | Error e -> Error e))
-            (Ok([], []))
+    let rec resolveAll foundRev skippedRev =
+        function
+        | [] -> Ok(List.rev foundRev, List.rev skippedRev)
+        | selector :: rest ->
+            match Selector.resolve entries selector with
+            | Ok e -> resolveAll (e :: foundRev) skippedRev rest
+            | Error(ObjectNotFound _)
+            | Error(ObjectNotFoundSuggest _) when spec.IfExists -> resolveAll foundRev (selector :: skippedRev) rest
+            | Error e -> Error e
+
+    let resolved = resolveAll [] [] spec.Selectors
 
     match resolved with
     | Error e -> Error e
@@ -490,27 +481,18 @@ let removeWith
                     if not stale.IsEmpty then
                         notes.Add $"""Removed {plural stale.Length "translation"} of removed objects from {fmt c}"""
 
-            match model.Annotations.Find queryOrder with
-            | null -> ()
-            | a ->
-                let queries =
-                    top
-                    |> List.choose (fun o ->
-                        match o with
-                        | :? Table as t -> Some t.Name
-                        | :? NamedExpression as x -> Some x.Name
-                        | _ -> None)
-                    |> Set.ofList
-
-                try
-                    let names = Text.Json.JsonSerializer.Deserialize<string array>(a.Value)
-
-                    if not (isNull names) && names |> Array.exists queries.Contains then
-                        let kept = names |> Array.filter (queries.Contains >> not)
-                        a.Value <- Text.Json.JsonSerializer.Serialize(kept, relaxedJson)
-                        notes.Add $"Updated the model's {queryOrder} annotation"
-                with _ ->
-                    ()
+            if
+                Tom.removeQueryOrder
+                    model
+                    (Set.ofList [
+                        for o in top do
+                            match o with
+                            | :? Table as t -> t.Name
+                            | :? NamedExpression as x -> x.Name
+                            | _ -> ()
+                    ])
+            then
+                notes.Add $"Updated the model's {Tom.queryOrderAnnotation} annotation"
 
             // Levels removed from hierarchies that stay: renumber the rest, keeping their order.
             let renumber =

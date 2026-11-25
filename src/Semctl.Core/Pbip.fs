@@ -10,6 +10,7 @@ open System.IO
 open System.Text
 open System.Text.Json
 open System.Text.Json.Nodes
+open Semctl.Prelude
 
 let pbismFileName = "definition.pbism"
 let platformFileName = ".platform"
@@ -30,12 +31,7 @@ let pbismVersion = "4.2"
 /// definition.pbism versions below this predate TMDL support.
 let minTmdlPbismVersion = Version(4, 0)
 
-let private documentOptions =
-    JsonDocumentOptions(AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip)
-
 let private nodeOptions = JsonNodeOptions(PropertyNameCaseInsensitive = false)
-
-let private utf8NoBom = UTF8Encoding(false)
 
 let private readJson (path: string) : Result<JsonNode, string> =
     try

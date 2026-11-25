@@ -10,6 +10,7 @@ open System.Text.Encodings.Web
 open System.Text.Json
 open System.Text.Json.Nodes
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.BpaRules
 
 let private jsonOptions (indented: bool) (eol: string) =
@@ -137,27 +138,27 @@ let addRules (replace: bool) (rules: JsonObject list) (set: RuleSet) : Result<Ad
             Rules = set.Rules.DeepClone() :?> JsonArray
     }
 
-    rules
-    |> List.fold
-        (fun acc (o: JsonObject) ->
-            acc
-            |> Result.bind (fun (added, replaced) ->
-                let id = idOf o |> Option.defaultValue ""
+    let rec loop added replaced =
+        function
+        | [] ->
+            Ok {
+                Set = copy
+                Added = List.rev added
+                Replaced = List.rev replaced
+            }
+        | (o: JsonObject) :: rest ->
+            let id = idOf o |> Option.defaultValue ""
 
-                match indexOf copy id with
-                | Some _ when not replace -> Error id
-                | Some i ->
-                    copy.Rules.[i] <- o.DeepClone()
-                    Ok(added, replaced @ [ id ])
-                | None ->
-                    copy.Rules.Add(o.DeepClone())
-                    Ok(added @ [ id ], replaced)))
-        (Ok([], []))
-    |> Result.map (fun (added, replaced) -> {
-        Set = copy
-        Added = added
-        Replaced = replaced
-    })
+            match indexOf copy id with
+            | Some _ when not replace -> Error id
+            | Some i ->
+                copy.Rules.[i] <- o.DeepClone()
+                loop added (id :: replaced) rest
+            | None ->
+                copy.Rules.Add(o.DeepClone())
+                loop (id :: added) replaced rest
+
+    loop [] [] rules
 
 /// Remove rules from a set by ID (case-insensitive). A missing ID is returned as the error.
 let removeRules (ruleIds: string list) (set: RuleSet) : Result<RuleSet, string> =
@@ -166,18 +167,14 @@ let removeRules (ruleIds: string list) (set: RuleSet) : Result<RuleSet, string> 
             Rules = set.Rules.DeepClone() :?> JsonArray
     }
 
-    ruleIds
-    |> List.fold
-        (fun acc id ->
-            acc
-            |> Result.bind (fun () ->
-                match indexOf copy id with
-                | None -> Error id
-                | Some i ->
-                    copy.Rules.RemoveAt i
-                    Ok()))
-        (Ok())
-    |> Result.map (fun () -> copy)
+    result {
+        for id in ruleIds do
+            match indexOf copy id with
+            | None -> return! Error id
+            | Some i -> copy.Rules.RemoveAt i
+
+        return copy
+    }
 
 // ---- rule files ----------------------------------------------------------------------------
 

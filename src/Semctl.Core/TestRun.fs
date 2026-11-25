@@ -17,6 +17,7 @@ open System.Text.Json
 open System.Text.Json.Nodes
 open Microsoft.AnalysisServices.Tabular
 open Semctl
+open Semctl.Prelude
 
 [<RequireQualifiedAccess>]
 type TestOutcome =
@@ -369,10 +370,7 @@ let private expectedTable (table: TableExpect) (actual: QueryResult) : Result<Qu
         | :? DecoderFallbackException as e -> Error $"can't read {path}: {e.Message}"
     | TableExpect.File path ->
         try
-            let options =
-                JsonDocumentOptions(CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true)
-
-            match JsonNode.Parse(File.ReadAllText path, Nullable(), options) with
+            match JsonNode.Parse(File.ReadAllText path, Nullable(), documentOptions) with
             | :? JsonObject as o ->
                 // A result as `sm query --json` writes one.
                 QueryResult.ofJson o
@@ -382,33 +380,39 @@ let private expectedTable (table: TableExpect) (actual: QueryResult) : Result<Qu
                         Columns = r.Columns |> List.map (fun c -> { c with Name = fst (column c.Name) })
                 })
             | :? JsonArray as rows ->
-                let objects = rows |> Seq.map (fun r -> r :?> JsonObject) |> List.ofSeq
+                let asObject (r: JsonNode) =
+                    match r with
+                    | :? JsonObject as o -> Ok o
+                    | _ -> Error $"{path}: expected an array of row objects"
 
-                let names =
-                    objects |> List.collect (fun o -> [ for kv in o -> kv.Key ]) |> List.distinct
+                let cell (o: JsonObject) (name: string) : Result<QueryType option -> QueryValue, string> =
+                    match o.[name] with
+                    | null -> Ok(fun t -> expectedValue t SuiteValue.Null)
+                    | node ->
+                        match node.GetValueKind() with
+                        | JsonValueKind.String ->
+                            Ok(fun t -> expectedValue t (SuiteValue.Text(node.GetValue<string>())))
+                        | JsonValueKind.True -> Ok(fun t -> expectedValue t (SuiteValue.Bool true))
+                        | JsonValueKind.False -> Ok(fun t -> expectedValue t (SuiteValue.Bool false))
+                        | JsonValueKind.Number ->
+                            Ok(fun t -> expectedValue t (SuiteValue.ofPlain (node.ToJsonString())))
+                        | _ -> Error $"{path}: the value of \"{name}\" must be a string, a number, true, false or null"
 
-                let cell (o: JsonObject) (name: string) : QueryType option -> QueryValue =
-                    let value =
-                        match o.[name] with
-                        | null -> SuiteValue.Null
-                        | node ->
-                            match node.GetValueKind() with
-                            | JsonValueKind.String -> SuiteValue.Text(node.GetValue<string>())
-                            | JsonValueKind.True -> SuiteValue.Bool true
-                            | JsonValueKind.False -> SuiteValue.Bool false
-                            | JsonValueKind.Number -> SuiteValue.ofPlain (node.ToJsonString())
-                            | _ -> failwith $"the value of \"{name}\" must be a string, a number, true, false or null"
+                result {
+                    let! objects = rows |> Seq.toList |> resultTraverse asObject
 
-                    fun t -> expectedValue t value
+                    let names =
+                        objects |> List.collect (fun o -> [ for kv in o -> kv.Key ]) |> List.distinct
 
-                Ok(build names (objects |> List.map (fun o -> names |> List.map (cell o))))
+                    let! cells = objects |> resultTraverse (fun o -> names |> resultTraverse (cell o))
+
+                    return build names cells
+                }
             | _ -> Error $"{path}: expected an array of row objects, or a result object with \"columns\" and \"rows\""
         with
         | :? JsonException
-        | :? InvalidCastException
         | :? IOException
-        | :? UnauthorizedAccessException
-        | Failure _ as e -> Error $"{path}: {e.Message}"
+        | :? UnauthorizedAccessException as e -> Error $"{path}: {e.Message}"
 
 /// Judge a result against a test's expectations (all but `error` and `snapshot`, which the caller
 /// handles): the list of what doesn't hold, or why the expectation can't be checked.

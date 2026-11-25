@@ -8,6 +8,7 @@ open System.Text
 open System.Text.Json
 open System.Text.Json.Nodes
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 open Semctl.Inventory
 
 /// One translatable property of one object in one culture.
@@ -501,9 +502,6 @@ type ImportSpec = {
     CreateCultures: bool
 }
 
-let private plural n (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
-
 let private lineList (lines: int list) =
     let shown = lines |> List.truncate 10 |> List.map string |> String.concat ", "
     if lines.Length > 10 then shown + ", ..." else shown
@@ -528,8 +526,9 @@ let import (db: Database) (spec: ImportSpec) : Result<Mutation.Effect, SemctlErr
 
     let fail r reason = fail spec.Path r reason
 
-    read
-    |> Result.bind (fun raw ->
+    result {
+        let! raw = read
+
         let wanted (r: RawRow) =
             spec.Cultures.IsEmpty || spec.Cultures |> List.exists (eqCi r.Culture)
 
@@ -538,157 +537,144 @@ let import (db: Database) (spec: ImportSpec) : Result<Mutation.Effect, SemctlErr
         let entries = objects db
 
         // Cultures, in order of first appearance; created ones are added only once all rows check out.
-        let culturesResult =
-            rows
-            |> List.fold
-                (fun acc r ->
-                    acc
-                    |> Result.bind (fun (known: (string * Culture) list, created: Culture list) ->
-                        let name = r.Culture.Trim()
+        let rec resolveCultures (knownRev: (string * Culture) list) (createdRev: Culture list) =
+            function
+            | [] -> Ok(List.rev knownRev, List.rev createdRev)
+            | (r: RawRow) :: rest ->
+                let name = r.Culture.Trim()
 
-                        if known |> List.exists (fun (n, _) -> eqCi n name) then
-                            Ok(known, created)
-                        else
-                            match model.Cultures |> Seq.tryFind (fun c -> eqCi c.Name name) with
-                            | Some c -> Ok(known @ [ name, c ], created)
-                            | None when name = "" -> fail r "no culture"
-                            | None when not spec.CreateCultures ->
-                                fail r $"the model has no culture '{name}' (pass --create-cultures to add it)"
+                if knownRev |> List.exists (fun (n, _) -> eqCi n name) then
+                    resolveCultures knownRev createdRev rest
+                else
+                    match model.Cultures |> Seq.tryFind (fun c -> eqCi c.Name name) with
+                    | Some c -> resolveCultures ((name, c) :: knownRev) createdRev rest
+                    | None when name = "" -> fail r "no culture"
+                    | None when not spec.CreateCultures ->
+                        fail r $"the model has no culture '{name}' (pass --create-cultures to add it)"
+                    | None ->
+                        match Scaffold.tryCulture name with
+                        | None -> fail r $"'{name}' is not a specific culture name, such as da-DK"
+                        | Some canonical ->
+                            match createdRev |> List.tryFind (fun c -> c.Name = canonical) with
+                            | Some c -> resolveCultures ((name, c) :: knownRev) createdRev rest
                             | None ->
-                                match Scaffold.tryCulture name with
-                                | None -> fail r $"'{name}' is not a specific culture name, such as da-DK"
-                                | Some canonical ->
-                                    match created |> List.tryFind (fun c -> c.Name = canonical) with
-                                    | Some c -> Ok(known @ [ name, c ], created)
-                                    | None ->
-                                        let c = new Culture(Name = canonical)
-                                        Ok(known @ [ name, c ], created @ [ c ])))
-                (Ok([], []))
+                                let c = new Culture(Name = canonical)
+                                resolveCultures ((name, c) :: knownRev) (c :: createdRev) rest
 
-        culturesResult
-        |> Result.bind (fun (known, created) ->
-            let cultureOf (r: RawRow) =
-                known |> List.find (fun (n, _) -> eqCi n (r.Culture.Trim())) |> snd
+        let! known, created = resolveCultures [] [] rows
 
-            // Exported files name objects by their exact reference: look those up directly, and
-            // anything else (another case, DAX-style names) the way `get` does.
-            let resolved =
-                Collections.Generic.Dictionary<string, Result<ObjectEntry, SemctlError>>()
+        let cultureOf (r: RawRow) =
+            known |> List.find (fun (n, _) -> eqCi n (r.Culture.Trim())) |> snd
 
-            for e in entries do
-                resolved.[ObjectRef.format e.Ref] <- Ok e
+        // Exported files name objects by their exact reference: look those up directly, and
+        // anything else (another case, DAX-style names) the way `get` does.
+        let resolved =
+            Collections.Generic.Dictionary<string, Result<ObjectEntry, SemctlError>>()
 
-            let resolve (s: string) =
-                match resolved.TryGetValue s with
-                | true, r -> r
-                | _ ->
-                    let r = Selector.resolve entries s
-                    resolved.[s] <- r
-                    r
+        for e in entries do
+            resolved.[ObjectRef.format e.Ref] <- Ok e
 
-            // Check every row, and pair it with what it sets.
-            let checkedRows: Result<(RawRow * ObjectEntry * Culture * TranslatedProperty) list, SemctlError> =
-                rows
-                |> List.fold
-                    (fun acc r ->
-                        acc
-                        |> Result.bind (fun xs ->
-                            match resolve r.Object with
-                            | Error e -> fail r (SemctlError.message e)
-                            | Ok e ->
-                                match tryParseProperty r.Property with
-                                | None ->
-                                    fail
-                                        r
-                                        $"unknown property '{r.Property}' (expected Caption, Description or DisplayFolder)"
-                                | Some p ->
-                                    match Serialize.translatableProperties e.Object with
-                                    | [] -> fail r $"{ObjectRef.format e.Ref} can't be translated"
-                                    | props when not (List.contains p props) ->
-                                        let names = props |> List.map propertyName |> String.concat ", "
+        let resolve (s: string) =
+            match resolved.TryGetValue s with
+            | true, r -> r
+            | _ ->
+                let r = Selector.resolve entries s
+                resolved.[s] <- r
+                r
 
-                                        fail
-                                            r
-                                            $"{ObjectRef.format e.Ref} has no translatable {propertyName p} (only {names})"
-                                    | _ -> Ok((r, e, cultureOf r, p) :: xs)))
-                    (Ok [])
-                |> Result.map List.rev
+        // Check every row, and pair it with what it sets.
+        let! checkedRows =
+            rows
+            |> resultTraverse (fun r ->
+                match resolve r.Object with
+                | Error e -> fail r (SemctlError.message e)
+                | Ok e ->
+                    match tryParseProperty r.Property with
+                    | None ->
+                        fail r $"unknown property '{r.Property}' (expected Caption, Description or DisplayFolder)"
+                    | Some p ->
+                        match Serialize.translatableProperties e.Object with
+                        | [] -> fail r $"{ObjectRef.format e.Ref} can't be translated"
+                        | props when not (List.contains p props) ->
+                            let names = props |> List.map propertyName |> String.concat ", "
 
+                            fail r $"{ObjectRef.format e.Ref} has no translatable {propertyName p} (only {names})"
+                        | _ -> Ok(r, e, cultureOf r, p))
+
+        // The same property twice must agree.
+        let conflict =
             checkedRows
-            |> Result.bind (fun checkedRows ->
-                // The same property twice must agree.
-                let conflict =
-                    checkedRows
-                    |> List.groupBy (fun (_, e, c, p) -> e.Ref, c.Name, p)
-                    |> List.tryPick (fun (_, group) ->
-                        match group |> List.distinctBy (fun (r, _, _, _) -> r.Translation) with
-                        | (first, _, _, _) :: (second, _, _, _) :: _ -> Some(first, second)
-                        | _ -> None)
+            |> List.groupBy (fun (_, e, c, p) -> e.Ref, c.Name, p)
+            |> List.tryPick (fun (_, group) ->
+                match group |> List.distinctBy (fun (r, _, _, _) -> r.Translation) with
+                | (first, _, _, _) :: (second, _, _, _) :: _ -> Some(first, second)
+                | _ -> None)
 
-                match conflict with
-                | Some(first, second) ->
-                    let other =
-                        match first.Line, first.Item with
-                        | Some l, _ -> $"line {l}"
-                        | _, Some n -> $"item {n}"
-                        | _ -> "an earlier row"
+        match conflict with
+        | Some(first, second) ->
+            let other =
+                match first.Line, first.Item with
+                | Some l, _ -> $"line {l}"
+                | _, Some n -> $"item {n}"
+                | _ -> "an earlier row"
 
-                    fail second $"a different translation of the same property as {other}"
-                | None ->
-                    for c in created do
-                        model.Cultures.Add c
+            return! fail second $"a different translation of the same property as {other}"
+        | None ->
+            for c in created do
+                model.Cultures.Add c
 
-                    let mutable set = 0
-                    let mutable removed = 0
-                    let mutable unchanged = 0
-                    let stale = ResizeArray<int>()
+            let mutable set = 0
+            let mutable removed = 0
+            let mutable unchanged = 0
+            let stale = ResizeArray<int>()
 
-                    for r, e, c, p in checkedRows |> List.distinctBy (fun (_, e, c, p) -> e.Ref, c.Name, p) do
-                        let current = translation c e.Object p
+            for r, e, c, p in checkedRows |> List.distinctBy (fun (_, e, c, p) -> e.Ref, c.Name, p) do
+                let current = translation c e.Object p
 
-                        match r.Source with
-                        // A blank source (a cleared or hand-written column) isn't checked.
-                        | Some s when s <> "" && s <> sourceValue e.Object p ->
-                            stale.Add(defaultArg r.Line (defaultArg r.Item 0))
-                        | _ -> ()
+                match r.Source with
+                // A blank source (a cleared or hand-written column) isn't checked.
+                | Some s when s <> "" && s <> sourceValue e.Object p ->
+                    stale.Add(defaultArg r.Line (defaultArg r.Item 0))
+                | _ -> ()
 
-                        if r.Translation = current then
-                            unchanged <- unchanged + 1
-                        elif r.Translation = "" then
-                            c.ObjectTranslations.SetTranslation(e.Object, p, "")
-                            removed <- removed + 1
+                if r.Translation = current then
+                    unchanged <- unchanged + 1
+                elif r.Translation = "" then
+                    c.ObjectTranslations.SetTranslation(e.Object, p, "")
+                    removed <- removed + 1
+                else
+                    c.ObjectTranslations.SetTranslation(e.Object, p, r.Translation)
+                    set <- set + 1
+
+            let names =
+                checkedRows
+                |> List.map (fun (_, _, c, _) -> c.Name)
+                |> List.distinct
+                |> String.concat ", "
+
+            let where = lineWord format stale.Count
+
+            return {
+                Mutation.Effect.none with
+                    Notes = [
+                        for c in created do
+                            $"Added {ObjectRef.format (ObjectRef.modelLevel ObjectKind.Culture c.Name)}"
+                        if checkedRows.IsEmpty then
+                            "No rows to import"
                         else
-                            c.ObjectTranslations.SetTranslation(e.Object, p, r.Translation)
-                            set <- set + 1
-
-                    let names =
-                        checkedRows
-                        |> List.map (fun (_, _, c, _) -> c.Name)
-                        |> List.distinct
-                        |> String.concat ", "
-
-                    let where = lineWord format stale.Count
-
-                    Ok {
-                        Mutation.Effect.none with
-                            Notes = [
-                                for c in created do
-                                    $"Added {ObjectRef.format (ObjectRef.modelLevel ObjectKind.Culture c.Name)}"
-                                if checkedRows.IsEmpty then
-                                    "No rows to import"
-                                else
-                                    $"""Translations ({names}): {set} set, {removed} removed, {unchanged} unchanged"""
-                                if not skipped.IsEmpty then
-                                    $"""Skipped {plural skipped.Length "row"} of other cultures"""
-                            ]
-                            Warnings = [
-                                if stale.Count > 0 then
-                                    $"""the source text of {plural stale.Count "row"} no longer matches the model ({where} {lineList (List.ofSeq stale)}): it changed after the export, so check those translations"""
-                                for name in spec.Cultures do
-                                    if not (raw |> List.exists (fun r -> eqCi r.Culture name)) then
-                                        $"the file has no rows for culture '{name}'"
-                            ]
-                    })))
+                            $"""Translations ({names}): {set} set, {removed} removed, {unchanged} unchanged"""
+                        if not skipped.IsEmpty then
+                            $"""Skipped {plural skipped.Length "row"} of other cultures"""
+                    ]
+                    Warnings = [
+                        if stale.Count > 0 then
+                            $"""the source text of {plural stale.Count "row"} no longer matches the model ({where} {lineList (List.ofSeq stale)}): it changed after the export, so check those translations"""
+                        for name in spec.Cultures do
+                            if not (raw |> List.exists (fun r -> eqCi r.Culture name)) then
+                                $"the file has no rows for culture '{name}'"
+                    ]
+            }
+    }
 
 /// How much of each culture is translated: (culture, property, translated, total) over the rows
 /// `export` lists.

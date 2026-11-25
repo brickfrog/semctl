@@ -591,26 +591,6 @@ module TestSuite =
     let private tryKey (key: string) (pairs: (string * Node * Node) list) =
         pairs |> List.tryPick (fun (k, _, v) -> if k = key then Some v else None)
 
-    /// How many single-character edits (insert, delete, replace, swap of neighbours) turn `a` into `b`.
-    let private editDistance (a: string) (b: string) : int =
-        let d = Array2D.zeroCreate<int> (a.Length + 1) (b.Length + 1)
-
-        for i in 0 .. a.Length do
-            d.[i, 0] <- i
-
-        for j in 0 .. b.Length do
-            d.[0, j] <- j
-
-        for i in 1 .. a.Length do
-            for j in 1 .. b.Length do
-                let cost = if a.[i - 1] = b.[j - 1] then 0 else 1
-                d.[i, j] <- min (min (d.[i - 1, j] + 1) (d.[i, j - 1] + 1)) (d.[i - 1, j - 1] + cost)
-
-                if i > 1 && j > 1 && a.[i - 1] = b.[j - 2] && a.[i - 2] = b.[j - 1] then
-                    d.[i, j] <- min d.[i, j] (d.[i - 2, j - 2] + 1)
-
-        d.[a.Length, b.Length]
-
     let private checkKeys (what: string) (known: string list) (pairs: (string * Node * Node) list) =
         let plain (s: string) =
             s.Replace("_", "").Replace("-", "").ToLowerInvariant()
@@ -620,7 +600,7 @@ module TestSuite =
                 // A misspelt key (`expcet`, `queryFile`) is the likeliest mistake: name the one meant.
                 let close =
                     known
-                    |> List.map (fun k -> k, editDistance (plain k) (plain key))
+                    |> List.map (fun k -> k, Suggest.distance (plain k) (plain key))
                     |> List.filter (fun (k, distance) -> distance <= (if k.Length <= 4 then 1 else 2))
                     |> List.sortBy snd
                     |> List.tryHead

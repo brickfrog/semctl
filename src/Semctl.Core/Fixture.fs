@@ -7,6 +7,7 @@ open System.IO
 open System.Text
 open System.Text.Json
 open Microsoft.AnalysisServices.Tabular
+open Semctl.Prelude
 
 // Fixture data for the local DAX engine: a directory with one `<Table>.csv` or `<Table>.json` per
 // model table, read into a `DataStore` and checked against the model. Nothing here evaluates DAX,
@@ -21,14 +22,6 @@ open Microsoft.AnalysisServices.Tabular
 /// `%XX`, and files match tables ignoring case and Unicode normalization (macOS may hand back NFD).
 module FixtureName =
 
-    let private reserved =
-        HashSet<string>(
-            [ "CON"; "PRN"; "AUX"; "NUL" ]
-            @ [ for d in "0123456789\u00B9\u00B2\u00B3" -> $"COM{d}" ]
-            @ [ for d in "0123456789\u00B9\u00B2\u00B3" -> $"LPT{d}" ],
-            StringComparer.OrdinalIgnoreCase
-        )
-
     let private illegal = "%<>:\"/\\|?*"
 
     let private escape (sb: StringBuilder) (text: string) =
@@ -41,9 +34,7 @@ module FixtureName =
         let sb = StringBuilder()
 
         // Windows treats "CON", "con.txt" and "CON .x" as the console device.
-        let device =
-            let stem = (name.Split('.').[0]).TrimEnd(' ')
-            reserved.Contains stem
+        let device = WindowsFileName.isReserved name
 
         let mutable i = 0
 
@@ -1253,8 +1244,7 @@ module Fixture =
 
         String.concat ", " some
 
-    let private plural (n: int) (one: string) (many: string) =
-        if n = 1 then $"1 {one}" else $"{n} {many}"
+    let private plural = pluralOf
 
     /// The checks of the loaded data against the model's relationships and keys:
     /// `duplicate-key`, `blank-key`, `unmatched-key`, `not-unique`, `unchecked-relationship`.
