@@ -20,13 +20,13 @@ Editor CLI uses, so tooling written for one reads the other:
 How the fields work:
 - **Severity:** `error`, `warning` or `info`.
 - **`code`:** stable. It's the `validate` rule id, the BPA rule ID, or the `lint` rule id (`DI001`...).
-- **`objectPath`:** a tessera reference, so it pastes into any command.
+- **`objectPath`:** a semctl reference, so it pastes into any command.
 - **`objectType`:** one of `Model`, `Table`, `Column`, `Measure`, `Hierarchy`, `Level`, `Partition`,
   `CalculationItem`, `Calendar`, `Relationship`, `Role`, `Perspective`, `Culture`, `NamedExpression`, `Function`,
   `DataSource`; and, for `test`, `Test` and `TestSuite` (which have no `objectPath`: they aren't model objects).
 - **Optional keys** (`objectPath`, `expressionPosition`, `ruleName`, `category`) are left out rather than written
   as `null`. Where the position is only known to the line, `expressionPosition` has no `column`.
-- **`fixable`:** whether `tess lint --fix` fixes it. Always `false` for `validate` and `bpa`, which don't
+- **`fixable`:** whether `sm lint --fix` fixes it. Always `false` for `validate` and `bpa`, which don't
   apply fixes.
 
 `--ci github` writes one `::error` / `::warning` / `::notice` line per finding to stderr. `--ci azdo` writes
@@ -44,24 +44,24 @@ results). It doesn't change the command's own output or exit code.
   causes). `level` is `error`, `warning` or `note` (for info). `message` starts with the object's reference.
 - **Rules** (`tool.driver.rules`): the rules that ran, with their description and, for `bpa` and `lint`, their
   severity and category (as a tag). `helpUri` only where the rule itself has a URL (a BPA rule's `LearnMoreUrl`);
-  tess adds none.
+  sm adds none.
 - **Locations:** the file and line where the object is declared: the TMDL file and the line of `measure 'X'`, or
   the line of the object's `"name"` in a .bim. A `data check` issue in a fixture file points at its line there.
-  Each result also has a logical location whose `fullyQualifiedName` is the object's tessera reference. When the
+  Each result also has a logical location whose `fullyQualifiedName` is the object's semctl reference. When the
   declaration can't be found (or a name is declared twice), the result points at the nearest enclosing object (a
   measure's table), else line 1 of the model file, and its `properties.exactLocation` is `false`. A remote
   (`xmla:`) model has no files, so its results have only the logical location.
 - **Paths** are relative to the repository root (the nearest folder above the model that holds `.git`, else the
   current folder), with `/` and percent-encoding, under `uriBaseId` `SRCROOT`; a file outside that folder gets an
   absolute `file:` URI. No machine-specific paths otherwise.
-- **Deterministic:** no timestamps or machine names; the same model gives the same bytes. tess writes no
+- **Deterministic:** no timestamps or machine names; the same model gives the same bytes. sm writes no
   `partialFingerprints`: GitHub's upload action computes its own.
 - `bpa`: findings an object's ignore annotation hides are left out, as they are from `findings` (GitHub doesn't
   document SARIF suppressions, so they could show as open alerts); rules that couldn't run are
   `toolConfigurationNotifications`. `properties` on a result carry `objectType`, `fixable`, `exactLocation` and,
   where known, `expressionPosition` (the line within the expression; the region is the declaration's line).
 
-tess only writes the file; uploading it is your CI's job. With GitHub Actions (tess exits 1 on errors, so the upload
+sm only writes the file; uploading it is your CI's job. With GitHub Actions (sm exits 1 on errors, so the upload
 step runs `if: always()`):
 
 ```yaml
@@ -74,19 +74,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Install tess (a release binary, see Install)
+      - name: Install sm (a release binary, see Install)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download --repo brickfrog/tessera --pattern 'tess-*-linux-x64.tar.gz'
-          tar -xzf tess-*-linux-x64.tar.gz
-          echo "$PWD/$(ls -d tess-*-linux-x64/)" >> "$GITHUB_PATH"
-      - run: tess bpa "Sales.SemanticModel" --sarif bpa.sarif
+          gh release download --repo brickfrog/semctl --pattern 'sm-*-linux-x64.tar.gz'
+          tar -xzf sm-*-linux-x64.tar.gz
+          echo "$PWD/$(ls -d sm-*-linux-x64/)" >> "$GITHUB_PATH"
+      - run: sm bpa "Sales.SemanticModel" --sarif bpa.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: bpa.sarif
-          category: tess-bpa   # one category per command, if you upload several
+          category: sm-bpa   # one category per command, if you upload several
 ```
 
 ## Re-running on save (`--watch`)
@@ -95,13 +95,13 @@ jobs:
 until Ctrl+C (which exits 0).
 
 ```sh
-tess validate Sales.SemanticModel --watch
-tess bpa model.bim --rules team.json --watch --json | jq -c .summary
+sm validate Sales.SemanticModel --watch
+sm bpa model.bim --rules team.json --watch --json | jq -c .summary
 ```
 
 - **What it watches:** the model's files. A `.bim` is that one file; a TMDL folder, `.SemanticModel` folder or
   `.pbip` project is the semantic model folder (not the report). `bpa` also watches its `--rules` files; `test run`
-  also watches its suite files (or the default `.tess-tests` folders) and its `--data` folder.
+  also watches its suite files (or the default `.sm-tests` folders) and its `--data` folder.
 - **What it ignores:** files outside those, hidden folders (`.git`, `.pbi`, `.vs`), editors' temporary and backup
   files (`*~`, `.#*`, `*.swp`, `*.tmp`, `4913`, JetBrains `___jb_` files...), and the command's own outputs
   (`--trx`, `--junit`).

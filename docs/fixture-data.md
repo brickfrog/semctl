@@ -2,12 +2,12 @@
 
 ## Previewing a table (`preview`)
 
-`tess preview <model> <table>` shows the first rows of a table, like Tabular Editor 3's table preview:
+`sm preview <model> <table>` shows the first rows of a table, like Tabular Editor 3's table preview:
 
 ```
-tess preview ./Sales.pbip Customer --data ./fixture                 # offline: the first 10 rows
-tess preview ./Sales.pbip Customer --data ./fixture -n 3 -c Name,Country --csv
-tess preview "xmla:powerbi://api.powerbi.com/v1.0/myorg/Sales;Sales" Customer --json
+sm preview ./Sales.pbip Customer --data ./fixture                 # offline: the first 10 rows
+sm preview ./Sales.pbip Customer --data ./fixture -n 3 -c Name,Country --csv
+sm preview "xmla:powerbi://api.powerbi.com/v1.0/myorg/Sales;Sales" Customer --json
 ```
 
 - Model files need `--data <fixture>`: the local engine evaluates the table (`EVALUATE 'Customer'`) and the first rows
@@ -24,19 +24,19 @@ tess preview "xmla:powerbi://api.powerbi.com/v1.0/myorg/Sales;Sales" Customer --
 ## Fixture data (`data`)
 
 A fixture is a directory of data files, one per table, that the local DAX engine evaluates a model against: no
-server, no refresh. `tess data` creates one, checks it against the model, and summarizes it. `tess query <model>
---data <dir>` runs queries over it: see [the local DAX engine](dax-engine.md#the-local-dax-engine-query---data). `tess test`
+server, no refresh. `sm data` creates one, checks it against the model, and summarizes it. `sm query <model>
+--data <dir>` runs queries over it: see [the local DAX engine](dax-engine.md#the-local-dax-engine-query---data). `sm test`
 runs a model's tests over it: see [testing a model](model-tests.md#testing-a-model-test).
 
-**Fixture data never leaves your machine.** tess reads the files from the directory and does nothing else with
+**Fixture data never leaves your machine.** sm reads the files from the directory and does nothing else with
 them: no upload, no telemetry, no network call of any kind.
 
 ```sh
-tess data init  ./Sales.pbip ./fixtures                      # a header-only CSV per table, to fill in
-tess data init  ./Sales.pbip ./fixtures --rows 1000 --seed 7 # ... or 1000 rows of synthetic data per table
-tess data check ./Sales.pbip ./fixtures                      # files, columns, types, keys, relationships
-tess data info  ./Sales.pbip ./fixtures --json               # tables, row counts, distinct counts per column
-tess data embed ./Sales.pbip ./fixtures ./with-data.bim      # the model with the fixture's rows inside it
+sm data init  ./Sales.pbip ./fixtures                      # a header-only CSV per table, to fill in
+sm data init  ./Sales.pbip ./fixtures --rows 1000 --seed 7 # ... or 1000 rows of synthetic data per table
+sm data check ./Sales.pbip ./fixtures                      # files, columns, types, keys, relationships
+sm data info  ./Sales.pbip ./fixtures --json               # tables, row counts, distinct counts per column
+sm data embed ./Sales.pbip ./fixtures ./with-data.bim      # the model with the fixture's rows inside it
 ```
 
 ### The format
@@ -105,7 +105,7 @@ case-sensitive or binary (`..._CS_...`, `..._BIN2`) is loaded case-sensitively. 
 
 ### `data init`
 
-`tess data init <model> <dir>` writes `<Table>.csv` for every table that takes data: the header row only, or with
+`sm data init <model> <dir>` writes `<Table>.csv` for every table that takes data: the header row only, or with
 `--rows N`, N rows of synthetic data. The files are UTF-8 without a byte-order mark, with LF line ends.
 
 The synthetic data is made to be queryable, not realistic:
@@ -158,12 +158,12 @@ envelope adds `"valid"` (no errors), `"directory"` and `"tables": [{table, file,
 ### `data embed`
 
 ```sh
-tess data embed ./Sales.pbip ./fixtures ./Sales-with-data.bim
+sm data embed ./Sales.pbip ./fixtures ./Sales-with-data.bim
 ```
 
 `embed` writes a copy of the model that carries the fixture inside it: every loaded table becomes a calculated
 table whose expression is a `DATATABLE` of the fixture's rows. The copy needs no data source, so it can be
-deployed to any workspace (`tess deploy`, then refresh it there) and answers queries the way the model does
+deployed to any workspace (`sm deploy`, then refresh it there) and answers queries the way the model does
 locally against the fixture. That is how the [conformance corpus](development.md#the-dax-conformance-corpus) is run on a real
 server.
 

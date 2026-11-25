@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Semctl.Scripting</RootNamespace>
+    <Description>C# scripts against a model's TOM, compiled with Roslyn in memory (`sm csharp`). Self-contained: drop this project and the command to remove scripting.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="CsScript.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The C# compiler API (not Microsoft.CodeAnalysis.CSharp.Scripting, which needs assemblies on disk
+         and so fails in the single-file binary: see docs/scripting-design.md). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Semctl.Core/Semctl.Core.fsproj" />
+  </ItemGroup>
+
+</Project>

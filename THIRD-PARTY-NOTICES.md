@@ -1,6 +1,6 @@
 # Third-party notices
 
-tessera's own source code is MIT-licensed (see `LICENSE`). The release binaries and the `tessera` NuGet tool
+semctl's own source code is MIT-licensed (see `LICENSE`). The release binaries and the `semctl` NuGet tool
 package also contain third-party components, which are licensed to you under their own terms, listed below.
 **The MIT license in `LICENSE` does not apply to them.**
 
@@ -11,8 +11,8 @@ reserved.
 
 This component is licensed under the **Microsoft Software License Terms for Microsoft Analysis Management
 Objects (AMO)**. The full text is in `licenses/Microsoft-AMO-license-terms.rtf`, as Microsoft publishes it at
-<https://go.microsoft.com/fwlink/?linkid=852989>. tessera includes the component unmodified, in object code
-form. By using tessera's binaries you agree to those terms for that component. In particular, you may not
+<https://go.microsoft.com/fwlink/?linkid=852989>. semctl includes the component unmodified, in object code
+form. By using semctl's binaries you agree to those terms for that component. In particular, you may not
 reverse engineer, decompile or disassemble it, you may not remove Microsoft's notices from it, and you may not
 redistribute it except as those terms allow.
 
@@ -23,14 +23,14 @@ Corporation. All rights reserved.
 
 This component is licensed under the **Microsoft Software License Terms for Microsoft Analysis Services
 ADOMD.NET**. The full text is in `licenses/Microsoft-ADOMD.NET-license-terms.rtf`, as Microsoft publishes it at
-<https://go.microsoft.com/fwlink/?linkid=852895>. tessera includes the component unmodified, in object code
-form. By using tessera's binaries you agree to those terms for that component, on the same points as for AMO
+<https://go.microsoft.com/fwlink/?linkid=852895>. semctl includes the component unmodified, in object code
+form. By using semctl's binaries you agree to those terms for that component, on the same points as for AMO
 above.
 
 ### Data collection
 
 Both sets of Microsoft terms say the software "may collect information about you and your use of the software
-and send that to Microsoft". tessera turns on no such feature. It makes no network connection unless you ask
+and send that to Microsoft". semctl turns on no such feature. It makes no network connection unless you ask
 for one: the commands that work on model files and fixture data (`query --data`, `bpa`, `validate`, and the
 others) open no network socket at all, and connected mode (`xmla:` sources, `connect`, `deploy`, `refresh`)
 talks only to the server you name, as does `schemacheck --source sql:...`.
@@ -41,17 +41,17 @@ talks only to the server you name, as does `schemacheck --source sql:...`.
 |---|---|
 | Microsoft.Identity.Client (MSAL.NET), Microsoft.Identity.Client.Broker, Microsoft.Identity.Client.NativeInterop, Microsoft.IdentityModel.Abstractions | © Microsoft Corporation |
 | System.Configuration.ConfigurationManager, System.Security.Cryptography.ProtectedData | © Microsoft Corporation (.NET Foundation) |
-| Microsoft.Data.SqlClient, Microsoft.Data.SqlClient.Extensions.Abstractions, Microsoft.Data.SqlClient.Internal.Logging, Microsoft.SqlServer.Server (`schemacheck`'s SQL source), and what they use: Microsoft.IdentityModel.JsonWebTokens, Microsoft.IdentityModel.Logging, Microsoft.IdentityModel.Protocols, Microsoft.IdentityModel.Protocols.OpenIdConnect, Microsoft.IdentityModel.Tokens, System.IdentityModel.Tokens.Jwt, Microsoft.Bcl.Cryptography, Microsoft.Extensions.Caching.Abstractions, Microsoft.Extensions.Caching.Memory, Microsoft.Extensions.DependencyInjection.Abstractions, Microsoft.Extensions.Logging.Abstractions, Microsoft.Extensions.Options, Microsoft.Extensions.Primitives, System.Diagnostics.EventLog, System.Security.Cryptography.Pkcs, System.Threading.RateLimiting. SqlClient's native Windows network library (Microsoft.Data.SqlClient.SNI, under Microsoft's own terms) is not included: tess uses SqlClient's managed networking | © Microsoft Corporation (.NET Foundation) |
+| Microsoft.Data.SqlClient, Microsoft.Data.SqlClient.Extensions.Abstractions, Microsoft.Data.SqlClient.Internal.Logging, Microsoft.SqlServer.Server (`schemacheck`'s SQL source), and what they use: Microsoft.IdentityModel.JsonWebTokens, Microsoft.IdentityModel.Logging, Microsoft.IdentityModel.Protocols, Microsoft.IdentityModel.Protocols.OpenIdConnect, Microsoft.IdentityModel.Tokens, System.IdentityModel.Tokens.Jwt, Microsoft.Bcl.Cryptography, Microsoft.Extensions.Caching.Abstractions, Microsoft.Extensions.Caching.Memory, Microsoft.Extensions.DependencyInjection.Abstractions, Microsoft.Extensions.Logging.Abstractions, Microsoft.Extensions.Options, Microsoft.Extensions.Primitives, System.Diagnostics.EventLog, System.Security.Cryptography.Pkcs, System.Threading.RateLimiting. SqlClient's native Windows network library (Microsoft.Data.SqlClient.SNI, under Microsoft's own terms) is not included: sm uses SqlClient's managed networking | © Microsoft Corporation (.NET Foundation) |
 | .NET runtime, in the self-contained binaries (its own notices: <https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT>) | © .NET Foundation and Contributors |
 | FSharp.Core | © Microsoft Corporation (.NET Foundation) |
 | Argu | © 2019 Argu contributors (<https://github.com/fsprojects/Argu>) |
 | YamlDotNet | © Antoine Aubry and contributors (<https://github.com/aaubry/YamlDotNet>) |
-| Dax.Vpax, Dax.Metadata, Dax.ViewVpaExport (VertiPaq Analyzer), Dax.Vpax.Obfuscator, Dax.Vpax.Obfuscator.Common, Dax.Tokenizer; the DMV and DAX queries of Dax.Model.Extractor, followed in `src/Tessera.Xmla/VertipaqServer.fs`; `tests/Tessera.Tests/vertipaq/Contoso.vpax` (test data, not shipped) | © 2019 SQLBI (<https://github.com/sql-bi/VertiPaq-Analyzer>, <https://github.com/sql-bi/Vpax-Obfuscator>) |
+| Dax.Vpax, Dax.Metadata, Dax.ViewVpaExport (VertiPaq Analyzer), Dax.Vpax.Obfuscator, Dax.Vpax.Obfuscator.Common, Dax.Tokenizer; the DMV and DAX queries of Dax.Model.Extractor, followed in `src/Semctl.Xmla/VertipaqServer.fs`; `tests/Semctl.Tests/vertipaq/Contoso.vpax` (test data, not shipped) | © 2019 SQLBI (<https://github.com/sql-bi/VertiPaq-Analyzer>, <https://github.com/sql-bi/Vpax-Obfuscator>) |
 | Newtonsoft.Json | © James Newton-King (<https://www.newtonsoft.com/json>) |
 | System.IO.Packaging | © Microsoft Corporation (.NET Foundation) |
 | The `Vertipaq_*` annotation names, from Michael Kovalsky's Tabular Editor scripts (`VertipaqAnnotations.cs`, `VpaxToTabularEditor.cs`) | © Michael Kovalsky (<https://github.com/m-kovalsky/Tabular>) |
-| Roslyn: Microsoft.CodeAnalysis, Microsoft.CodeAnalysis.CSharp (the C# compiler, for `tess csharp`) | © .NET Foundation and Contributors (<https://github.com/dotnet/roslyn>) |
-| Tabular Editor 2: small portions adapted in `src/Tessera.Core` (for example the BPA token codes in `BpaDaxToken.fs`, and the database.json folder format in `FolderFormat.fs`), marked in the source; a TE2 test fixture in `tests/Tessera.Tests/Te2Fixture.fs` | © 2017 Daniel Otykier (<https://github.com/TabularEditor/TabularEditor>) |
+| Roslyn: Microsoft.CodeAnalysis, Microsoft.CodeAnalysis.CSharp (the C# compiler, for `sm csharp`) | © .NET Foundation and Contributors (<https://github.com/dotnet/roslyn>) |
+| Tabular Editor 2: small portions adapted in `src/Semctl.Core` (for example the BPA token codes in `BpaDaxToken.fs`, and the database.json folder format in `FolderFormat.fs`), marked in the source; a TE2 test fixture in `tests/Semctl.Tests/Te2Fixture.fs` | © 2017 Daniel Otykier (<https://github.com/TabularEditor/TabularEditor>) |
 
 The MIT license text:
 
@@ -88,13 +88,13 @@ The full text is in `licenses/BSD-3-Clause-ANTLR.txt`. Distributed unmodified.
 
 ## Used only by the tests (not shipped)
 
-`tests/Tessera.Tests/sarif/sarif-schema-2.1.0.json` is the OASIS SARIF 2.1.0 (errata 01) JSON schema, copied
+`tests/Semctl.Tests/sarif/sarif-schema-2.1.0.json` is the OASIS SARIF 2.1.0 (errata 01) JSON schema, copied
 unmodified from <https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json>.
-Copyright © OASIS Open 2023. All Rights Reserved. The tests use it to check the SARIF `tess` writes; it is not in
+Copyright © OASIS Open 2023. All Rights Reserved. The tests use it to check the SARIF `sm` writes; it is not in
 the binaries or the package. OASIS's notice, which permits copies that keep it, is next to the file in
-`tests/Tessera.Tests/sarif/NOTICE.txt`.
+`tests/Semctl.Tests/sarif/NOTICE.txt`.
 
 ## Not affiliated
 
-tessera is an independent project. It is not affiliated with, endorsed by or sponsored by Microsoft or Tabular
+semctl is an independent project. It is not affiliated with, endorsed by or sponsored by Microsoft or Tabular
 Editor ApS. "Power BI", "Analysis Services" and "Microsoft" are trademarks of Microsoft Corporation.

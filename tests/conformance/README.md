@@ -14,7 +14,7 @@ tests/conformance/
   check-quotes.py           dev tool: checks every quoted line against the page it cites (uses the network)
 ```
 
-The harness is `tests/Tessera.Tests/Conformance.fs`; `ConformanceTests.fs` checks every file on each test run
+The harness is `tests/Semctl.Tests/Conformance.fs`; `ConformanceTests.fs` checks every file on each test run
 (the model builds in TOM, the rows pass `Fixture.check`, the query parses with `DaxParser`, the expected result is
 well-formed, the metadata is complete). Files are JSON; comments and trailing commas are allowed.
 
@@ -44,7 +44,7 @@ well-formed, the metadata is complete). Files are JSON; comments and trailing co
 | `title` | one line: the fact the case settles. One fact per case, since one error fails a whole query. |
 | `model` | the name of a shared model, or `{ "base": "<name>", ...changes }` (below). |
 | `query` | a DAX query: a string, or an array of lines. `DEFINE MEASURE` / `VAR` / `TABLE` / `COLUMN` / `FUNCTION` go here. |
-| `expected` | an array with one result per `EVALUATE`, in the [`tess query` JSON shape](../../docs/xmla.md#query) (`rowCount` and `truncated` may be left out); or an error expectation with `error` (reason), optional local DAX `code`, and optional case-insensitive `message` fragment. XMLA exposes one query error code, so portable message fragments can narrow its verdict. |
+| `expected` | an array with one result per `EVALUATE`, in the [`sm query` JSON shape](../../docs/xmla.md#query) (`rowCount` and `truncated` may be left out); or an error expectation with `error` (reason), optional local DAX `code`, and optional case-insensitive `message` fragment. XMLA exposes one query error code, so portable message fragments can narrow its verdict. |
 | `ordered` | `true` when the query's `ORDER BY` fixes the order of every row and that order is part of the expectation. Default `false`: rows are compared as a multiset. |
 | `tolerance` | relative tolerance for doubles, if the default (1e-9) isn't right. |
 | `source` | `{ "url", "quote"?, "supports" }`, or an array of them. `quote` is a line or two of the page, word for word; `supports` says what in the page justifies the expectation. |
@@ -55,7 +55,7 @@ well-formed, the metadata is complete). Files are JSON; comments and trailing co
 | `notes` | anything else worth knowing. |
 | `as` | `{ "roles": [ ... ], "customData": "..." }`: the query runs as a member of these roles of the model (on a server: a connection with `Roles=` and `CustomData=`). Without it, as an administrator. |
 
-Expected values are spelled as `tess query --json` spells them: BLANK is `null`, an `int64` has no decimal
+Expected values are spelled as `sm query --json` spells them: BLANK is `null`, an `int64` has no decimal
 point, a `double` and a `decimal` (DAX currency) have one, a `dateTime` is `"2024-01-31T00:00:00"`. In a column of
 type `variant` a value's type is not in its spelling: a number without a point is an int64, with one a double, and
 anything else is written `{ "type": "decimal", "value": 12.5 }` (also `dateTime`, `double` for `"NaN"`).
@@ -69,7 +69,7 @@ Column names are the engine's: `Table[Column]` for a model column, `[name]` for 
 ### Tags with a meaning
 
 - `assumption:<id>`: the case is designed to settle one of the items marked `ASSUMPTION` in
-  `src/Tessera.Core/DaxValue.fs`. The ids are listed in `ConformanceTests.fs`, which fails if one has no case.
+  `src/Semctl.Core/DaxValue.fs`. The ids are listed in `ConformanceTests.fs`, which fails if one has no case.
 - Areas an engine may leave for later carry their area's tag, so they can be skipped as a group:
   `time-intelligence`, `allselected`, `format`, `text-functions`, `date-functions`, `math-functions`,
   `calculation-groups`, `window-functions`, `security`, `format-strings`. A case in a folder of that name must have
@@ -140,7 +140,7 @@ prefer a new shared model to many one-off changes.
    cite from memory. Adapt the example onto a shared model's data, quote at most a line or two, and cite.
 2. `published` only if the page shows the result or states it outright. If you had to apply its rule to other
    data, it is `derived`: write the arithmetic.
-3. Never get an expected value by running tessera, and don't read the engine's code for one. If the sources
+3. Never get an expected value by running semctl, and don't read the engine's code for one. If the sources
    don't settle it, write the case anyway, as `uncertain`, with both readings.
 4. Make the query deterministic: `ORDER BY` every row if order matters (and set `ordered`), name result columns,
    no `NOW`, `TODAY`, `RAND` or anything that depends on the server's locale beyond the model's `en-US`.

@@ -1,6 +1,6 @@
 # Benchmark results
 
-On a 24-core Linux desktop (.NET 10, Release), spaceparts at commit a74c5833 with `tess data init --rows N --seed 7`.
+On a 24-core Linux desktop (.NET 10, Release), spaceparts at commit a74c5833 with `sm data init --rows N --seed 7`.
 Times are of `Engine.evaluateQuery` alone (prepare is listed separately); "timeout" is the `--timeout` the run used.
 Peak working set is the child process's, the largest of the run's children.
 

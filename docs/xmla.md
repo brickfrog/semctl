@@ -2,23 +2,23 @@
 
 ## Connected mode (`connect`, `query`, `deploy`, remote models)
 
-tess works on files and stays offline unless a command is given a server. Then it talks to that server over XMLA,
+sm works on files and stays offline unless a command is given a server. Then it talks to that server over XMLA,
 through Microsoft's own client libraries (AMO/TOM and ADOMD.NET). **This part has been built and tested against a
 fake server only; it has not yet been run against a real one.** `docs/xmla-manual-test.md` is the checklist for
 that.
 
 ```sh
-export TESS_XMLA_TOKEN="$(az account get-access-token --resource https://analysis.windows.net/powerbi/api --query accessToken -o tsv)"
-tess connect "powerbi://api.powerbi.com/v1.0/myorg/Finance"            # can I get in? which models are there?
-tess info "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales"    # any read-only command, on the deployed model
-tess diff "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" ./Sales.SemanticModel
-tess convert "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" ./Sales.SemanticModel   # download as files
-tess query "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" "EVALUATE TOPN(10, 'Date')"
-tess query "xmla:...;Sales" -f totals.dax --json
-tess deploy ./Sales.SemanticModel "powerbi://api.powerbi.com/v1.0/myorg/Finance" Sales          # dry run
-tess deploy ./Sales.SemanticModel "powerbi://api.powerbi.com/v1.0/myorg/Finance" Sales --execute --overwrite
-tess refresh "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" Orders --type full       # dry run
-tess refresh "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" Orders --type full --execute
+export SM_XMLA_TOKEN="$(az account get-access-token --resource https://analysis.windows.net/powerbi/api --query accessToken -o tsv)"
+sm connect "powerbi://api.powerbi.com/v1.0/myorg/Finance"            # can I get in? which models are there?
+sm info "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales"    # any read-only command, on the deployed model
+sm diff "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" ./Sales.SemanticModel
+sm convert "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" ./Sales.SemanticModel   # download as files
+sm query "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" "EVALUATE TOPN(10, 'Date')"
+sm query "xmla:...;Sales" -f totals.dax --json
+sm deploy ./Sales.SemanticModel "powerbi://api.powerbi.com/v1.0/myorg/Finance" Sales          # dry run
+sm deploy ./Sales.SemanticModel "powerbi://api.powerbi.com/v1.0/myorg/Finance" Sales --execute --overwrite
+sm refresh "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" Orders --type full       # dry run
+sm refresh "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales" Orders --type full --execute
 ```
 
 ### Naming a server model
@@ -39,7 +39,7 @@ prefix is optional.
 | Power BI Desktop's local model | `localhost:<port>` | Windows only |
 
 The Windows-only rows are a limit of Microsoft's client library, which has no TCP transport on other systems.
-tess says so before trying.
+sm says so before trying.
 
 The database can be left out when the server has exactly one (as Power BI Desktop does). A wrong name is answered
 with the names that exist. A full connection string also works after the prefix
@@ -50,38 +50,38 @@ with a `Password`, `User ID` or anything token-like is refused (exit 2): credent
 
 Credentials come from environment variables, or from files (or standard input) that variables point at. They are
 never read from the command line, never printed, never written to JSON output, and removed from every error message
-(tess scrubs the secrets it holds, and anything shaped like a password, bearer token or JWT).
+(sm scrubs the secrets it holds, and anything shaped like a password, bearer token or JWT).
 
 | To sign in with | Set |
 |---|---|
-| an access token you already have | `TESS_XMLA_TOKEN`, or `TESS_XMLA_TOKEN_FILE=<path>` (`-` for standard input) |
-| a service principal | `TESS_XMLA_CLIENT_ID`, `TESS_XMLA_TENANT_ID`, and `TESS_XMLA_CLIENT_SECRET` or `TESS_XMLA_CLIENT_SECRET_FILE`. Without those, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_CLIENT_SECRET` are used |
-| your own account (device code) | `TESS_XMLA_AUTH=device-code` and `TESS_XMLA_CLIENT_ID` (your own app registration); optionally `TESS_XMLA_TENANT_ID` |
-| a user name and password (SSAS) | `TESS_XMLA_USER`, and `TESS_XMLA_PASSWORD` or `TESS_XMLA_PASSWORD_FILE` |
+| an access token you already have | `SM_XMLA_TOKEN`, or `SM_XMLA_TOKEN_FILE=<path>` (`-` for standard input) |
+| a service principal | `SM_XMLA_CLIENT_ID`, `SM_XMLA_TENANT_ID`, and `SM_XMLA_CLIENT_SECRET` or `SM_XMLA_CLIENT_SECRET_FILE`. Without those, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_CLIENT_SECRET` are used |
+| your own account (device code) | `SM_XMLA_AUTH=device-code` and `SM_XMLA_CLIENT_ID` (your own app registration); optionally `SM_XMLA_TENANT_ID` |
+| a user name and password (SSAS) | `SM_XMLA_USER`, and `SM_XMLA_PASSWORD` or `SM_XMLA_PASSWORD_FILE` |
 | the current Windows account (SSAS) | nothing |
 
-`TESS_XMLA_AUTH` picks one explicitly: `auto` (the default), `token`, `spn`, `device-code`, `basic` or `integrated`.
+`SM_XMLA_AUTH` picks one explicitly: `auto` (the default), `token`, `spn`, `device-code`, `basic` or `integrated`.
 With `auto`, a cloud server (`powerbi://`, `asazure://`) uses the token if there is one, then the service principal;
-with neither, tess stops and says what to set. It never starts an interactive sign-in by itself. Other servers use
+with neither, sm stops and says what to set. It never starts an interactive sign-in by itself. Other servers use
 the user name and password if both are set, otherwise the current Windows account. A token or service principal in
 the environment is never sent to a non-cloud server.
 
 A token must be issued for the server's resource: `https://analysis.windows.net/powerbi/api` for Power BI,
-`https://*.asazure.windows.net` for Azure Analysis Services. A static token isn't renewed; tess reads its expiry from
+`https://*.asazure.windows.net` for Azure Analysis Services. A static token isn't renewed; sm reads its expiry from
 the token only to tell the client library.
 
 Device-code sign-in prints a URL and a code on stderr and waits for you to enter the code in a browser, on any
-device. It needs `TESS_XMLA_CLIENT_ID`: the application (client) ID of a public client app registration of your
-own, with the Power BI Service delegated permission and "Allow public client flows" on. tess ships no application
+device. It needs `SM_XMLA_CLIENT_ID`: the application (client) ID of a public client app registration of your
+own, with the Power BI Service delegated permission and "Allow public client flows" on. sm ships no application
 ID. The sign-in lasts for that one command, unless you opt in to keeping it:
 
 ```sh
-export TESS_XMLA_AUTH=device-code TESS_XMLA_CLIENT_ID=<your app> TESS_XMLA_TOKEN_CACHE=~/.cache/tessera/xmla-token-cache
+export SM_XMLA_AUTH=device-code SM_XMLA_CLIENT_ID=<your app> SM_XMLA_TOKEN_CACHE=~/.cache/semctl/xmla-token-cache
 ```
 
-`TESS_XMLA_TOKEN_CACHE` names a file where the sign-in (including a refresh token) is kept between runs. It is
+`SM_XMLA_TOKEN_CACHE` names a file where the sign-in (including a refresh token) is kept between runs. It is
 created with mode 0600 on Linux and macOS; on Windows it gets its folder's permissions, so keep it in your profile.
-Nothing else in tess ever writes a credential to disk. Delete the file to sign out.
+Nothing else in sm ever writes a credential to disk. Delete the file to sign out.
 
 ### What gets contacted
 
@@ -93,9 +93,9 @@ Only commands given a server contact anything, and only these, all through the c
 - the service's own name resolution: the Power BI workspace lookup on the address's host, and for `asazure://`
   the region's host and `global.asazure.windows.net`.
 
-tess adds no telemetry and no other calls. The test suite checks, on the compiled assemblies, that
-`Tessera.Core` uses no network type outside the explicit BPA rule download and `pkg`'s daxlib.org fetch, that the
-CLI uses none itself, and that in `Tessera.Xmla` only the live connector (and `schemacheck`'s live SQL describer,
+sm adds no telemetry and no other calls. The test suite checks, on the compiled assemblies, that
+`Semctl.Core` uses no network type outside the explicit BPA rule download and `pkg`'s daxlib.org fetch, that the
+CLI uses none itself, and that in `Semctl.Xmla` only the live connector (and `schemacheck`'s live SQL describer,
 `LiveSql`) does.
 
 ### Remote models in other commands
@@ -111,7 +111,7 @@ The editing commands show their dry run against a remote model and can `--save-t
 
 ### `connect`
 
-`tess connect <server>` connects, and prints the product and version, how it signed in (never the credential), and
+`sm connect <server>` connects, and prints the product and version, how it signed in (never the credential), and
 the databases with their compatibility levels. With `--json`, each database also has a `source` you can paste as a
 model argument. It then becomes this terminal's **active connection** (`active:`; see
 [profiles and the active connection](#profiles-and-the-active-connection-profile-session-connect)), unless
@@ -120,15 +120,15 @@ model argument. It then becomes this terminal's **active connection** (`active:`
 ### `query`
 
 ```sh
-tess query <xmla-model> "<DAX>"        # or: -f <file>, or - for standard input
-tess query <xmla-model> -f q.dax --csv > out.csv
-tess query <xmla-model> "EVALUATE 'Date'" --max-rows 0 --json
+sm query <xmla-model> "<DAX>"        # or: -f <file>, or - for standard input
+sm query <xmla-model> -f q.dax --csv > out.csv
+sm query <xmla-model> "EVALUATE 'Date'" --max-rows 0 --json
 ```
 
 A query may hold several `EVALUATE` statements; each gives one result. The default output is an aligned table per
 result, `--csv` is RFC 4180 with results separated by an empty line, and `--json` is described below. `--max-rows`
 caps each result (default 1000, 0 for all); a capped result is marked `truncated` and stderr says so. Queries to a
-server are sent as they are: tess doesn't check them first. On model files, `query` needs `--data <fixture>` and
+server are sent as they are: sm doesn't check them first. On model files, `query` needs `--data <fixture>` and
 runs offline: see [the local DAX engine](dax-engine.md#the-local-dax-engine-query---data).
 `--role <name>` (repeatable), `--user-name` / `--user-principal-name` and `--custom-data` query as someone else:
 they become the connection's `Roles=`, `EffectiveUserName=` and `CustomData=` (see
@@ -176,18 +176,18 @@ there. See [format strings](dax-engine.md#format-strings).
 
 Read `decimal` values with a decimal type; a parser that goes through binary floating point can lose digits. In a
 `variant` column a number with a decimal point may be a `double` or a `decimal`. In text and CSV output BLANK is
-empty, booleans are `TRUE`/`FALSE`, and CSV writes an empty string as `""`. The type is `Tessera.QueryResult` in
-`Tessera.Core`; `QueryValue.toJson` is the encoder.
+empty, booleans are `TRUE`/`FALSE`, and CSV writes an empty string as `""`. The type is `Semctl.QueryResult` in
+`Semctl.Core`; `QueryValue.toJson` is the encoder.
 
 ### `deploy`
 
 ```sh
-tess deploy <model> <server> <database>            # dry run: connects and reads, changes nothing
-tess deploy <model> <server> <database> --execute  # deploys; an existing database also needs --overwrite
+sm deploy <model> <server> <database>            # dry run: connects and reads, changes nothing
+sm deploy <model> <server> <database> --execute  # deploys; an existing database also needs --overwrite
 ```
 
 `deploy` always connects, reads the database if it exists, and works out the model the server would hold
-afterwards. A dry run prints what would change (the same diff as `tess diff`, with `--stat`, `--name-only` and
+afterwards. A dry run prints what would change (the same diff as `sm diff`, with `--stat`, `--name-only` and
 `--ignore`), then the TMSL `createOrReplace` script it would run. `--tmsl` prints only the script; `--json` gives
 `changes`, `kept`, `warnings`, `introducedErrors`, `tmsl`, `creates`, `dryRun` and `deployed` in one document.
 `<model>` can be another `xmla:` model, to copy between servers.
@@ -216,9 +216,9 @@ deployment, new or changed tables may need a refresh: see `refresh` below (`depl
 
 Where this differs from the Tabular Editor tools, and why:
 
-- **Arguments.** `te deploy` names the source with `-s`/`-d` and the target with `--target-server`. tess takes the
+- **Arguments.** `te deploy` names the source with `-s`/`-d` and the target with `--target-server`. sm takes the
   model as its first argument, like every other command, then the server and database.
-- **`--execute` doesn't prompt.** `te` asks for confirmation and wants `--execute --force` in CI. tess never prompts;
+- **`--execute` doesn't prompt.** `te` asks for confirmation and wants `--execute --force` in CI. sm never prompts;
   `--force` means only "despite new errors".
 - **Overwriting needs `--overwrite`**, as in TE2 (`-O`). `te` overwrites unless `--create-only`.
 - **A new database gets the model's roles** even without `--deploy-roles`. TE2 would create it without roles,
@@ -227,15 +227,15 @@ Where this differs from the Tabular Editor tools, and why:
 - **Passwords in the model's data sources are not deployed.** The script is written without restricted
   information, so a dry run never prints a credential; TE2 includes it. After `--deploy-connections` (or creating a
   database with data sources), set their credentials on the server.
-- **Not done:** TE2's two-step deployment for a table or column that changes between calculated and loaded (tess
+- **Not done:** TE2's two-step deployment for a table or column that changes between calculated and loaded (sm
   warns instead), a BPA gate, skipping linguistic metadata, deployment profiles, and refreshing afterwards.
 
 ### `refresh`
 
 ```sh
-tess refresh "xmla:<server>;<database>"                               # dry run: the whole model, type automatic
-tess refresh "xmla:<server>;<database>" Sales "partition:Orders/2024" --type full
-tess refresh "xmla:<server>;<database>" Sales --type full --execute   # refreshes
+sm refresh "xmla:<server>;<database>"                               # dry run: the whole model, type automatic
+sm refresh "xmla:<server>;<database>" Sales "partition:Orders/2024" --type full
+sm refresh "xmla:<server>;<database>" Sales --type full --execute   # refreshes
 ```
 
 `refresh` connects, reads the model to find what the selectors name, and prints what the refresh covers and the
@@ -261,7 +261,7 @@ A partition of a table that is also named is dropped (with a warning), as is eve
 | `add` | appends what a partition's query returns to the rows it has | partitions |
 
 Those are all the types TMSL documents; any other is a usage error. The "Takes" column is Microsoft's reference,
-and tess refuses the rest (exit 3) before running anything, where the client library would script it and leave it
+and sm refuses the rest (exit 3) before running anything, where the client library would script it and leave it
 to the server.
 
 - **`--max-parallelism <n>`** wraps the refresh in a TMSL `sequence` with `maxParallelism`, so at most `n` objects
@@ -276,11 +276,11 @@ to the server.
   warns when a policy will be applied (the server may add, merge and remove partitions), and when the options are
   given but can't matter (no table in the refresh has a policy, or the type ignores policies).
 
-With `--execute`, tess writes `Refreshing...` to stderr, then progress as the server reports it, then
+With `--execute`, sm writes `Refreshing...` to stderr, then progress as the server reports it, then
 `Refreshed '<database>' on <server> in <seconds>`. If the server rejects the script or reports errors running it,
 that is exit 5 with its messages (`refresh-failed` in JSON, where the document still has `progress`).
 
-Progress comes from a trace of tess's own session (the client library's `Server.SessionTrace`). `--progress` picks
+Progress comes from a trace of sm's own session (the client library's `Server.SessionTrace`). `--progress` picks
 how much:
 
 | `--progress` | Shows |
@@ -296,7 +296,7 @@ Refreshing...
 Refreshed 'Sales' on powerbi://api.powerbi.com/v1.0/myorg/Finance in 14.2s.
 ```
 
-The text in each line is the server's own. If the trace can't be started or stops, the refresh still runs and tess
+The text in each line is the server's own. If the trace can't be started or stops, the refresh still runs and sm
 says why there is no progress (`traceError` in JSON). Which events a server sends, and what they say, has only been
 checked against a fake: use `--progress all` to see what yours sends, and `--progress none` if the trace itself
 gets in the way.
@@ -309,16 +309,16 @@ nothing is written to stderr.
 
 Where this differs from `te refresh`, and why:
 
-- **Objects are selectors after the model**, not `--table` and `--partition T.P`, as in every other tess command.
+- **Objects are selectors after the model**, not `--table` and `--partition T.P`, as in every other sm command.
 - **`--execute` doesn't prompt**, as with `deploy`.
-- **`--apply-refresh-policy` takes no value.** `te` accepts `true`, `false` or a table name; tess has the pair of
+- **`--apply-refresh-policy` takes no value.** `te` accepts `true`, `false` or a table name; sm has the pair of
   flags, and one script applies one setting to every table in it. Run two refreshes to treat tables differently.
 - **Not done:** refresh override profiles (TMSL `overrides`: other data sources, queries or parameters for one
   refresh), writing the trace to a file (`--trace <path>`), VertiPaq statistics after a refresh, cancelling a
-  running refresh (interrupting tess closes the session; what the server then does hasn't been observed), and
+  running refresh (interrupting sm closes the session; what the server then does hasn't been observed), and
   waiting for trace events the server sends after the script returns (they are dropped).
 
-### Not in tess yet
+### Not in sm yet
 
 A workspace mirror (`te connect -w`: saves written locally, then to the server), interactive
 browser sign-in, and certificate and managed-identity sign-in.
@@ -326,44 +326,44 @@ browser sign-in, and certificate and managed-identity sign-in.
 What each needs, for whoever picks it up:
 - **Refresh overrides:** `Refresh.Request` (Core) would carry the TMSL `overrides` array; the builder writes it
   after `objects`. `IXmlaSession.ExecuteTraced` is the trace seam, if something else needs server events.
-- **Interactive sign-in:** needs the MSAL broker the single-file builds leave out (see `Tessera.Cli.fsproj`).
+- **Interactive sign-in:** needs the MSAL broker the single-file builds leave out (see `Semctl.Cli.fsproj`).
 
 ## Profiles and the active connection (`profile`, `session`, `connect`)
 
 Local state only: nothing here contacts a server or stores a secret.
 
-**The active connection.** `tess connect <model or server>` checks it (a server: connects and lists its databases;
+**The active connection.** `sm connect <model or server>` checks it (a server: connects and lists its databases;
 a local model: loads it) and makes it this terminal's active connection. Any command then takes `active:` as its
 model argument:
 
 ```sh
-tess connect ./Sales.pbip                       # or: tess connect "powerbi://.../Finance;Sales"
-tess validate active:
-tess interactive                                # a local active connection; a server needs `tess interactive active:`
-tess connect                                    # show it
-tess connect --clear                            # forget it
+sm connect ./Sales.pbip                       # or: sm connect "powerbi://.../Finance;Sales"
+sm validate active:
+sm interactive                                # a local active connection; a server needs `sm interactive active:`
+sm connect                                    # show it
+sm connect --clear                            # forget it
 ```
 
 "This terminal" is the terminal's session leader on Linux and macOS (`getsid`: the shell the terminal started,
 which pipelines and subshells share) and the parent process on Windows, together with its start time, so a later
-process that gets the same id doesn't inherit it. `TESS_SESSION=<name>` names a session to share between terminals
-(or to keep one when tess runs under a wrapper such as `dotnet tool run`, whose parent changes every run). State
-files live in `$TESS_STATE_DIR`, else `%LOCALAPPDATA%\tessera\sessions` (Windows),
-`$XDG_STATE_HOME/tessera/sessions`, or `~/.local/state/tessera/sessions`; each holds the model argument, the profile
-it came from, the time and the terminal's process id and start time. `tess session` shows this session's (`list`:
+process that gets the same id doesn't inherit it. `SM_SESSION=<name>` names a session to share between terminals
+(or to keep one when sm runs under a wrapper such as `dotnet tool run`, whose parent changes every run). State
+files live in `$SM_STATE_DIR`, else `%LOCALAPPDATA%\semctl\sessions` (Windows),
+`$XDG_STATE_HOME/semctl/sessions`, or `~/.local/state/semctl/sessions`; each holds the model argument, the profile
+it came from, the time and the terminal's process id and start time. `sm session` shows this session's (`list`:
 every session's, marking terminals that are gone; `clear`; `prune` deletes those of terminals that are gone).
 
-**Profiles** are named connections in the user config file: `$TESS_CONFIG`, else `%APPDATA%\tessera\config.json`
-(Windows), `$XDG_CONFIG_HOME/tessera/config.json`, or `~/.config/tessera/config.json`.
+**Profiles** are named connections in the user config file: `$SM_CONFIG`, else `%APPDATA%\semctl\config.json`
+(Windows), `$XDG_CONFIG_HOME/semctl/config.json`, or `~/.config/semctl/config.json`.
 
 ```sh
-tess profile set dev --model ./Sales.pbip --description "Local TMDL"
-tess profile set prod --server "powerbi://api.powerbi.com/v1.0/myorg/Finance" --database Sales --setting auth=device-code
-tess profile list
-tess profile show prod --json
-tess connect --profile prod                     # make it the active connection (nothing is contacted)
-tess query profile:prod "EVALUATE ..."          # one command, without changing the active connection
-tess profile remove dev
+sm profile set dev --model ./Sales.pbip --description "Local TMDL"
+sm profile set prod --server "powerbi://api.powerbi.com/v1.0/myorg/Finance" --database Sales --setting auth=device-code
+sm profile list
+sm profile show prod --json
+sm connect --profile prod                     # make it the active connection (nothing is contacted)
+sm query profile:prod "EVALUATE ..."          # one command, without changing the active connection
+sm profile remove dev
 ```
 
 ```json
@@ -373,24 +373,24 @@ tess profile remove dev
 ```
 
 A profile names a local model (`--model`) or a server and database (`--server`, `--database`). Its settings are
-behaviour overrides: defaults for the non-secret `TESS_*` variables, for the commands that use the profile
+behaviour overrides: defaults for the non-secret `SM_*` variables, for the commands that use the profile
 (`profile:<name>`, or `active:` when the active connection came from it). A variable set in the environment wins.
 
 | Setting | Variable |
 |---|---|
-| `auth` | `TESS_XMLA_AUTH` (`token`, `spn`, `device-code`, `basic`, `integrated`) |
-| `clientId`, `tenantId` | `TESS_XMLA_CLIENT_ID`, `TESS_XMLA_TENANT_ID` |
-| `user` | `TESS_XMLA_USER` |
-| `tokenCache` | `TESS_XMLA_TOKEN_CACHE` (the opt-in sign-in cache's file) |
-| `bpaRules` | `TESS_BPA_RULES` |
+| `auth` | `SM_XMLA_AUTH` (`token`, `spn`, `device-code`, `basic`, `integrated`) |
+| `clientId`, `tenantId` | `SM_XMLA_CLIENT_ID`, `SM_XMLA_TENANT_ID` |
+| `user` | `SM_XMLA_USER` |
+| `tokenCache` | `SM_XMLA_TOKEN_CACHE` (the opt-in sign-in cache's file) |
+| `bpaRules` | `SM_BPA_RULES` |
 
 **Never a secret.** Tokens, client secrets and passwords stay in the environment (and the opt-in token cache) as
-without a profile: a server string with credentials in it is refused as on the command line, a setting tess doesn't
+without a profile: a server string with credentials in it is refused as on the command line, a setting sm doesn't
 know is refused, and so is any value with credentials written the way a connection string writes them
 (`Password=`, `Pwd=`, `...Secret=`, `...Token=`). The state files hold
 only the model argument.
 
 `active:` and `profile:<name>` are replaced before the command line is read, wherever they appear as a whole
-argument (a model argument, or `diff`'s second model). tess reads the config and state files only for a command
+argument (a model argument, or `diff`'s second model). sm reads the config and state files only for a command
 line that uses one of them, and for `connect`, `profile`, `session` and a bare `interactive`. (An `@name` form, as
 in `te`, is avoided: PowerShell reads `@name` as splatting.)

@@ -41,7 +41,7 @@ jobs:
           elif [[ -n "$INPUT_VERSION" ]]; then
             version="${INPUT_VERSION#v}"
           else
-            version="$(dotnet msbuild src/Tessera.Cli -getProperty:Version)"
+            version="$(dotnet msbuild src/Semctl.Cli -getProperty:Version)"
           fi
           if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::'$version' is not a version like 1.2.3 or 1.2.3-beta.1"
@@ -89,28 +89,28 @@ jobs:
           global-json-file: global.json
       - name: Publish
         run: >
-          dotnet publish src/Tessera.Cli -c Release -r "$RID" --self-contained
+          dotnet publish src/Semctl.Cli -c Release -r "$RID" --self-contained
           -p:PublishSingleFile=true -p:Version="$VERSION" -o "publish/$RID"
       - name: Smoke test
         if: matrix.smoke
         run: |
-          exe="publish/$RID/tess"
+          exe="publish/$RID/sm"
           [[ "$RID" == win-* ]] && exe="$exe.exe"
           out="$("$exe" --version | tr -d '\r')"
           echo "$out"
-          [[ "$out" == "tess $VERSION" ]]
+          [[ "$out" == "sm $VERSION" ]]
           git clone --depth 1 https://github.com/TabularEditor/spaceparts-analytics "$RUNNER_TEMP/spaceparts"
           "$exe" info "$RUNNER_TEMP/spaceparts"
           "$exe" convert "$RUNNER_TEMP/spaceparts" "$RUNNER_TEMP/sample.bim"
       - name: Archive
         run: |
-          name="tess-$VERSION-$RID"
+          name="sm-$VERSION-$RID"
           mkdir -p "dist/$name"
           if [[ "$RID" == win-* ]]; then
-            cp "publish/$RID/tess.exe" "dist/$name/"
+            cp "publish/$RID/sm.exe" "dist/$name/"
           else
-            cp "publish/$RID/tess" "dist/$name/"
-            chmod +x "dist/$name/tess"
+            cp "publish/$RID/sm" "dist/$name/"
+            chmod +x "dist/$name/sm"
           fi
           cp LICENSE THIRD-PARTY-NOTICES.md SKILL.md "dist/$name/"
           # The archive ships the quickstart. Point its reference links at this release.
@@ -126,7 +126,7 @@ jobs:
           ls -la
       - uses: actions/upload-artifact@v7
         with:
-          name: tess-${{ matrix.rid }}
+          name: sm-${{ matrix.rid }}
           path: dist/*
           if-no-files-found: error
 
@@ -142,10 +142,10 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - run: dotnet pack src/Tessera.Cli -c Release -p:Version="$VERSION" -o dist
+      - run: dotnet pack src/Semctl.Cli -c Release -p:Version="$VERSION" -o dist
       - uses: actions/upload-artifact@v7
         with:
-          name: tess-nupkg
+          name: sm-nupkg
           path: dist/*.nupkg
           if-no-files-found: error
 
@@ -165,7 +165,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: tess-*
+          pattern: sm-*
           path: dist
           merge-multiple: true
       - name: Checksums
@@ -180,5 +180,5 @@ jobs:
           else
             flags=()
             [[ "$VERSION" == *-* ]] && flags+=(--prerelease)
-            gh release create "$TAG" dist/* --title "tess $VERSION" --generate-notes --verify-tag "${flags[@]}"
+            gh release create "$TAG" dist/* --title "sm $VERSION" --generate-notes --verify-tag "${flags[@]}"
           fi

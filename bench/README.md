@@ -5,9 +5,9 @@ CI: build and run it by hand.
 
 ```sh
 git clone https://github.com/TabularEditor/spaceparts-analytics /tmp/spaceparts   # pinned: a74c5833
-dotnet run --project src/Tessera.Cli -- data init "/tmp/spaceparts/Invoiced Sales.pbip" /tmp/fx200 --rows 200 --seed 7
-dotnet build -c Release bench/Tessera.Bench
-dotnet bench/Tessera.Bench/bin/Release/net10.0/Tessera.Bench.dll "/tmp/spaceparts/Invoiced Sales.pbip" /tmp/fx200 \
+dotnet run --project src/Semctl.Cli -- data init "/tmp/spaceparts/Invoiced Sales.pbip" /tmp/fx200 --rows 200 --seed 7
+dotnet build -c Release bench/Semctl.Bench
+dotnet bench/Semctl.Bench/bin/Release/net10.0/Semctl.Bench.dll "/tmp/spaceparts/Invoiced Sales.pbip" /tmp/fx200 \
     --timeout 60 --out results.tsv [--compare earlier.tsv] [--filter regex] [--check]
 ```
 

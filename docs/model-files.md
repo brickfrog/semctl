@@ -27,7 +27,7 @@ Unless you pass `--format`, the format is inferred from the destination:
 `--serialization` is another name for `--format` (as in TE's CLI). Its values are a fixed list:
 `bim`, `tmdl`, `pbip` and `database.json`.
 
-tess tells a `.bim` file from other files by its extension, so `--format bim` adds `.bim` to a destination that
+sm tells a `.bim` file from other files by its extension, so `--format bim` adds `.bim` to a destination that
 doesn't end in it (`--format bim ./out` writes `./out.bim`; the output line and `--json` give the real path), and
 refuses a destination that is a folder (exit 2). The folder formats write wherever they're told. `init` and
 `data embed` do the same.
@@ -39,7 +39,7 @@ The defaults match Power BI Desktop's output:
 - expressions written as-is
 - restricted information (e.g. passwords) stripped
 
-Line endings default to `--eol auto`: tess matches the files already at the destination, so overwrites
+Line endings default to `--eol auto`: sm matches the files already at the destination, so overwrites
 don't rewrite every line in git. With nothing there, it matches the source, and falls back to LF.
 Use `--eol lf|crlf`, `--indent-spaces N` or `--include-sensitive` to change these. `convert` won't write over a
 non-empty destination without `--force`. With `--force`, stale `.tmdl` files are removed and unrelated files are
@@ -76,8 +76,8 @@ A PBIP save merges into what's there and never clobbers it:
   - names that would collide on a case- or normalization-insensitive file system get `~2`, `~3`, ...
     The first keeps its name.
 
-For TMDL, tess keeps TOM's own file names and only renames the files that wouldn't be portable. TMDL readers
-take object names from file contents, never from file names. Golden tests in `tests/Tessera.Tests/golden`
+For TMDL, sm keeps TOM's own file names and only renames the files that wouldn't be portable. TMDL readers
+take object names from file contents, never from file names. Golden tests in `tests/Semctl.Tests/golden`
 pin the output byte for byte. A new `.platform`'s `logicalId` is random, as it has to be.
 
 ## Tabular Editor folders (`database.json`)
@@ -93,16 +93,16 @@ tables/<table>/{columns,measures,hierarchies,partitions,calculationItems,annotat
 ```
 
 ```sh
-tess convert ./model.bim ./model-folder --serialization database.json
-tess convert ./model-folder ./Sales.SemanticModel        # ... and on to PBIP
-tess set ./model-folder "[Revenue]" -p formatString='#,0' --save   # saves back as database.json
+sm convert ./model.bim ./model-folder --serialization database.json
+sm convert ./model-folder ./Sales.SemanticModel        # ... and on to PBIP
+sm set ./model-folder "[Revenue]" -p formatString='#,0' --save   # saves back as database.json
 ```
 
 The model's `TabularEditor_SerializeOptions` annotation sets the layout, as it does for TE, so a folder
 keeps its layout whoever saves it:
 - `Levels` decides which collections get their own files. That includes TE3's per-file UDFs (`Functions`)
   and calculation items (`Tables/Calculation Items`); the old spelling `Tables/CalculationItems` is read
-  too. A level tess doesn't know leaves its objects inline.
+  too. A level sm doesn't know leaves its objects inline.
 - `PrefixFilenames` adds `000 ` prefixes to keep the model's order.
 - `LocalTranslations`, `LocalPerspectives` and `LocalRelationships` store translations, perspective
   membership and relationships as TE's annotations on the objects themselves.
@@ -114,7 +114,7 @@ annotation is written into `database.json`, as TE does. Reading resolves TE's lo
 translations, perspectives and relationships, then removes them, as TE does. A folder TE2 wrote with all
 three `Local*` options loads and saves back byte for byte.
 
-Where tess departs from TE2:
+Where sm departs from TE2:
 - **File names** are portable on every OS (see above). TE2 escapes only what the running OS refuses.
 - **Reading order**: names with a number prefix (`000 `, `1000 `) are sorted by that number, the rest
   ordinally. TE2 uses the current culture's order (so `1000 x` comes before `101 x`) and, for table
@@ -124,7 +124,7 @@ Where tess departs from TE2:
   GUID names became "Relationship 1", "Relationship 2", ... Names of that generated form are still dropped.
 - **Linguistic metadata** survives `LocalTranslations`: a culture that has any keeps its file, without the
   translations. TE2 drops such cultures.
-- **Refusals**: tess refuses to save, with an error, rather than lose data:
+- **Refusals**: sm refuses to save, with an error, rather than lose data:
   - `IgnoreIncrementalRefreshPartitions` when the model has incremental refresh partitions (TE2 deletes them);
   - `LocalPerspectives` when a perspective has extended properties, or annotations on its members, which
     TE's annotation can't hold;
@@ -143,9 +143,9 @@ files aren't rewritten.
 support files. The model is named after the folder or file, without `.SemanticModel` or `.bim`.
 
 ```sh
-tess init ./Sales.SemanticModel                                 # PBIP: definition/ + definition.pbism + .platform
-tess init ./finance.bim --name Finance --culture da-DK
-tess init ./model --compatibility-level 1601 --force            # TMDL folder; replace what's there
+sm init ./Sales.SemanticModel                                 # PBIP: definition/ + definition.pbism + .platform
+sm init ./finance.bim --name Finance --culture da-DK
+sm init ./model --compatibility-level 1601 --force            # TMDL folder; replace what's there
 ```
 
 The model gets the properties Power BI Desktop puts on a new model:
@@ -199,7 +199,7 @@ Commands that take an object accept any of these forms:
 | bare name | `Sales`, `Readers` | the table with that name; failing that, any uniquely named object |
 
 Names match exact-case first, then case-insensitively, since Tabular treats names case-insensitively. Inside
-DAX quoting, `''` escapes a quote and `]]` escapes a bracket. If more than one object matches, tess lists the
+DAX quoting, `''` escapes a quote and `]]` escapes a bracket. If more than one object matches, sm lists the
 candidates.
 
 ## Property paths
@@ -222,7 +222,7 @@ not.
 type, its current value, and the allowed values of enums. `--all` adds read-only properties, with the reason.
 
 ```
-$ tess get ./Sales.pbip "Sales[Amount]" --properties
+$ sm get ./Sales.pbip "Sales[Amount]" --properties
 alternateOf                     object
 alternateOf.baseColumn          reference                -> column
 annotations.<name>              string
@@ -241,7 +241,7 @@ summarizeBy                     enum       sum           default|none|sum|min|ma
     "allowed": [ "default", "none", "sum", "min", "max", "count", "average", "distinctCount" ] },
   { "property": "sortByColumn", "type": "reference", "writable": true, "value": null, "refersTo": "column" },
   { "property": "name", "type": "string", "writable": false, "value": "Amount",
-    "reason": "use `tess rename`, which also updates the DAX that refers to it" } ]
+    "reason": "use `sm rename`, which also updates the DAX that refers to it" } ]
 ```
 
 Each entry has:
@@ -255,7 +255,7 @@ Each entry has:
 `annotations.<name>` and `extendedProperties.<name>` stand for new items of any name. Existing ones are listed
 by name. Text output shows the first line of long values; `--json` has them in full.
 
-Both `get --properties` and `set` read one property catalog (`Tessera.PropertyCatalog`), built once per TOM type
+Both `get --properties` and `set` read one property catalog (`Semctl.PropertyCatalog`), built once per TOM type
 by reflection and cached: each path's type, whether `set` writes it at the model's compatibility level and mode,
 and the enum members that level allows. An object's list is that table plus its current values (and the
 annotations it has). A value outside an enum's members is refused with the members and the closest one:
@@ -263,16 +263,16 @@ annotations it has). A value outside an enum's members is refused with the membe
 
 ### Filtering objects (`get --where`)
 
-`tess get <model> <container> --where <path>=<pattern>` lists the objects inside a container whose property
+`sm get <model> <container> --where <path>=<pattern>` lists the objects inside a container whose property
 matches a wildcard: `*` is any run of characters (line breaks included), `?` one character, and the rest is
 literal. Matching is case-insensitive and covers the whole value. `<path>!=<pattern>` keeps the objects that
 don't match. `--where` is repeatable, and every condition must hold.
 
 ```sh
-tess get ./Sales.pbip model --where objectKind=measure --where 'expression=*CALCULATE*'
-tess get ./Sales.pbip Sales --where isHidden=true
-tess get ./Sales.pbip model --where objectKind=measure --where description= -p expression   # undocumented measures
-tess get ./Sales.pbip model --where annotations.Owner!=finance --where objectKind=table
+sm get ./Sales.pbip model --where objectKind=measure --where 'expression=*CALCULATE*'
+sm get ./Sales.pbip Sales --where isHidden=true
+sm get ./Sales.pbip model --where objectKind=measure --where description= -p expression   # undocumented measures
+sm get ./Sales.pbip model --where annotations.Owner!=finance --where objectKind=table
 ```
 
 - **Container:** the objects whose TOM parent chain reaches it. For the model that is every object; for a table
@@ -285,7 +285,7 @@ tess get ./Sales.pbip model --where annotations.Owner!=finance --where objectKin
   translations, come from the paths `get -p` prints. A property that holds nothing (an unset description, an
   annotation the object doesn't have) reads as empty, so `description=` finds objects without one.
 - **Objects without the property** (a relationship has no `isHidden`) match neither `=` nor `!=`.
-- **Output** is the same as `list`'s, text or `--json`. With `-p <path>`, tess prints those properties of each
+- **Output** is the same as `list`'s, text or `--json`. With `-p <path>`, sm prints those properties of each
   match instead (`ref  path: value`, the first line of long values; `--json`: `[{ref, kind, properties}]`).
 - Finding nothing is not an error: no output, exit code 0. A path that no object inside the container has is
   `unknown-property` (exit code 2) with close matches. `--where` can't be combined with `--properties` or

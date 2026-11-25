@@ -1,0 +1,90 @@
+/// The top-level command line. Each command's own arguments live in Commands/<Name>Command.fs.
+module Semctl.Cli.Args
+
+open Argu
+
+[<HelpFlags("--help", "-h")>]
+type CliArgs =
+    | [<Inherit; AltCommandLine("-j")>] Json
+    | Version
+    | [<CliPrefix(CliPrefix.None)>] Convert of ParseResults<ConvertCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Info of ParseResults<InfoCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] List of ParseResults<ListCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Get of ParseResults<GetCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Find of ParseResults<FindCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Diff of ParseResults<DiffCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Deps of ParseResults<DepsCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Init of ParseResults<InitCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Validate of ParseResults<ValidateCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Rename of ParseResults<RenameCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Remove of ParseResults<RemoveCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Move of ParseResults<MoveCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Bpa of ParseResults<BpaCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Set of ParseResults<SetCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Add of ParseResults<AddCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Translations of ParseResults<TranslationsCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Perspective of ParseResults<PerspectiveCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Script of ParseResults<ScriptCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Lint of ParseResults<LintCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Format of ParseResults<FormatCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Connect of ParseResults<ConnectCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Profile of ParseResults<ProfileCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Session of ParseResults<SessionCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Query of ParseResults<QueryCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Preview of ParseResults<PreviewCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Deploy of ParseResults<DeployCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Data of ParseResults<DataCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Refresh of ParseResults<RefreshCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Test of ParseResults<TestCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Completion of ParseResults<CompletionCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Mcp of ParseResults<McpCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Vertipaq of ParseResults<VertipaqCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Schemacheck of ParseResults<SchemaCheckCommand.Args>
+    | [<CliPrefix(CliPrefix.None); AltCommandLine("shell")>] Interactive of ParseResults<InteractiveCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Pkg of ParseResults<PkgCommand.Args>
+    | [<CliPrefix(CliPrefix.None)>] Csharp of ParseResults<CsharpCommand.Args>
+    | [<Hidden; CliPrefix(CliPrefix.None); CustomCommandLine("__complete")>] Complete of
+        ParseResults<CompletionCommand.CompleteArgs>
+
+    interface IArgParserTemplate with
+        member this.Usage =
+            match this with
+            | Json -> "write machine-readable JSON to stdout."
+            | Version -> "print the version."
+            | Convert _ -> ConvertCommand.summary
+            | Info _ -> InfoCommand.summary
+            | List _ -> ListCommand.summary
+            | Get _ -> GetCommand.summary
+            | Find _ -> FindCommand.summary
+            | Diff _ -> DiffCommand.summary
+            | Deps _ -> DepsCommand.summary
+            | Init _ -> InitCommand.summary
+            | Validate _ -> ValidateCommand.summary
+            | Rename _ -> RenameCommand.summary
+            | Remove _ -> RemoveCommand.summary
+            | Move _ -> MoveCommand.summary
+            | Bpa _ -> BpaCommand.summary
+            | Set _ -> SetCommand.summary
+            | Add _ -> AddCommand.summary
+            | Translations _ -> TranslationsCommand.summary
+            | Perspective _ -> PerspectiveCommand.summary
+            | Script _ -> ScriptCommand.summary
+            | Lint _ -> LintCommand.summary
+            | Format _ -> FormatCommand.summary
+            | Connect _ -> ConnectCommand.summary
+            | Profile _ -> ProfileCommand.summary
+            | Session _ -> SessionCommand.summary
+            | Query _ -> QueryCommand.summary
+            | Preview _ -> PreviewCommand.summary
+            | Deploy _ -> DeployCommand.summary
+            | Data _ -> DataCommand.summary
+            | Refresh _ -> RefreshCommand.summary
+            | Test _ -> TestCommand.summary
+            | Completion _ -> CompletionCommand.summary
+            | Mcp _ -> McpCommand.summary
+            | Vertipaq _ -> VertipaqCommand.summary
+            | Schemacheck _ -> SchemaCheckCommand.summary
+            | Interactive _ -> InteractiveCommand.summary
+            | Pkg _ -> PkgCommand.summary
+            | Csharp _ -> CsharpCommand.summary
+            | Complete _ -> "candidates for the completion scripts."

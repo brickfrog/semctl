@@ -1,17 +1,17 @@
 # The local DAX engine (`query --data`)
 
-`tess query` on model files evaluates DAX on your machine, over [fixture data](fixture-data.md#fixture-data-data): no server, no
+`sm query` on model files evaluates DAX on your machine, over [fixture data](fixture-data.md#fixture-data-data): no server, no
 refresh, no network.
 
 ```sh
-tess query ./Sales.pbip --data ./fixtures "EVALUATE SUMMARIZECOLUMNS ( 'Date'[Year], \"Sales\", [Total] )"
-tess query ./Sales.pbip --data ./fixtures -f totals.dax --json      # or - for standard input; --csv; --max-rows
-tess query ./Sales.pbip --coverage                                  # what the engine can evaluate of this model
-tess query ./Sales.pbip --data ./fixtures --now 2024-03-05T14:30:00 "EVALUATE ROW ( \"d\", TODAY () )"   # a fixed clock
+sm query ./Sales.pbip --data ./fixtures "EVALUATE SUMMARIZECOLUMNS ( 'Date'[Year], \"Sales\", [Total] )"
+sm query ./Sales.pbip --data ./fixtures -f totals.dax --json      # or - for standard input; --csv; --max-rows
+sm query ./Sales.pbip --coverage                                  # what the engine can evaluate of this model
+sm query ./Sales.pbip --data ./fixtures --now 2024-03-05T14:30:00 "EVALUATE ROW ( \"d\", TODAY () )"   # a fixed clock
 ```
 
 The options, the output and the JSON are those of [`query` on a server](xmla.md#query): the same `QueryResult`, with
-`"source"` the model's path. The fixture is checked first (as `tess data check` does) and a fixture with errors is
+`"source"` the model's path. The fixture is checked first (as `sm data check` does) and a fixture with errors is
 refused (exit 3, `fixture-has-errors`).
 
 **What it is.** An independent reimplementation of DAX's semantics, written against the public documentation:
@@ -24,7 +24,7 @@ random models; a conformance corpus against published results is the next step.
 engine doesn't implement exactly is an error, `not-supported` (exit 3), naming the thing and where it is:
 
 ```
-tess: Not supported by the local DAX engine: the function PATHITEM (measure 'Sales'[Label] 2:5)
+sm: Not supported by the local DAX engine: the function PATHITEM (measure 'Sales'[Label] 2:5)
 ```
 
 That includes the places where the sources don't settle what the real engine does. A subset that is right is the
@@ -154,11 +154,11 @@ measures (what their expressions use, not their format string expressions).
 
 A measure's format string is its `formatString`, or its dynamic format string (`formatStringDefinition`, a DAX
 expression), and a calculation item's format string expression replaces it while the item is applied. The local
-engine evaluates them where the measure is evaluated; `tess query --formatted` shows a result's measure columns with
+engine evaluates them where the measure is evaluated; `sm query --formatted` shows a result's measure columns with
 them, and these functions see them:
 
 ```sh
-tess query ./Sales.pbip --data ./fixtures --formatted "EVALUATE SUMMARIZECOLUMNS ( 'Date'[Year], \"Sales\", [Sales Amount] )"
+sm query ./Sales.pbip --data ./fixtures --formatted "EVALUATE SUMMARIZECOLUMNS ( 'Date'[Year], \"Sales\", [Sales Amount] )"
 ```
 
 - **Dynamic format strings** are evaluated as the internal measure Power BI makes of them, `Table[_<measure>
@@ -429,7 +429,7 @@ A field left `None` stays refused (`CUSTOMDATA` is then BLANK, as for a connecti
 `Prepared` is unchanged; calculated columns and tables never see the identity. On the command line:
 
 ```sh
-tess query model.bim --data fixture "EVALUATE { USERNAME () }" --user-name 'CONTOSO\ann'
+sm query model.bim --data fixture "EVALUATE { USERNAME () }" --user-name 'CONTOSO\ann'
 ```
 
 with `--user-name`, `--user-principal-name`, `--user-object-id`, `--user-culture` and `--custom-data`. On a server
@@ -442,9 +442,9 @@ model, `--user-name` / `--user-principal-name` and `--custom-data` become the co
 they don't keep, and what that leaves is all the query sees.
 
 ```sh
-tess query model.bim --data fixture --role Europe "EVALUATE { [Sales Amount] }"
-tess query model.bim --data fixture --role ByEmail --user-principal-name ann@contoso.com "EVALUATE Customer"
-tess query 'xmla:<server>;<database>' --role Europe --role Asia --custom-data 7 "EVALUATE { [Sales Amount] }"
+sm query model.bim --data fixture --role Europe "EVALUATE { [Sales Amount] }"
+sm query model.bim --data fixture --role ByEmail --user-principal-name ann@contoso.com "EVALUATE Customer"
+sm query 'xmla:<server>;<database>' --role Europe --role Asia --custom-data 7 "EVALUATE { [Sales Amount] }"
 ```
 
 On a server the roles become the connection's `Roles=` and the identity options `EffectiveUserName=` and
@@ -488,7 +488,7 @@ is not used: `--role` says which roles the query runs as.
 In code:
 
 ```fsharp
-Engine.asRoles : string list -> Engine.Prepared -> Result<Engine.Prepared, TessError>
+Engine.asRoles : string list -> Engine.Prepared -> Result<Engine.Prepared, SemctlError>
 // Engine.prepare db store |> Result.map (Engine.withIdentity id) |> Result.bind (Engine.asRoles [ "Europe" ])
 Engine.roles : Engine.Prepared -> string list
 ```
@@ -614,7 +614,7 @@ compare such results as sets.
 
 ## `--coverage`
 
-`tess query <model> --coverage` reads the model only (no data) and lists every measure, calculated column,
+`sm query <model> --coverage` reads the model only (no data) and lists every measure, calculated column,
 calculated table, calculation item and role (its row filters, and what applying it refuses) that uses something the
 engine doesn't support, with what; then how many of each kind it can
 evaluate, and the unsupported things ranked by how many objects use them. It follows references: a measure that
@@ -631,14 +631,14 @@ of mixed types) only shows when evaluating: coverage is a lower bound on what is
 
 ## For developers
 
-The engine is `src/Tessera.Core/Engine/`:
+The engine is `src/Semctl.Core/Engine/`:
 
 ```fsharp
-Engine.prepare        : Database -> DataStore -> Result<Engine.Prepared, TessError>   // bind, compute calculated columns/tables
-Engine.evaluateQuery  : Engine.Prepared -> string -> Result<QueryResult list, TessError>
-Engine.evaluateScalar : Engine.Prepared -> string -> Result<QueryValue, TessError>    // no filter context, no row context
+Engine.prepare        : Database -> DataStore -> Result<Engine.Prepared, SemctlError>   // bind, compute calculated columns/tables
+Engine.evaluateQuery  : Engine.Prepared -> string -> Result<QueryResult list, SemctlError>
+Engine.evaluateScalar : Engine.Prepared -> string -> Result<QueryValue, SemctlError>    // no filter context, no row context
 Engine.coverage       : Database -> (ObjectRef * string list) list
-Engine.failures       : Engine.Prepared -> (ObjectRef * TessError) list               // what prepare couldn't compute
+Engine.failures       : Engine.Prepared -> (ObjectRef * SemctlError) list               // what prepare couldn't compute
 Engine.functions      : (string * string) list                                        // name, family
 ```
 
@@ -679,7 +679,7 @@ table. That is exact where a table's rows are intersections and preimages of its
 that filters both ways, a limited or a one-to-one relationship, while anything is being computed, or where a column
 read could raise, the engine computes the rows in full as before. The argument, and what it asks of an engine
 author, are in "Incremental filter contexts" in the header of `Engine/Types.fs`. A check mode recomputes every
-incremental result in full and fails on any difference: `TESSERA_CHECK_INCREMENTAL=1` for the test suite,
+incremental result in full and fails on any difference: `SEMCTL_CHECK_INCREMENTAL=1` for the test suite,
 `--check` for the benchmark, `(Engine.incrementalStats prepared).Check` in code. What remains slow is the cost of
 a context transition itself: an iterator over 2,000 dimension rows with a measure per row is 2,000 CALCULATEs
 however few fact rows each one reads (see `bench/RESULTS.md`).

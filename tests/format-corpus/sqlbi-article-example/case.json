@@ -2,5 +2,5 @@
   "source": "https://www.sqlbi.com/articles/rules-for-dax-code-formatting/ (the article's example, en dashes written as -, trailing spaces dropped)",
   "options": { "long": true },
   "expect": "differs",
-  "note": "The article breaks its chains by hand: no line width gives both `) > 42 + 8 - 25 * ( 3 - 1 )` (a break before + 2) and `2 + 2 - 2` (a break inside a short CALCULATE), and the second line inside that CALCULATE is not indented while the outer one is. tess matches the structure: calls in new rows after their operator, arguments indented 4 from the call, ) under the call."
+  "note": "The article breaks its chains by hand: no line width gives both `) > 42 + 8 - 25 * ( 3 - 1 )` (a break before + 2) and `2 + 2 - 2` (a break inside a short CALCULATE), and the second line inside that CALCULATE is not indented while the outer one is. sm matches the structure: calls in new rows after their operator, arguments indented 4 from the call, ) under the call."
 }

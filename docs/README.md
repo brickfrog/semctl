@@ -1,10 +1,10 @@
-# Tessera documentation
+# Semctl documentation
 
 ## Getting started
 
-- [Install Tessera](installation.md) on Linux, macOS, or Windows.
+- [Install Semctl](installation.md) on Linux, macOS, or Windows.
 - [CLI basics](cli.md) covers command examples, shell completion, JSON output, and exit codes.
-- [Model files and object references](model-files.md) explains which paths Tessera accepts, how to convert formats, and how to select an object or property.
+- [Model files and object references](model-files.md) explains which paths Semctl accepts, how to convert formats, and how to select an object or property.
 
 ## Working with models
 

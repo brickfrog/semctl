@@ -88,13 +88,13 @@ further (0 means all the way), and circular references are marked rather than fo
 
 ### Unused objects (`deps --unused`)
 
-`tess deps <model> --unused` lists the tables, columns, measures, hierarchies and functions that nothing uses.
-Reports can use any visible object, and tess can't see reports, so by default only hidden objects are listed:
+`sm deps <model> --unused` lists the tables, columns, measures, hierarchies and functions that nothing uses.
+Reports can use any visible object, and sm can't see reports, so by default only hidden objects are listed:
 hidden and unused means dead. An object counts as hidden if it, or its table, is hidden or private.
 `--include-visible` checks visible objects too: what nothing *in the model* uses.
 
 ```
-$ tess deps ./Sales.pbip --unused
+$ sm deps ./Sales.pbip --unused
 measure:Sales/Old Margin
 column:Sales/Legacy Key  used only by unused measure:Sales/Old Margin
 ```
@@ -114,7 +114,7 @@ Some rules of thumb:
 - Perspectives and translations don't count: they list objects, they don't use them.
 - Calculated-table columns are listed with a note, since removing one means changing the table's DAX.
 - Calculation items, levels, partitions, roles, relationships, M expressions and data sources are never
-  listed. tess doesn't read M, so it can't tell which M expressions are used.
+  listed. sm doesn't read M, so it can't tell which M expressions are used.
 - Power BI's auto date/time template table counts as used.
 - When in doubt, an object counts as used. For example, a hidden table that only a relationship touches is
   never listed.
@@ -155,7 +155,7 @@ their warnings never do.
 `unknown-function` knows DAX's functions from a list built on 2026-11-15 from Microsoft Learn's DAX function
 reference (every function in its table of contents) and dax.guide (which adds visual calculation functions,
 ones Power BI's own queries use, and deprecated ones such as `KEYWORDMATCH`); the list and its sources are in
-`src/Tessera.Core/DaxFunctions.fs`. A function Microsoft adds after that is reported as unknown, and an edit that
+`src/Semctl.Core/DaxFunctions.fs`. A function Microsoft adds after that is reported as unknown, and an edit that
 introduces a call to one needs `--force` to save, until the list catches up.
 
 There is no rule for a compatibility level too low for the features a model uses, because TOM already refuses
@@ -174,7 +174,7 @@ Options:
 errors. `--ci github|azdo` also writes CI annotations to stderr.
 
 Issues with one root cause are grouped. In practice that means a name many expressions use but that nothing
-has, such as a column renamed or removed outside tess: every `unresolved-reference` naming it is one group, and
+has, such as a column renamed or removed outside sm: every `unresolved-reference` naming it is one group, and
 so is every reference to a missing table or its columns. Names match ignoring case. The first issue stands for
 the group, with a count and the missing name, and the summary still counts every issue:
 
@@ -195,26 +195,26 @@ Exit codes don't change. Grouping applies after `--rule` and `--min-severity`.
 
 Other rules don't cascade, so they aren't grouped. Every rule checks an object's own definition: a measure
 that uses a broken measure isn't reported, and TOM's validation doesn't read DAX. To see what a broken object affects, use
-`tess deps <model> <object> --referenced-by --depth 0`. TOM also doesn't say which name it couldn't find, so its
+`sm deps <model> <object> --referenced-by --depth 0`. TOM also doesn't say which name it couldn't find, so its
 own errors (e.g. a relationship to a missing column) aren't grouped with the DAX that names that column.
 
 ## VertiPaq statistics (`vertipaq`)
 
-`tess vertipaq` shows what VertiPaq Analyzer shows: for each table, column, relationship, user hierarchy and
+`sm vertipaq` shows what VertiPaq Analyzer shows: for each table, column, relationship, user hierarchy and
 partition, its rows, distinct values (cardinality) and size in VertiPaq's storage, and the rows that break
 referential integrity. The statistics come from one of three places:
 
 ```sh
-tess vertipaq ./Sales.pbip --data ./fixtures                  # offline: model files + fixture data
-tess vertipaq "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales"   # a model on a server
-tess vertipaq --import stats.vpax                             # a VertiPaq Analyzer file (DAX Studio, Bravo, TE3)
+sm vertipaq ./Sales.pbip --data ./fixtures                  # offline: model files + fixture data
+sm vertipaq "xmla:powerbi://api.powerbi.com/v1.0/myorg/Finance;Sales"   # a model on a server
+sm vertipaq --import stats.vpax                             # a VertiPaq Analyzer file (DAX Studio, Bravo, TE3)
 
-tess vertipaq ./Sales.pbip --data ./fixtures --columns --top 10     # the 10 largest columns
-tess vertipaq ./Sales.pbip --data ./fixtures Sales Customer --all   # every view, for two tables
-tess vertipaq "xmla:...;Sales" --export stats.vpax                  # write a .vpax for DAX Studio
-tess vertipaq --import stats.vpax --export shared.vpax --obfuscate  # obfuscate a file before sharing it
-tess vertipaq ./Sales.pbip --import stats.vpax --annotate --save    # stats as annotations, for BPA rules
-tess bpa ./Sales.pbip --vpax stats.vpax                             # ... or for one BPA run, in memory
+sm vertipaq ./Sales.pbip --data ./fixtures --columns --top 10     # the 10 largest columns
+sm vertipaq ./Sales.pbip --data ./fixtures Sales Customer --all   # every view, for two tables
+sm vertipaq "xmla:...;Sales" --export stats.vpax                  # write a .vpax for DAX Studio
+sm vertipaq --import stats.vpax --export shared.vpax --obfuscate  # obfuscate a file before sharing it
+sm vertipaq ./Sales.pbip --import stats.vpax --annotate --save    # stats as annotations, for BPA rules
+sm bpa ./Sales.pbip --vpax stats.vpax                             # ... or for one BPA run, in memory
 ```
 
 **Views.** The default is the table view; `--columns`, `--relationships`, `--partitions` and `--hierarchies`
@@ -222,10 +222,10 @@ choose others (several at once is fine), `--all` shows them all. Each view lists
 (unknown sizes last) and `--top N` keeps the first N. Table names after the model show only those tables (a
 relationship stays if either end is one of them), but sizes, totals and shares are still the whole model's; a name
 that isn't a table is an error with suggestions. `te
-vertipaq` shows columns by default; tess follows VertiPaq Analyzer, which opens on tables. `te`'s `--detail`,
+vertipaq` shows columns by default; sm follows VertiPaq Analyzer, which opens on tables. `te`'s `--detail`,
 `--fields` and `--stats` aren't there: `--json` has every field.
 
-**Unknown is never 0.** A statistic tess couldn't read is `?` in text and left out of JSON, and so is every total
+**Unknown is never 0.** A statistic sm couldn't read is `?` in text and left out of JSON, and so is every total
 that needs it (a table's size, then the model's). stderr says why, once per cause.
 
 ### From fixture data (`--data`)
@@ -247,7 +247,7 @@ unknown, with a warning. Nothing leaves the machine.
   unknown: how many there are depends on the server.
 
 **Sizes are estimates** (`"estimated": true` in JSON, `(sizes estimated)` in text). The real sizes depend on how
-VertiPaq sorts, encodes and compresses each segment, which only a refresh decides, so tess models the
+VertiPaq sorts, encodes and compresses each segment, which only a refresh decides, so sm models the
 uncompressed layout, assuming hash encoding everywhere:
 
 | Structure | Estimate |
@@ -264,7 +264,7 @@ column view shows the model's `EncodingHint` when it isn't `Default`.
 
 ### From a server
 
-For an `xmla:` model, tess reads the model, then runs the read-only storage DMVs and DAX queries VertiPaq Analyzer
+For an `xmla:` model, sm reads the model, then runs the read-only storage DMVs and DAX queries VertiPaq Analyzer
 runs (SQLBI's Dax.Model.Extractor), over the same connection, against that database only, and closes it.
 (`--annotate` connects twice: once to read the model it edits, once for the statistics.) These are
 all the queries it sends (the DAX ones in batches of 50 tables or columns, and 10 relationships):
@@ -281,7 +281,7 @@ all the queries it sends (the DAX ones in batches of 50 tables or columns, and 1
 | `EVALUATE UNION ( ROW ( "Table", ..., "Column", ..., "Cardinality", DISTINCTCOUNT ( 'Sales'[Key] ) ), ... )` | exact cardinality |
 | `CALCULATETABLE ( ROW ( "RelationshipId", 1, "MissingKeys", DISTINCTCOUNT ( 'Sales'[Key] ), "InvalidRows", COUNTROWS ( 'Sales' ) ), ISBLANK ( 'Product'[Key] ), USERELATIONSHIP ( 'Sales'[Key], 'Product'[Key] ) )` | missing keys and invalid rows |
 
-The full texts are in `src/Tessera.Xmla/VertipaqServer.fs`. Tables in DirectQuery, Dual or Direct Lake mode get
+The full texts are in `src/Semctl.Xmla/VertipaqServer.fs`. Tables in DirectQuery, Dual or Direct Lake mode get
 no DAX queries (they would query the source, or page columns into memory): their statistics come from the DMVs
 only, and a warning names them. A query that fails (a DMV the server doesn't have, a user without the permission
 to run it) leaves its statistics unknown, with a warning, and the rest is read: Tabular Editor 3's "fall back to
@@ -291,26 +291,26 @@ connected mode, this has been tested against a fake server only.**
 ### `.vpax` files (`--import`, `--export`, `--obfuscate`)
 
 A `.vpax` is a zip of `DaxModel.json` (the statistics and the model's metadata), `DaxVpaView.json`, `Model.bim`
-and `CompatabilityMode.txt` (sic). tess reads and writes them with SQLBI's own library (Dax.Vpax, MIT), the one
-VertiPaq Analyzer's tools use, so a file tess writes is in their format. The tests read a file Bravo made, and
-open every file tess writes with Dax.ViewModel, the view model DAX Studio's VertiPaq Analyzer pane is built on,
+and `CompatabilityMode.txt` (sic). sm reads and writes them with SQLBI's own library (Dax.Vpax, MIT), the one
+VertiPaq Analyzer's tools use, so a file sm writes is in their format. The tests read a file Bravo made, and
+open every file sm writes with Dax.ViewModel, the view model DAX Studio's VertiPaq Analyzer pane is built on,
 reading every property it shows. **DAX Studio, Bravo and Tabular Editor 3 themselves have not been run on a file
-tess wrote.**
+sm wrote.**
 
-- `--import <file>` reads one. It needs no model: `tess vertipaq --import stats.vpax`. With a model first
-  (`tess vertipaq ./Sales.pbip --import stats.vpax`), the model is what `--annotate` writes to. A file made
+- `--import <file>` reads one. It needs no model: `sm vertipaq --import stats.vpax`. With a model first
+  (`sm vertipaq ./Sales.pbip --import stats.vpax`), the model is what `--annotate` writes to. A file made
   without reading statistics from data says so, and its missing keys and invalid rows are unknown.
 - `--export <file>` writes one, from any source; `--import a.vpax --export b.vpax` copies the file's own
   statistics unchanged. An existing file is replaced only with `--force` (exit 4). The file says which tool made
-  it; a file tess made from fixture data is marked as an estimate, and reads back as one. The format has no
-  "unknown": tess writes 0 (what VertiPaq Analyzer writes for a statistic it didn't read) and says which ones on
+  it; a file sm made from fixture data is marked as an estimate, and reads back as one. The format has no
+  "unknown": sm writes 0 (what VertiPaq Analyzer writes for a statistic it didn't read) and says which ones on
   stderr. Each column gets one segment per partition, holding that partition's whole share of it, so a file
-  tess writes shows one segment per partition however many the server had. A column's data with no known
+  sm writes shows one segment per partition however many the server had. A column's data with no known
   partition (or in a partition the model doesn't have, which stderr names) goes in the table's first partition.
   A server's `RowNumber-<guid>` columns are included, as VertiPaq Analyzer includes them in table sizes.
 - `--obfuscate` (with `--export`) obfuscates the names and expressions with SQLBI's Dax.Vpax.Obfuscator (their
   library for obfuscating VertiPaq Analyzer files), and writes only `DaxModel.json`, as that library does (no
-  `Model.bim`, which would carry the real names). SQLBI's tools name such a file `.ovpax`; tess uses the name you
+  `Model.bim`, which would carry the real names). SQLBI's tools name such a file `.ovpax`; sm uses the name you
   give. Names that are
   reserved in DAX (a table called `Date` or `Currency`) can't be changed and stay readable; stderr lists them. The
   dictionary that maps the obfuscated names back is written next to the file as `<name>.dict` (replaced only with
@@ -327,7 +327,7 @@ names are those of Michael Kovalsky's VertiPaq Analyzer scripts for Tabular Edit
 
 | On | Annotations |
 |---|---|
-| the model | `Vertipaq_ModelSize`; tess's own `Tessera_Vertipaq_Estimated` = `true` when the sizes are estimates |
+| the model | `Vertipaq_ModelSize`; sm's own `Semctl_Vertipaq_Estimated` = `true` when the sizes are estimates |
 | a table | `Vertipaq_RowCount`, `Vertipaq_TableSize`, `Vertipaq_TableSizePctOfModel` |
 | a column | `Vertipaq_Cardinality`, `Vertipaq_ColumnSize`, `Vertipaq_DataSize`, `Vertipaq_DictionarySize`, `Vertipaq_ColumnHierarchySize`, `Vertipaq_ColumnSizePctOfTable`, `Vertipaq_ColumnSizePctOfModel` |
 | a relationship | `Vertipaq_MaxFromCardinality`, `Vertipaq_MaxToCardinality`, `Vertipaq_RelationshipSize`, `Vertipaq_RIViolationInvalidRows` |
@@ -340,9 +340,9 @@ runs. Running it again with the same statistics changes nothing. Relationships a
 their names (a model's files and its server copy name them differently). With table names, only those tables'
 objects (and their relationships) are annotated, and the model's own annotations are left alone. `te`'s `--push`
 (annotating the model on the server) isn't there: `--save` is refused for a server model, as for every edit, so
-`--save-to` files and `tess deploy` them.
+`--save-to` files and `sm deploy` them.
 
-`tess bpa <model> --vpax <file>` puts a `.vpax`'s statistics on the model the same way, in memory, for that run
+`sm bpa <model> --vpax <file>` puts a `.vpax`'s statistics on the model the same way, in memory, for that run
 only: the model's files aren't changed. It can't be combined with `--fix`, which would save them.
 
 ## Checking columns against their source (`schemacheck`)
@@ -351,11 +351,11 @@ only: the model's files aren't changed. It can't be combined with `--fix`, which
 and the Tabular Editor CLI's `schemacheck` do. It never changes the model unless you add `--update`.
 
 ```sh
-tess schemacheck ./Sales.pbip --source ./schema.json             # a schema file (offline)
-tess schemacheck ./Sales.pbip --source ./fixtures                # a fixture directory (names only, offline)
-tess schemacheck ./Sales.pbip Sales Product --source "sql:myserver.database.windows.net;SalesDb"
-tess schemacheck ./Sales.pbip --source ./schema.json --update --save   # add new columns, update types
-tess set ./Sales.pbip Sales --update-schema --source ./schema.json --save   # the same, for one table
+sm schemacheck ./Sales.pbip --source ./schema.json             # a schema file (offline)
+sm schemacheck ./Sales.pbip --source ./fixtures                # a fixture directory (names only, offline)
+sm schemacheck ./Sales.pbip Sales Product --source "sql:myserver.database.windows.net;SalesDb"
+sm schemacheck ./Sales.pbip --source ./schema.json --update --save   # add new columns, update types
+sm set ./Sales.pbip Sales --update-schema --source ./schema.json --save   # the same, for one table
 ```
 
 | Code | Severity | Reports |
@@ -391,7 +391,7 @@ Tabular Editor 2's annotations are honoured, with TE2's names. Any value except 
 | `TabularEditor_SchemaCheckNoWarnings` | model | every warning becomes an error (as in TE2) |
 
 One difference from TE2: with `IgnoreDataTypeChange` on a table, TE2 also reports every column of it as missing
-(it only marks a column as matched while it compares types). tess doesn't.
+(it only marks a column as matched while it compares types). sm doesn't.
 
 ### Sources
 
@@ -409,13 +409,13 @@ A column is its source name, or an object with `name`, an optional `type` (`stri
 messages). A column without `type` isn't type-checked; a table none of whose columns has one counts as names only.
 A table the file doesn't list is skipped.
 
-**A fixture directory** (`--source <dir>`, the [`tess data`](fixture-data.md#fixture-data-data) layout): each table's file names its
+**A fixture directory** (`--source <dir>`, the [`sm data`](fixture-data.md#fixture-data-data) layout): each table's file names its
 columns, a CSV by its header and a JSON file by its rows' properties. Fixture files name columns by their *model*
 names, so columns are matched by name rather than by `sourceColumn`, and they carry no types, so only names are
 compared (the summary says so). Calculated columns in a file are ignored. A table with no file is skipped.
 
 **A SQL endpoint** (`--source "sql:<server>;<database>"`): SQL Server, Azure SQL, or a Fabric warehouse / lakehouse
-SQL endpoint. tess asks the server to describe each table's query with `sp_describe_first_result_set`: nothing is
+SQL endpoint. sm asks the server to describe each table's query with `sp_describe_first_result_set`: nothing is
 executed and no rows are read. (Tabular Editor 2 runs the query with `CommandBehavior.SchemaOnly` instead.) It reads a
 table's first partition, as TE2 does, and only these, exactly:
 
@@ -427,14 +427,14 @@ table's first partition, as TE2 does, and only these, exactly:
   expressions that are text, with or without `meta [...]`).
 
 Anything else (another step such as `Table.SelectColumns`, other options, other connectors, Direct Lake) is
-`SCHEMA_TABLE_SKIPPED`: its columns can't be known without running Power Query, and tess doesn't guess. So is a
+`SCHEMA_TABLE_SKIPPED`: its columns can't be known without running Power Query, and sm doesn't guess. So is a
 table whose partition names a different database from the one in `--source` (a different server is fine: point
 `--source` at a dev copy). A query the server rejects is `SCHEMA_SOURCE_QUERY_ERROR`, with the server's message.
 
 Data types: for a **query partition**, SQL types map as TE2 maps them (`int`, `bigint`, `smallint`, `tinyint` to
 `int64`; `float`, `real` to `double`; `decimal`, `numeric`, `money`, `smallmoney` to `decimal`; the date and time
 types to `dateTime`; `bit` to `boolean`; character types to `string`; `binary`, `varbinary` to `binary`), without
-TE2's guesses for other names. For an **M partition**, tess found no Microsoft documentation of Power Query's mapping, so only
+TE2's guesses for other names. For an **M partition**, sm found no Microsoft documentation of Power Query's mapping, so only
 `int`/`bigint` (`int64`), `float`/`real` (`double`), `bit`, character types, and `date`/`datetime`/`datetime2`/
 `smalldatetime` are compared. Other types (`decimal`, `numeric`, `money`, `smallint`, `tinyint`, `time`,
 `datetimeoffset`, `uniqueidentifier`, ...) are not compared, and `--update` won't add a column of such a type.
@@ -443,20 +443,20 @@ Signing in, from environment variables only (never the command line):
 
 | To sign in with | Set |
 |---|---|
-| an Entra access token for `https://database.windows.net/` | `TESS_SQL_TOKEN`, or `TESS_SQL_TOKEN_FILE=<path>` (`-` for standard input) |
-| a service principal | the same variables as [connected mode](xmla.md#signing-in): `TESS_XMLA_CLIENT_ID`, `TESS_XMLA_TENANT_ID`, `TESS_XMLA_CLIENT_SECRET` (or `_FILE`), else `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET` |
-| a SQL login | `TESS_SQL_USER`, and `TESS_SQL_PASSWORD` or `TESS_SQL_PASSWORD_FILE` |
+| an Entra access token for `https://database.windows.net/` | `SM_SQL_TOKEN`, or `SM_SQL_TOKEN_FILE=<path>` (`-` for standard input) |
+| a service principal | the same variables as [connected mode](xmla.md#signing-in): `SM_XMLA_CLIENT_ID`, `SM_XMLA_TENANT_ID`, `SM_XMLA_CLIENT_SECRET` (or `_FILE`), else `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET` |
+| a SQL login | `SM_SQL_USER`, and `SM_SQL_PASSWORD` or `SM_SQL_PASSWORD_FILE` |
 | the current Windows / Kerberos account | nothing |
 
-`TESS_SQL_AUTH` picks one: `auto` (the default), `token`, `spn`, `sql` or `integrated`. With `auto`, a Microsoft
+`SM_SQL_AUTH` picks one: `auto` (the default), `token`, `spn`, `sql` or `integrated`. With `auto`, a Microsoft
 cloud host (`*.database.windows.net` and the national clouds' equivalents, `*.sql.azuresynapse.net`,
 `*.datawarehouse.fabric.microsoft.com`, `*.database.fabric.microsoft.com`) uses the token, then the service
 principal, then a SQL login; any other server uses a SQL login if one is set, else integrated security. **A token or
 service principal is never sent to a server that isn't one of those hosts.** Nothing interactive is ever started.
 
 The connection is always encrypted (`Encrypt=Mandatory`) and the server's certificate must be trusted. For a local
-test server with a self-signed certificate, `TESS_SQL_TRUST_SERVER_CERTIFICATE=1` accepts it (still encrypted); it
-is off unless you set it. tess uses SqlClient's managed network layer on every OS (it ships without SqlClient's
+test server with a self-signed certificate, `SM_SQL_TRUST_SERVER_CERTIFICATE=1` accepts it (still encrypted); it
+is off unless you set it. sm uses SqlClient's managed network layer on every OS (it ships without SqlClient's
 native Windows library). On Windows, Microsoft documents that layer as meant for testing and debugging, and it
 doesn't do non-domain Windows authentication. A server that can't be reached, or refuses the sign-in, fails the whole command (exit 5).
 
@@ -474,14 +474,14 @@ set. The findings go to stderr.
 
 - A **new source column** becomes a data column named and sourced as the source names it, with its mapped type
   (summarized by sum if numeric; in a table with a lineage tag, also a lineage tag and `SummarizationSetBy`,
-  as `tess add` makes a column). A column with no exactly mapped type, or
+  as `sm add` makes a column). A column with no exactly mapped type, or
   whose name the table already uses, isn't added; a warning says why.
 - A **changed type** is changed on the column itself; everything else about it (name, format string, description,
   folders, relationships, translations) stays.
-- A **removed source column** is only reported, unless `--drop-removed-columns`. Then it is removed as `tess remove`
+- A **removed source column** is only reported, unless `--drop-removed-columns`. Then it is removed as `sm remove`
   would; a column other DAX still uses, or a PBIR report next to the model uses, is kept, with a warning naming
   what uses it.
 - Whatever an annotation makes the check ignore is left alone; skipped tables and query errors change nothing.
 
-`--update` doesn't take `--fail-on`, `--ci`, `--trx` or `--sarif`. `tess set <model> <table> --update-schema --source
+`--update` doesn't take `--fail-on`, `--ci`, `--trx` or `--sarif`. `sm set <model> <table> --update-schema --source
 <src>` does the same for one table (or for every table, with `model` as the object), with `set`'s switches.

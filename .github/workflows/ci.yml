@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TESSERA_SAMPLE_MODEL: ${{ github.workspace }}/spaceparts
+      SEMCTL_SAMPLE_MODEL: ${{ github.workspace }}/spaceparts
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
@@ -80,6 +80,6 @@ jobs:
       - run: dotnet test -c Release --no-build
       - name: Smoke-test the CLI on the sample
         run: |
-          dotnet run --project src/Tessera.Cli -c Release --no-build -- info "$TESSERA_SAMPLE_MODEL"
-          dotnet run --project src/Tessera.Cli -c Release --no-build -- convert "$TESSERA_SAMPLE_MODEL" "$RUNNER_TEMP/sample.bim"
-          dotnet run --project src/Tessera.Cli -c Release --no-build -- info "$RUNNER_TEMP/sample.bim"
+          dotnet run --project src/Semctl.Cli -c Release --no-build -- info "$SEMCTL_SAMPLE_MODEL"
+          dotnet run --project src/Semctl.Cli -c Release --no-build -- convert "$SEMCTL_SAMPLE_MODEL" "$RUNNER_TEMP/sample.bim"
+          dotnet run --project src/Semctl.Cli -c Release --no-build -- info "$RUNNER_TEMP/sample.bim"

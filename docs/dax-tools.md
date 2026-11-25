@@ -3,7 +3,7 @@
 ## DAX scripts (`script`)
 
 A DAX script is Tabular Editor 3's text format for many objects' DAX and properties in one file: export it, edit
-it, apply it back. `tess script export <model> [objects...]` writes one; `tess script apply <model> <script>`
+it, apply it back. `sm script export <model> [objects...]` writes one; `sm script apply <model> <script>`
 creates or updates each object it defines.
 
 ```
@@ -32,11 +32,11 @@ CALCULATIONGROUP 'Time Intelligence'[Period]
 ```
 
 ```sh
-tess script export ./Sales.pbip                          # every DAX object, to stdout
-tess script export ./Sales.pbip "[Total]" Sales -o x.dax  # a table stands for its measures, calculated columns and own DAX; an existing file needs --force
-tess script export ./Sales.pbip -k measure,calcitem -t Sales --json
-tess script apply  ./Sales.pbip x.dax                    # dry run: the changes, as `diff` shows them
-tess script apply  ./Sales.pbip - --save < x.dax         # from stdin
+sm script export ./Sales.pbip                          # every DAX object, to stdout
+sm script export ./Sales.pbip "[Total]" Sales -o x.dax  # a table stands for its measures, calculated columns and own DAX; an existing file needs --force
+sm script export ./Sales.pbip -k measure,calcitem -t Sales --json
+sm script apply  ./Sales.pbip x.dax                    # dry run: the changes, as `diff` shows them
+sm script apply  ./Sales.pbip - --save < x.dax         # from stdin
 ```
 
 What a script holds, and the properties each object takes (names are case-insensitive):
@@ -56,7 +56,7 @@ Values:
 - **`Datatype`** takes `BOOLEAN`, `DOUBLE`, `INTEGER`, `DATETIME`, `CURRENCY` (decimal) or `STRING`.
 - **DAX properties:** `DetailRows`, the `Kpi*Expression`s, and a calculation item's `FormatString` take DAX.
 - **A measure's `FormatString`:** a lone string is the static format string; any other DAX is a dynamic format
-  string. `FormatStringDefinition = <DAX>` (a tess extension) is always the dynamic one. export writes it when the
+  string. `FormatStringDefinition = <DAX>` (a sm extension) is always the dynamic one. export writes it when the
   DAX is a lone string, or when the measure also has a static format string. A static `FormatString` removes a
   dynamic one, unless the same object also sets `FormatStringDefinition`.
 
@@ -92,7 +92,7 @@ as a diff, new errors refused unless `--force`. It works like this:
 - **Refusals.** `apply` refuses:
   - a new object without an expression;
   - an expression on a data column, or on a table that isn't calculated (properties alone are fine);
-  - a calculation group whose `[Column]` isn't its items' column (use `tess rename` for that);
+  - a calculation group whose `[Column]` isn't its items' column (use `sm rename` for that);
   - a measure name that another table already uses;
   - a new object in a table that doesn't exist.
 
@@ -107,14 +107,14 @@ that way).
 
 `lint` checks every DAX expression in the model for code that can be written better: Tabular Editor 3's
 [code actions](https://docs.tabulareditor.com/te3/features/code-actions.html), offline. Rules that match one of
-TE3's code actions use its id and name; `TS` ids are tessera's own. It reads measures, calculated columns and
+TE3's code actions use its id and name; `TS` ids are semctl's own. It reads measures, calculated columns and
 tables, calculation items, KPIs, format string and detail rows expressions, row filters and functions.
 
 ```
-tess lint ./Sales.pbip                             # report (exit 1 on errors, like validate)
-tess lint ./Sales.pbip --rule DI003,DI004 --fail-on warning --ci github
-tess lint ./Sales.pbip --fix                       # show the rewrites (a dry run)
-tess lint ./Sales.pbip --fix --rule DI001 --save   # remove unused variables, and save
+sm lint ./Sales.pbip                             # report (exit 1 on errors, like validate)
+sm lint ./Sales.pbip --rule DI003,DI004 --fail-on warning --ci github
+sm lint ./Sales.pbip --fix                       # show the rewrites (a dry run)
+sm lint ./Sales.pbip --fix --rule DI001 --save   # remove unused variables, and save
 ```
 
 | ID | Severity | Name | Before | After |
@@ -144,7 +144,7 @@ What each rule reports, and when it doesn't fix:
   `DaxObjectFullName`. Columns resolve against the expression's own table, as in `deps`. A column isn't fixed
   when a measure anywhere has the same name, since `[Name]` might mean either. References inside `NAMEOF(...)`
   are left as written, because field parameters store the name NAMEOF returns. These match `bpa`'s
-  `TESS_QUALIFY_COLUMNS` and `TESS_UNQUALIFIED_MEASURES`, and after `lint --fix` those rules have nothing left to
+  `SM_QUALIFY_COLUMNS` and `SM_UNQUALIFIED_MEASURES`, and after `lint --fix` those rules have nothing left to
   report, except measures inside `NAMEOF`, which `bpa` still flags.
 - **`DI008`:** `CALCULATE(x, ...)` or `CALCULATETABLE(x, ...)` where `x` is a variable. A variable is evaluated
   where it is defined, so CALCULATE's filters don't change it. That is almost always a mistake, so it is
@@ -182,16 +182,16 @@ With `--fix`, `lint` is an [editing command](editing.md#editing-commands):
   refused with `--fix` (exit 2), as are `--save`, `--save-to`, `--force`, `--stat` and `--name-only`
   without it.
 
-To suppress findings, give the object a `TesseraLint_IgnoreRules` annotation listing rule ids, in the format of
+To suppress findings, give the object a `SemctlLint_IgnoreRules` annotation listing rule ids, in the format of
 TE's BPA ignore annotation: `{"RuleIDs":["DI004","DR014"]}` (TE's plain array form, `["DI004"]`, works too; ids are
 case-insensitive). It covers every expression the object holds (a measure's KPI and format string expressions
 too, and a role's row filters). On the model, it turns the rules off for every expression; that is also the way
 to ignore a rule on a calculation item, which TOM gives no annotations. Ignored findings are counted under the
 report (`ignored` in JSON), don't count for `--fail-on`, and `--fix` leaves them alone. TE has no convention for
-suppressing its code actions, so the annotation is tess's own; TE leaves it alone. To set it:
+suppressing its code actions, so the annotation is sm's own; TE leaves it alone. To set it:
 
 ```
-tess set ./Sales.pbip 'measure:Sales/Margin' -p 'annotations.TesseraLint_IgnoreRules={"RuleIDs":["DI004"]}' --save
+sm set ./Sales.pbip 'measure:Sales/Margin' -p 'annotations.SemctlLint_IgnoreRules={"RuleIDs":["DI004"]}' --save
 ```
 
 ## Formatting DAX (`format`)
@@ -201,13 +201,13 @@ tess set ./Sales.pbip 'measure:Sales/Margin' -p 'annotations.TesseraLint_IgnoreR
 [DAX Formatter](https://www.daxformatter.com) popularised. It runs entirely offline: nothing is sent anywhere.
 
 ```
-tess format --expr "calculate(sum(Sales[Amount]),all('Date'))"   # loose DAX, to stdout
-tess format - < measure.dax                                     # stdin
-tess format query.dax --json                                    # {success, formatted, errors}
-tess format query.dax --save                                    # format the file in place
-tess format ./Sales.pbip                                        # every DAX expression in a model (a dry run)
-tess format ./Sales.pbip "[Revenue]" -t Date --save             # some of them, and save
-tess format ./Sales.pbip --check                                # CI: exit 1 if anything isn't formatted
+sm format --expr "calculate(sum(Sales[Amount]),all('Date'))"   # loose DAX, to stdout
+sm format - < measure.dax                                     # stdin
+sm format query.dax --json                                    # {success, formatted, errors}
+sm format query.dax --save                                    # format the file in place
+sm format ./Sales.pbip                                        # every DAX expression in a model (a dry run)
+sm format ./Sales.pbip "[Revenue]" -t Date --save             # some of them, and save
+sm format ./Sales.pbip --check                                # CI: exit 1 if anything isn't formatted
 ```
 
 Before and after:
@@ -298,7 +298,7 @@ returns anything, it lexes the result and checks that it has the input's tokens 
 and built-in function names may differ in case), with the same comments in the same order, and that lexemes the
 lexer splits (`==`, a `1,5` decimal) weren't pulled apart. In a model, it also checks that every reference
 resolves to the same object as before. A result that fails a check is refused, never written, and reported as a
-tessera bug (exit 70 for loose DAX; a warning for an expression in a model). Formatting is idempotent: formatting formatted DAX changes nothing.
+semctl bug (exit 70 for loose DAX; a warning for an expression in a model). Formatting is idempotent: formatting formatted DAX changes nothing.
 
 Output and exit codes:
 - Loose DAX: the formatted DAX on stdout. `--json` writes `{"success", "formatted", "errors"}`, like
@@ -329,20 +329,20 @@ but not their alignment.
 
 ## DAX packages (`pkg`)
 
-[daxlib.org](https://daxlib.org) publishes libraries of DAX user-defined functions ("packages"). `tess pkg`
+[daxlib.org](https://daxlib.org) publishes libraries of DAX user-defined functions ("packages"). `sm pkg`
 installs them into a model the way Tabular Editor 3's
 [DAX Package Manager](https://docs.tabulareditor.com/en/features/dax-package-manager.html) (3.24+) does, so a
 model either tool touched shows the same installed packages in the other.
 
 ```sh
-tess pkg list ./Sales.pbip                                   # installed packages (reads only the model)
-tess pkg search svg --from ~/src/daxlib                      # a daxlib checkout, offline
-tess pkg show DaxLib.SVG --from ./packages                   # versions, functions, dependencies
-tess pkg install ./Sales.pbip DaxLib.SVG --from ./packages   # dry run: the diff
-tess pkg install ./Sales.pbip DaxLib.SVG@1.0.0 --from ./packages --save
-tess pkg update ./Sales.pbip --from ./packages               # every package to its latest version: the diff
-tess pkg remove ./Sales.pbip DaxLib.SVG --save               # reads only the model
-tess pkg search svg --from daxlib                            # online: daxlib.org's API (see below)
+sm pkg list ./Sales.pbip                                   # installed packages (reads only the model)
+sm pkg search svg --from ~/src/daxlib                      # a daxlib checkout, offline
+sm pkg show DaxLib.SVG --from ./packages                   # versions, functions, dependencies
+sm pkg install ./Sales.pbip DaxLib.SVG --from ./packages   # dry run: the diff
+sm pkg install ./Sales.pbip DaxLib.SVG@1.0.0 --from ./packages --save
+sm pkg update ./Sales.pbip --from ./packages               # every package to its latest version: the diff
+sm pkg remove ./Sales.pbip DaxLib.SVG --save               # reads only the model
+sm pkg search svg --from daxlib                            # online: daxlib.org's API (see below)
 ```
 
 Packages hold functions, which need compatibility level 1702 or higher; a lower model is refused, not upgraded.
@@ -354,15 +354,15 @@ named at once; they apply in order as one change.
 (zip) file. `--from` takes one package (folder or `.daxpkg`), a `.zip` of many (every folder in it holding a
 `manifest.daxlib`: GitHub's "Download ZIP" of [github.com/daxlib/daxlib](https://github.com/daxlib/daxlib)), or a
 folder searched for any of these (up to six levels deep, hidden folders skipped): a checkout of daxlib, or a
-folder of downloaded `.daxpkg` files. Package files over 16 MB and zips over 256 MB are refused. Without `--from`, the `TESS_PKG_SOURCE` environment variable names the
-source (a path, or `daxlib`). With neither, the command fails: tess never picks a source, and never goes online, on
+folder of downloaded `.daxpkg` files. Package files over 16 MB and zips over 256 MB are refused. Without `--from`, the `SM_PKG_SOURCE` environment variable names the
+source (a path, or `daxlib`). With neither, the command fails: sm never picks a source, and never goes online, on
 its own. `list` and `remove` need no source at all.
 
-**Online (daxlib.org).** Only `--from daxlib` or `--from https://api.daxlib.org` (or the same in `TESS_PKG_SOURCE`)
+**Online (daxlib.org).** Only `--from daxlib` or `--from https://api.daxlib.org` (or the same in `SM_PKG_SOURCE`)
 goes online, and `--offline` refuses it even then. `daxlib` while a file or folder of that name is in the current
-directory (a clone is called that) is refused as ambiguous: pass `./daxlib` for the folder, or the URL. tess then sends HTTPS GET requests to `https://api.daxlib.org` and nowhere else (another host, plain
+directory (a clone is called that) is refused as ambiguous: pass `./daxlib` for the folder, or the URL. sm then sends HTTPS GET requests to `https://api.daxlib.org` and nowhere else (another host, plain
 http, a non-default port or a redirect is refused), with no cookies, no credentials, no body, and the User-Agent
-`tessera`. Nothing about the model is sent except, by `update`, the IDs of the packages being updated: with no
+`semctl`. Nothing about the model is sent except, by `update`, the IDs of the packages being updated: with no
 IDs named, every installed package recorded under daxlib.org's provider (one recorded under another provider is
 skipped with a warning, its ID never sent). The requests are the ones daxlib's own client makes:
 
@@ -383,7 +383,7 @@ refused. The tests never go online: they use local folders and a fake of the API
   writes it, and `TabularEditor_ModelDaxPkgSeq`, the next key (it goes up by one per install);
 - on each of the package's functions, `TabularEditor_ObjDaxPkgHandle` (its package's key) and
   `TabularEditor_ObjDaxPkgContentHash`, the upper-case hex SHA-256 of the function's expression as installed (for
-  spaceparts' unchanged functions, installing the same package versions with tess gives the same hashes, keys,
+  spaceparts' unchanged functions, installing the same package versions with sm gives the same hashes, keys,
   table and sequence, byte for byte).
 
 The provider recorded is `https://api.daxlib.org` for packages from a local source too (they are daxlib's
@@ -412,13 +412,13 @@ doesn't have). Error codes: `no-package-source` (exit 2), `package-not-found`, `
 
 ## C# scripts (`csharp`)
 
-`tess csharp` runs a C# script against the model's TOM objects, then shows what it changed, as the
+`sm csharp` runs a C# script against the model's TOM objects, then shows what it changed, as the
 [editing commands](editing.md#editing-commands) do: a dry run unless `--save` or `--save-to`, with the save gate,
 `--stat`, `--name-only` and `--json`. The command's name is provisional (`script` is taken by DAX scripts).
 
 ```sh
-tess csharp ./Sales.pbip format-measures.csx           # dry run: the diff
-tess csharp ./Sales.pbip format-measures.csx --save
+sm csharp ./Sales.pbip format-measures.csx           # dry run: the diff
+sm csharp ./Sales.pbip format-measures.csx --save
 ```
 
 ```csharp
@@ -432,7 +432,7 @@ foreach (var m in Model.Tables.SelectMany(t => t.Measures).Where(m => m.Name.End
 
 - **The script** is a C# file of top-level statements. `using` directives, local functions and classes work as in
   any C# file.
-- **References:** the whole .NET 10 shared framework, TOM and Tessera.Core. `#r` and NuGet packages are not
+- **References:** the whole .NET 10 shared framework, TOM and Semctl.Core. `#r` and NuGet packages are not
   supported.
 - **Names TOM shares with the framework** are ambiguous, because TOM's namespace is imported: write
   `System.Text.Json.JsonSerializer`, not `JsonSerializer`.
@@ -441,7 +441,7 @@ foreach (var m in Model.Tables.SelectMany(t => t.Measures).Where(m => m.Name.End
   - `Model`, the model's TOM `Model`;
   - `Info(text)`, `Warning(text)` and `Output(value)`, which write to stderr;
   - `Error(text)`, which fails the script.
-- **The `TESS` symbol** is defined, so `#if TESS` tells a script it runs under tess.
+- **The `SM` symbol** is defined, so `#if SM` tells a script it runs under sm.
 - **TE scripts:** scripts written against Tabular Editor's own object model, such as `Model.AllMeasures`,
   `Selected` or `FormatDax`, don't compile here. Only scripts that stay within raw TOM run unchanged.
 - **Output:** everything the script writes, its `Console` output included, goes to stderr, so `--json` on stdout
@@ -451,9 +451,9 @@ foreach (var m in Model.Tables.SelectMany(t => t.Measures).Where(m => m.Name.End
   - an exception or `Error()` is `script-failed` (exit 3);
   - a failed script saves nothing.
 
-**Security.** The script must be a local file: tess never fetches one (a URL is refused) and never runs one on its
-own. It runs inside tess with your rights and can do anything you can, network included. tess's offline guarantee
-covers tess, not the code you give it. Treat a script like any program you run. It is compiled in memory with
+**Security.** The script must be a local file: sm never fetches one (a URL is refused) and never runs one on its
+own. It runs inside sm with your rights and can do anything you can, network included. sm's offline guarantee
+covers sm, not the code you give it. Treat a script like any program you run. It is compiled in memory with
 Roslyn's C# compiler and needs no files of its own on disk, so it works in the single-file binary. The
 measurements and the design are in [docs/scripting-design.md](scripting-design.md). It has been run on
 Linux only so far.

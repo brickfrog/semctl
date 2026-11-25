@@ -1,0 +1,163 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>false</GenerateProgramFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Fixtures.fs" />
+    <Compile Include="ObjectRefTests.fs" />
+    <Compile Include="ModelSourceTests.fs" />
+    <Compile Include="ModelIOTests.fs" />
+    <Compile Include="InventoryTests.fs" />
+    <Compile Include="SelectorTests.fs" />
+    <Compile Include="SerializeTests.fs" />
+    <Compile Include="FindTests.fs" />
+    <Compile Include="DiffTests.fs" />
+    <Compile Include="DaxTests.fs" />
+    <Compile Include="DepsTests.fs" />
+    <Compile Include="InitTests.fs" />
+    <Compile Include="ValidateTests.fs" />
+    <Compile Include="RenameTests.fs" />
+    <Compile Include="BpaTests.fs" />
+    <Compile Include="MutationTests.fs" />
+    <Compile Include="SetTests.fs" />
+    <Compile Include="AddTests.fs" />
+    <Compile Include="RemoveMoveTests.fs" />
+    <Compile Include="TranslationsTests.fs" />
+    <Compile Include="PerspectivesTests.fs" />
+    <Compile Include="XmlaFakes.fs" />
+    <Compile Include="CliHarness.fs" />
+    <Compile Include="ValidateCommandTests.fs" />
+    <Compile Include="CliTests.fs" />
+    <Compile Include="InitCommandTests.fs" />
+    <Compile Include="RenameCommandTests.fs" />
+    <Compile Include="SetCommandTests.fs" />
+    <Compile Include="WhereTests.fs" />
+    <Compile Include="McpTests.fs" />
+    <Compile Include="AddCommandTests.fs" />
+    <Compile Include="RemoveMoveCommandTests.fs" />
+    <Compile Include="BpaCommandTests.fs" />
+    <Compile Include="SampleModelTests.fs" />
+    <Compile Include="TranslationsCommandTests.fs" />
+    <Compile Include="PerspectiveCommandTests.fs" />
+    <Compile Include="UnusedTests.fs" />
+    <Compile Include="UnusedCommandTests.fs" />
+    <Compile Include="ValidateGroupTests.fs" />
+    <Compile Include="DaxScriptTests.fs" />
+    <Compile Include="ScriptTests.fs" />
+    <Compile Include="ScriptCommandTests.fs" />
+    <Compile Include="DepsKeywordTests.fs" />
+    <Compile Include="LintTests.fs" />
+    <Compile Include="LintCommandTests.fs" />
+    <Compile Include="BpaLayerTests.fs" />
+    <Compile Include="BpaRulesCommandTests.fs" />
+    <Compile Include="CaseRenameTests.fs" />
+    <Compile Include="ReportTests.fs" />
+    <Compile Include="ReportCommandTests.fs" />
+    <Compile Include="ReportRemoveTests.fs" />
+    <Compile Include="InteractiveTests.fs" />
+    <Compile Include="ConnectionsTests.fs" />
+    <Compile Include="SampleReportTests.fs" />
+    <Compile Include="RenameEdgeTests.fs" />
+    <Compile Include="RenameEdgeCommandTests.fs" />
+    <Compile Include="FormatTests.fs" />
+    <Compile Include="FormatCommandTests.fs" />
+    <Compile Include="XmlaAddressTests.fs" />
+    <Compile Include="QueryResultTests.fs" />
+    <Compile Include="DeployTests.fs" />
+    <Compile Include="XmlaCredentialsTests.fs" />
+    <Compile Include="XmlaRemoteTests.fs" />
+    <Compile Include="XmlaReaderTests.fs" />
+    <Compile Include="XmlaCommandTests.fs" />
+    <Compile Include="OfflineTests.fs" />
+    <Compile Include="XmlaIntegrationTests.fs" />
+    <Compile Include="DaxParserTests.fs" />
+    <Compile Include="DaxValueTests.fs" />
+    <Compile Include="DataStoreTests.fs" />
+    <Compile Include="FixtureTests.fs" />
+    <Compile Include="DataCommandTests.fs" />
+    <Compile Include="RefreshTests.fs" />
+    <Compile Include="XmlaRefreshTests.fs" />
+    <Compile Include="RefreshCommandTests.fs" />
+    <Compile Include="QueryCompareTests.fs" />
+    <Compile Include="EmbedTests.fs" />
+    <Compile Include="Conformance.fs" />
+    <Compile Include="ConformanceTests.fs" />
+    <Compile Include="ConformanceServer.fs" />
+    <Compile Include="ConformanceServerTests.fs" />
+    <Compile Include="FormatCorpusTests.fs" />
+    <Compile Include="EngineHelpers.fs" />
+    <Compile Include="EngineSmokeTests.fs" />
+    <Compile Include="EngineScalarTests.fs" />
+    <Compile Include="EngineMathTests.fs" />
+    <Compile Include="EngineCalendarTests.fs" />
+    <Compile Include="EngineContextTests.fs" />
+    <Compile Include="EngineAllSelectedTests.fs" />
+    <Compile Include="EngineTableTests.fs" />
+    <Compile Include="EnginePropertyTests.fs" />
+    <Compile Include="EngineTextTests.fs" />
+    <Compile Include="EngineTimeIntelligenceTests.fs" />
+    <Compile Include="EngineWindowTests.fs" />
+    <Compile Include="EngineCommandTests.fs" />
+    <Compile Include="EngineDateTimeTests.fs" />
+    <Compile Include="EngineModelShapeTests.fs" />
+    <Compile Include="EngineCalcGroupTests.fs" />
+    <Compile Include="EngineSecurityTests.fs" />
+    <Compile Include="SecurityCommandTests.fs" />
+    <Compile Include="EngineFormatStringTests.fs" />
+    <Compile Include="EngineSampleTests.fs" />
+    <Compile Include="EnginePerfTests.fs" />
+    <Compile Include="EngineCacheTests.fs" />
+    <Compile Include="EngineIncrementalTests.fs" />
+    <Compile Include="EngineGroupAggTests.fs" />
+    <Compile Include="TestSuiteTests.fs" />
+    <Compile Include="TestCommandTests.fs" />
+    <Compile Include="Te2Fixture.fs" />
+    <Compile Include="FolderFormatTests.fs" />
+    <Compile Include="FolderFormatCommandTests.fs" />
+    <Compile Include="JsonSchema.fs" />
+    <Compile Include="SarifTests.fs" />
+    <Compile Include="JsonNullTests.fs" />
+    <Compile Include="SuggestTests.fs" />
+    <Compile Include="PlainOutputTests.fs" />
+    <Compile Include="WatchTests.fs" />
+    <Compile Include="CompletionTests.fs" />
+    <Compile Include="ValidateSemanticTests.fs" />
+    <Compile Include="UnknownFunctionTests.fs" />
+    <Compile Include="OutputPathTests.fs" />
+    <Compile Include="BpaFixTests.fs" />
+    <Compile Include="BpaFixCommandTests.fs" />
+    <Compile Include="PreviewCommandTests.fs" />
+    <Compile Include="AddCalendarTests.fs" />
+    <Compile Include="VertipaqTests.fs" />
+    <Compile Include="SchemaCheckTests.fs" />
+    <Compile Include="SchemaCheckSqlLiveTests.fs" />
+    <Compile Include="PkgTests.fs" />
+    <Compile Include="CsharpTests.fs" />
+    <Compile Include="Main.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The OASIS SARIF 2.1.0 schema, unmodified (see sarif/NOTICE.txt): the SARIF tests check against it. -->
+    <EmbeddedResource Include="sarif/sarif-schema-2.1.0.json" LogicalName="sarif-schema-2.1.0.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Expecto" Version="11.1.1" />
+    <!-- MIT (SQLBI). The view model DAX Studio's VertiPaq Analyzer builds from a .vpax: tests open exported files with it. -->
+    <PackageReference Include="Dax.ViewModel" Version="1.12.1" />
+    <PackageReference Include="Expecto.FsCheck" Version="11.1.1" />
+    <PackageReference Include="YoloDev.Expecto.TestSdk" Version="0.16.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Semctl.Core/Semctl.Core.fsproj" />
+    <ProjectReference Include="../../src/Semctl.Xmla/Semctl.Xmla.fsproj" />
+    <ProjectReference Include="../../src/Semctl.Cli/Semctl.Cli.fsproj" />
+  </ItemGroup>
+
+</Project>

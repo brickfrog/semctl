@@ -83,7 +83,7 @@ def fetch(url, cache, offline):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cache", default=os.path.join(tempfile.gettempdir(), "tessera-conformance-pages"))
+    parser.add_argument("--cache", default=os.path.join(tempfile.gettempdir(), "semctl-conformance-pages"))
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("paths", nargs="*")
     args = parser.parse_args()

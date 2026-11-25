@@ -1,18 +1,18 @@
 # AI agents (`mcp`)
 
-`tess mcp <model>` serves one model to an AI agent (Claude Code, VS Code, Cursor, Codex, ...) as a
-[Model Context Protocol](https://modelcontextprotocol.io) server over stdio: the agent's client starts tess, and
+`sm mcp <model>` serves one model to an AI agent (Claude Code, VS Code, Cursor, Codex, ...) as a
+[Model Context Protocol](https://modelcontextprotocol.io) server over stdio: the agent's client starts sm, and
 they talk JSON-RPC 2.0 over its stdin and stdout (MCP 2025-06-18; clients asking for 2025-03-26 or 2024-11-05 get
-that version). There is no HTTP transport: tess opens no port and makes no network call of its own.
+that version). There is no HTTP transport: sm opens no port and makes no network call of its own.
 
 ```sh
-claude mcp add tess -- tess mcp ./Sales.pbip                                   # read only
-claude mcp add tess -- tess mcp ./Sales.pbip --allow metadata-write --save    # may change and save it
-claude mcp add tess -- tess mcp ./Sales.pbip --allow data-read --data ./fixtures --audit-log ./tess-mcp.jsonl
+claude mcp add sm -- sm mcp ./Sales.pbip                                   # read only
+claude mcp add sm -- sm mcp ./Sales.pbip --allow metadata-write --save    # may change and save it
+claude mcp add sm -- sm mcp ./Sales.pbip --allow data-read --data ./fixtures --audit-log ./sm-mcp.jsonl
 ```
 
 ```json
-{ "mcpServers": { "tess": { "command": "tess", "args": ["mcp", "./Sales.pbip", "--allow", "read,bpa"] } } }
+{ "mcpServers": { "sm": { "command": "sm", "args": ["mcp", "./Sales.pbip", "--allow", "read,bpa"] } } }
 ```
 
 **Permissions.** `--allow` (repeatable or comma-separated) decides which tools exist. A tool outside the grants is
@@ -48,12 +48,12 @@ left exactly as it was and the error names the operation (`operation`: its index
 
 | `op` | Arguments | Like |
 |---|---|---|
-| `set` | `object`, `properties` (`{"<path>": value or null}`), `unset` | `tess set` |
-| `rename` | `object`, `newName` | `tess rename` (fixes the DAX that refers to it, and the PBIR reports next to the model: staged, written by `save_model`) |
-| `add` | `kind` (`measure`, `calculatedColumn`, `dataColumn`, `calculatedTable`, `relationship`), `table`, `name`, `expression`, `dataType`, `sourceColumn`, `from`, `to`, `active`, `description`, `displayFolder`, `formatString`, `hidden` | `tess add` |
-| `remove` | `objects`, `cascade`, `force` | `tess remove` (refused while other DAX or a report's visuals use them, unless `force`) |
-| `move` | `measure`, `table`, `displayFolder` | `tess move` |
-| `script` | `dax`: `DEFINE MEASURE`/`COLUMN`/`TABLE` blocks, created or updated | `tess script apply` |
+| `set` | `object`, `properties` (`{"<path>": value or null}`), `unset` | `sm set` |
+| `rename` | `object`, `newName` | `sm rename` (fixes the DAX that refers to it, and the PBIR reports next to the model: staged, written by `save_model`) |
+| `add` | `kind` (`measure`, `calculatedColumn`, `dataColumn`, `calculatedTable`, `relationship`), `table`, `name`, `expression`, `dataType`, `sourceColumn`, `from`, `to`, `active`, `description`, `displayFolder`, `formatString`, `hidden` | `sm add` |
+| `remove` | `objects`, `cascade`, `force` | `sm remove` (refused while other DAX or a report's visuals use them, unless `force`) |
+| `move` | `measure`, `table`, `displayFolder` | `sm move` |
+| `script` | `dax`: `DEFINE MEASURE`/`COLUMN`/`TABLE` blocks, created or updated | `sm script apply` |
 
 The result is the editing commands' JSON: `changes[]`, `introducedErrors` (errors the batch introduced),
 `resolvedErrors` (errors it fixed), `errorsIntroducedSinceLoad`, notes, warnings and `unsavedChanges`. Changes stay
@@ -61,17 +61,17 @@ in memory for the session. Only with `--save` is there a `save_model` tool, whic
 was loaded from (the same format and line endings, as `--save` does), then the report files its renames rewrote
 (`reportFiles` in the results). In-place saves check the report originals before writing and roll back file edits if a later write fails. It refuses while the session's changes have
 introduced errors that weren't there when the model was loaded, unless called with `force: true`. A model loaded
-from a server is never saved (`tess deploy` deploys files). There is no tool for raw TMSL or XMLA.
+from a server is never saved (`sm deploy` deploys files). There is no tool for raw TMSL or XMLA.
 
 **The audit log.** `--audit-log <file>` appends one JSON line per tool call: `time` (UTC), `tool`, `objects` (the
 object names in the arguments), `outcome` (`ok`, `error`, `unknown-tool`) and, for an error, `errorCode` (never
 the message, which can quote a value). A first line (`event: start`) records the model, the grants and the tools
 offered. Property values, DAX, query text and query results are never written.
 
-**stdout is the protocol.** It carries JSON-RPC frames only, one per line, UTF-8 without a BOM. tess's own
+**stdout is the protocol.** It carries JSON-RPC frames only, one per line, UTF-8 without a BOM. sm's own
 messages (the start-up line, option errors even with `--json`, `--help`, sign-in prompts for `--server`) go to
-stderr. tess serves until its input ends.
+stderr. sm serves until its input ends.
 
 **Not done:** resources, prompts, sampling, progress notifications and cancellation (requests are answered one
-at a time, in order); `add` covers five kinds (the rest through a `script` operation, or `tess add`); there is no undo
-within a session other than not saving. Errors keep their CLI wording, which may mention a `tess` command.
+at a time, in order); `add` covers five kinds (the rest through a `script` operation, or `sm add`); there is no undo
+within a session other than not saving. Errors keep their CLI wording, which may mention a `sm` command.

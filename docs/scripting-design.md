@@ -1,26 +1,26 @@
-# Scripting in tess: measurements and a recommendation
+# Scripting in sm: measurements and a recommendation
 
 Tabular Editor users automate models with C# scripts. This note measures what F# scripting
-(FSharp.Compiler.Service) and C# scripting (Roslyn) would add to tess's release binary and start-up,
+(FSharp.Compiler.Service) and C# scripting (Roslyn) would add to sm's release binary and start-up,
 whether each works from the single-file binary, and recommends what to ship. It also sets out the security
 model a scripting command must keep.
 
-Measured 2026-11-15 on Linux x64 (CachyOS, .NET SDK 10.0.114), on tess at `9cafc6b` (branch feat/pkg).
+Measured 2026-11-15 on Linux x64 (CachyOS, .NET SDK 10.0.114), on sm at `9cafc6b` (branch feat/pkg).
 The spike's code lived in scratch copies of the repository, not in the release build.
 
 ## How it was measured
 
 - **Binaries** were published as `.github/workflows/release.yml` publishes them:
-  `dotnet publish src/Tessera.Cli -c Release -r <rid> --self-contained -p:PublishSingleFile=true`. The
+  `dotnet publish src/Semctl.Cli -c Release -r <rid> --self-contained -p:PublishSingleFile=true`. The
   fsproj adds compression, an embedded PDB, no trimming, and leaves out MSAL's native broker.
-- **The .NET tool package** was built with `dotnet pack src/Tessera.Cli -c Release`.
+- **The .NET tool package** was built with `dotnet pack src/Semctl.Cli -c Release`.
 - **Three variants:**
   - the baseline;
   - `FSharp.Compiler.Service` 43.10.114, the FCS that matches the SDK's FSharp.Core 10.0.114, with a hidden
     `__fsx <model> <script>` that evaluates an `.fsx` in an `FsiEvaluationSession` with the TOM `Model` bound;
   - Roslyn: first `Microsoft.CodeAnalysis.CSharp.Scripting` 5.0.0, then plain `Microsoft.CodeAnalysis.CSharp`
     5.0.0 (the compiler API) with a hidden `__csx <model> <script>`.
-- **Start-up** is the best of 5 runs, wall clock, warm file cache: `tess --version` and `tess info` on the
+- **Start-up** is the best of 5 runs, wall clock, warm file cache: `sm --version` and `sm info` on the
   spaceparts-analytics model.
 - **Script timings** come from stopwatches inside the process and from wall-clock runs of a script that lists
   measures and counts functions.
@@ -45,15 +45,15 @@ The scripting assemblies load only when a script runs, so other commands don't s
 
 | command | baseline | + FCS | + Roslyn compiler |
 |---|---|---|---|
-| `tess --version` | 459 ms | 455 ms | 445 ms |
-| `tess info <spaceparts>` | 818 ms | 819 ms | 834 ms |
+| `sm --version` | 459 ms | 455 ms | 445 ms |
+| `sm info <spaceparts>` | 818 ms | 819 ms | 834 ms |
 
 Running a script costs, on top of loading the model:
 
 - **FCS:**
   - creating the `FsiEvaluationSession` and binding `Model`: about 2.7 s;
   - evaluating the script: about 1.1 s more;
-  - total wall clock about 4.1-4.4 s, against about 0.8 s for `tess info`.
+  - total wall clock about 4.1-4.4 s, against about 0.8 s for `sm info`.
 - **Roslyn compiler API:**
   - compiling: 0.8-1.5 s, cold JIT of Roslyn in every process;
   - running: about 1 ms;
@@ -79,7 +79,7 @@ has no such files, because `Assembly.Location` is empty.
 
 With `-p:IncludeAllContentForSelfExtract=true` it works: the script ran and printed the model's measures. But the
 bundle then unpacks itself on first run, 94 MB of it, under `~/.net` (or `DOTNET_BUNDLE_EXTRACT_BASE_DIR`). The
-fsproj already rules that out for tess as a whole: extraction fails where HOME isn't writable (CI containers,
+fsproj already rules that out for sm as a whole: extraction fails where HOME isn't writable (CI containers,
 locked-down machines), and it would apply to every command, not only to scripts.
 
 The remaining fix would be to embed reference assemblies (FSharp.Core and the framework's ref pack) and write
@@ -107,7 +107,7 @@ The scripting layer always adds a reference to the core library by its file path
    empty. So the shared framework's managed assemblies are loaded first, by name: about 170 names, the same on
    every OS. Then every assembly loaded in the process is referenced from its in-memory metadata:
    `Assembly.TryGetRawMetadata` → `ModuleMetadata.CreateFromMetadata` → `AssemblyMetadata.GetReference()`.
-   That covers the framework, TOM and Tessera.Core, including assemblies inside the bundle. Collecting the 35
+   That covers the framework, TOM and Semctl.Core, including assemblies inside the bundle. Collecting the 35
    references takes 13-30 ms.
 2. **The script.** The `.csx` file is compiled as a C# top-level-statements program, in its own syntax tree, so
    diagnostics carry the script's own file name, line and column, for example
@@ -120,7 +120,7 @@ The scripting layer always adds a reference to the core library by its file path
      the TOM type `Model`.
    - Declaring `Model` as a global (a `global using static`) was tried first, and fails with CS0229, ambiguous
      between the property and the type.
-4. **The symbol `TESS`** is defined, like TE CLI's `TECLI`, so a script can tell where it runs.
+4. **The symbol `SM`** is defined, like TE CLI's `TECLI`, so a script can tell where it runs.
 5. **Emit and run.** The program is emitted to memory, loaded with `Assembly.Load(byte[])`, and its entry point
    is invoked.
 
@@ -139,25 +139,25 @@ of TE's docs were run against the prototype, with table and measure names adapte
 
 So only scripts that stay within raw TOM run unchanged. TE scripts are written against TE's own object model
 (`TabularEditor.TOMWrapper`: `Model.AllMeasures`, `Selected`, `Output()`, `FormatDax()`, the `ScriptHelper`
-methods). That wrapper isn't open source, and tess can't reuse it. A compatibility layer would mean
+methods). That wrapper isn't open source, and sm can't reuse it. A compatibility layer would mean
 reimplementing the commonly used part of that API on top of TOM: `AllMeasures`, `AllColumns`, `Output`,
-`Error`, perhaps `FormatDax` through `tess format`. It could grow piece by piece, the way the DAX engine did, but
+`Error`, perhaps `FormatDax` through `sm format`. It could grow piece by piece, the way the DAX engine did, but
 it is its own project.
 
 ## Security model
 
 A scripting command must keep these rules:
 
-1. **A script is a local file named on the command line.** tess never fetches one: an `http(s)://` argument is
+1. **A script is a local file named on the command line.** sm never fetches one: an `http(s)://` argument is
    refused, not downloaded, and no script is ever read from the model, its annotations, or a package. Running a
    script is always an explicit act of the user.
 2. **A script runs in-process, with the user's rights.** It can do anything the user can: read and write files,
-   start processes, open network connections. tess doesn't sandbox it, and .NET offers no in-process sandbox
+   start processes, open network connections. sm doesn't sandbox it, and .NET offers no in-process sandbox
    since Code Access Security was removed. The scripting guide says so plainly: treat a script like any program you run.
-3. **tess's no-network guarantee covers tess, not the code a script brings.** tess adds no network access for
-   scripts, and the offline tests keep checking tess's own assemblies. A script's own `HttpClient` is the
+3. **sm's no-network guarantee covers sm, not the code a script brings.** sm adds no network access for
+   scripts, and the offline tests keep checking sm's own assemblies. A script's own `HttpClient` is the
    script's business.
-4. **The model is changed only through the usual pipeline.** The script edits the in-memory TOM model. tess
+4. **The model is changed only through the usual pipeline.** The script edits the in-memory TOM model. sm
    then shows the change set as a diff (a dry run by default), applies the save gate (refused if the script
    introduced errors, unless `--force`), and writes only with `--save` or `--save-to`. A failing script, whether
    a compile error, an exception or `Error()`, saves nothing.
@@ -177,23 +177,23 @@ A scripting command must keep these rules:
   the thing to decide next.
 
 **Don't ship F# scripting in the binary.** It is small enough (+7.7 MB), but it doesn't run single-file without
-self-extraction, which tess has ruled out. If F# scripting is wanted, ship it as a separate, optional
-`tess-script` .NET tool. A framework-dependent tool package has real files on disk, so FCS works there. That
-tool can reference Tessera.Core and live in this repo, outside the release binaries. A separate tool is also the
+self-extraction, which sm has ruled out. If F# scripting is wanted, ship it as a separate, optional
+`sm-script` .NET tool. A framework-dependent tool package has real files on disk, so FCS works there. That
+tool can reference Semctl.Core and live in this repo, outside the release binaries. A separate tool is also the
 fallback for C#, should the in-binary approach fail on Windows or macOS.
 
 ## What was built
 
-The recommendation's C# path is built as `tess csharp <model> <script.csx>`. The command name is provisional,
-and `script` is taken by DAX scripts. It lives in its own project, `src/Tessera.Scripting`, and its own command
+The recommendation's C# path is built as `sm csharp <model> <script.csx>`. The command name is provisional,
+and `script` is taken by DAX scripts. It lives in its own project, `src/Semctl.Scripting`, and its own command
 file, so it can be dropped by removing one project reference and one command. See the [C# scripting guide](dax-tools.md#c-scripts-csharp). The F# variant and the Scripting-API variant were spike code only, and were not kept.
 
 ## Open
 
 - **Windows and macOS: not executed.** `TryGetRawMetadata` and in-memory emit are not platform-specific, but nobody
-  has run them there. Run `tess csharp` from the win-x64 and osx-arm64 release binaries before announcing it.
+  has run them there. Run `sm csharp` from the win-x64 and osx-arm64 release binaries before announcing it.
 - **No TE wrapper API.** `Selected` has no meaning in a CLI, and `AllMeasures`, `Output`, `FormatDax` and the
   rest don't exist yet.
 - **No ReadyToRun build of Roslyn**, so each run compiles with a cold JIT.
-- **No `#r` and no NuGet packages.** References are the shared framework, TOM and tess's own assemblies. The
+- **No `#r` and no NuGet packages.** References are the shared framework, TOM and sm's own assemblies. The
   framework's list of names is fixed in `CsScript.fs` for .NET 10, and a name the runtime lacks is skipped.

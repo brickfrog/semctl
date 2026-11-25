@@ -1,0 +1,45 @@
+module Semctl.Tests.Main
+
+open System
+open Expecto
+
+[<EntryPoint>]
+let main argv =
+    match List.ofArray argv with
+    // Not a test: runs the conformance corpus against a real server (docs/xmla-manual-test.md, F).
+    | "conformance-server" :: rest ->
+        ConformanceServer.main (Semctl.Xmla.LiveConnector()) Semctl.Cli.Common.processEnv Console.Out Console.Error rest
+    | _ ->
+        // SEMCTL_CHECK_INCREMENTAL=1: every incremental filter context is recomputed in full and
+        // compared, and every value aggregated by group evaluated row by row (slow); the run fails
+        // if any differed.
+        let check = Environment.GetEnvironmentVariable "SEMCTL_CHECK_INCREMENTAL" = "1"
+        let stats = Semctl.DaxEngine.IncrementalStats.Global
+
+        if check then
+            stats.Check <- true
+
+        let code = runTestsInAssemblyWithCLIArgs [] argv
+
+        if check then
+            eprintfn
+                "incremental filter contexts: %d applied, %d checked, %d mismatched, %d fell back after an error"
+                stats.Applied
+                stats.Checked
+                stats.Mismatched
+                stats.Errors
+
+            eprintfn
+                "aggregation by group: %d values, %d rows from their buckets, %d checked, %d mismatched, %d fell back after an error"
+                stats.GroupApplied
+                stats.GroupRows
+                stats.GroupChecked
+                stats.GroupMismatched
+                stats.GroupErrors
+
+            if stats.Mismatched > 0L || stats.GroupMismatched > 0L then
+                1
+            else
+                code
+        else
+            code

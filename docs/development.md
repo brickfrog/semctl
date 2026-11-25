@@ -3,24 +3,24 @@
 ```sh
 dotnet build
 dotnet test                                         # Expecto + FsCheck
-dotnet run --project tests/Tessera.Tests -- --summary   # same tests, Expecto's own runner
-dotnet run --project src/Tessera.Cli -- info <path>
+dotnet run --project tests/Semctl.Tests -- --summary   # same tests, Expecto's own runner
+dotnet run --project src/Semctl.Cli -- info <path>
 dotnet tool restore && dotnet fantomas src tests    # format
-dotnet pack src/Tessera.Cli -c Release -o artifacts && dotnet tool install -g tessera --add-source ./artifacts
+dotnet pack src/Semctl.Cli -c Release -o artifacts && dotnet tool install -g semctl --add-source ./artifacts
 ```
 
 CI (`.github/workflows/ci.yml`) checks formatting, then builds and tests on Linux, Windows and macOS. A further job
 runs the suite against a pinned clone of the sample model below.
-Set `TESSERA_BPA_RULES=<file>[:<file>...]` to run BPA rule files (e.g. from TabularEditor/BestPracticeRules)
-in a test that reports how many rules are supported. (This is a test setting; `tess bpa` itself reads
-`TESS_BPA_RULES`, which the CLI tests hide, along with `HOME`, `XDG_CONFIG_HOME` and `APPDATA`.) It runs against `TESSERA_SAMPLE_MODEL` if that is set,
+Set `SEMCTL_BPA_RULES=<file>[:<file>...]` to run BPA rule files (e.g. from TabularEditor/BestPracticeRules)
+in a test that reports how many rules are supported. (This is a test setting; `sm bpa` itself reads
+`SM_BPA_RULES`, which the CLI tests hide, along with `HOME`, `XDG_CONFIG_HOME` and `APPDATA`.) It runs against `SEMCTL_SAMPLE_MODEL` if that is set,
 otherwise against a fixture.
 
-Set `TESSERA_XMLA_SERVER` and `TESSERA_XMLA_DATABASE` (with credentials in the `TESS_XMLA_*` variables) to also run
+Set `SEMCTL_XMLA_SERVER` and `SEMCTL_XMLA_DATABASE` (with credentials in the `SM_XMLA_*` variables) to also run
 read-only tests against a real server; see `docs/xmla-manual-test.md`. The CLI tests never see real credentials,
 and fail if a command that should be offline asks for a connection.
 
-Set `TESSERA_SAMPLE_MODEL=<path>` to also run a round-trip test against a real model, such as a clone of
+Set `SEMCTL_SAMPLE_MODEL=<path>` to also run a round-trip test against a real model, such as a clone of
 [TabularEditor/spaceparts-analytics](https://github.com/TabularEditor/spaceparts-analytics).
 
 Releases: push a tag such as `v0.2.0`. `.github/workflows/release.yml` then:
@@ -29,40 +29,40 @@ Releases: push a tag such as `v0.2.0`. `.github/workflows/release.yml` then:
   (`-p:Version=0.2.0`; `Directory.Build.props` holds the default for local builds)
 - attaches them all to a GitHub release
 
-`tess --version` prints that version. The `+<commit>` suffix .NET adds to the informational version is left out.
+`sm --version` prints that version. The `+<commit>` suffix .NET adds to the informational version is left out.
 To build a binary locally:
 
 ```sh
-dotnet publish src/Tessera.Cli -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish
+dotnet publish src/Semctl.Cli -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish
 ```
 
 Single-file binaries are compressed and not trimmed, because TOM relies on reflection. They leave out MSAL's native
-sign-in broker, which tess never uses (it signs in with a token, a service principal or a device code, all in
+sign-in broker, which sm never uses (it signs in with a token, a service principal or a device code, all in
 managed code), and the optional `msasxpress.dll` transport compression on Windows.
 
 Layout:
 
-- `src/Tessera.Core` holds the model logic and never prints anything. Commands return typed results and
-  `TessError` values.
-- `src/Tessera.Xmla` is the only assembly that opens connections to servers. Everything goes through
+- `src/Semctl.Core` holds the model logic and never prints anything. Commands return typed results and
+  `SemctlError` values.
+- `src/Semctl.Xmla` is the only assembly that opens connections to servers. Everything goes through
   `IXmlaConnector` / `IXmlaSession` (`Session.fs`); `Live.fs` is the one implementation that uses the client
   libraries' connection types, and tests use a fake. `Remote.fs` holds the logic on top, `Credentials.fs` reads the
-  `TESS_XMLA_*` variables, and `Failures.fs` turns client-library errors into `TessError`s with secrets scrubbed.
-- `src/Tessera.Cli` handles argument parsing (Argu) and text/JSON rendering:
+  `SM_XMLA_*` variables, and `Failures.fs` turns client-library errors into `SemctlError`s with secrets scrubbed.
+- `src/Semctl.Cli` handles argument parsing (Argu) and text/JSON rendering:
   - `Output.fs` holds the JSON helpers.
   - `Common.fs` holds exit codes, `Outcome`, `Ctx` and argument helpers.
   - `Commands/<Name>Command.fs` holds one command each: its `summary`, `Args`, renderers and `run`.
 
 To add a command:
 1. Write the logic in Core, with tests.
-2. Add `src/Tessera.Cli/Commands/<Name>Command.fs`, following an existing command.
-3. Add it to `Tessera.Cli.fsproj`, before `Args.fs`.
+2. Add `src/Semctl.Cli/Commands/<Name>Command.fs`, following an existing command.
+3. Add it to `Semctl.Cli.fsproj`, before `Args.fs`.
 4. Add a case to `CliArgs` in `Args.fs`, plus its usage line (`<Name>Command.summary`).
 5. Add a dispatch line in `App.fs`.
-6. Put its CLI tests in `tests/Tessera.Tests/<Name>CommandTests.fs`, using `CliHarness` (`tess`, `json`,
+6. Put its CLI tests in `tests/Semctl.Tests/<Name>CommandTests.fs`, using `CliHarness` (`sm`, `json`,
    `project`).
 
-## The DAX parser (`Tessera.Core`)
+## The DAX parser (`Semctl.Core`)
 
 A real DAX parser, the first step of a local DAX engine. It has no command of its own yet: it is the library the
 evaluator is written against. Three modules, none of which knows about a model:
@@ -114,10 +114,10 @@ published source (the DAX reference, DAX Guide, SQLBI) and saying which: its for
 engine: no expected value came from running or reading an engine. **It has not been confirmed against a server
 yet**; many cases are worked out by hand from documented rules, and some are marked uncertain.
 
-- `tests/Tessera.Tests/Conformance.fs` reads and checks the corpus, and runs any engine against a case:
+- `tests/Semctl.Tests/Conformance.fs` reads and checks the corpus, and runs any engine against a case:
 
   ```fsharp
-  Conformance.run : (Database -> DataStore -> string -> Result<QueryResult list, TessError>) -> Case -> Outcome
+  Conformance.run : (Database -> DataStore -> string -> Result<QueryResult list, SemctlError>) -> Case -> Outcome
   // Outcome: Pass | Fail of Mismatch (a value-level diff) | NotSupported of reason | Error of message
   ```
 
@@ -127,15 +127,15 @@ yet**; many cases are worked out by hand from documented rules, and some are mar
   there lists the tags the engine may leave for later. It takes any tag, a function's name included (`round`,
   `format`): the area tags (`math-functions`...) mark the cases in that area's folder, and cases elsewhere call
   such functions too, tagged only with the function.
-- `QueryResult.compare` (`Tessera.Core`) is the comparison: columns by name, rows as a multiset unless ordered,
+- `QueryResult.compare` (`Semctl.Core`) is the comparison: columns by name, rows as a multiset unless ordered,
   doubles within a tolerance, int64 and decimal exactly, and differences of type (`1` against `1.0`, a column
   declared `double` instead of `decimal`) reported apart from differences of value. `QueryResult.ofJson` reads
-  the `tess query --json` shape back.
-- To run the corpus against a real server (it deploys scratch databases named `tessera-conformance-*`):
+  the `sm query --json` shape back.
+- To run the corpus against a real server (it deploys scratch databases named `semctl-conformance-*`):
 
   ```sh
-  TESSERA_XMLA_SERVER='powerbi://api.powerbi.com/v1.0/myorg/<workspace>' \
-    dotnet run --project tests/Tessera.Tests -c Release -- conformance-server --out ./conformance-report
+  SEMCTL_XMLA_SERVER='powerbi://api.powerbi.com/v1.0/myorg/<workspace>' \
+    dotnet run --project tests/Semctl.Tests -c Release -- conformance-server --out ./conformance-report
   ```
 
   See `docs/xmla-manual-test.md`, section G. `python3 tests/conformance/check-quotes.py` checks every quoted
@@ -147,4 +147,4 @@ yet**; many cases are worked out by hand from documented rules, and some are mar
   for TOM behaviour; for example, the Power BI compatibility-mode heuristic follows its
   `PowerBiCompatibilityModeHelper`. `bpa` follows its Best Practice Analyzer: the rule format, scopes, ignore
   annotations and the TOMWrapper names that rules use. Its DAX token codes are ported from TE2's lexer.
-- tessera is independent of Tabular Editor ApS and its commercial Tabular Editor 3 and `te` CLI.
+- semctl is independent of Tabular Editor ApS and its commercial Tabular Editor 3 and `te` CLI.
