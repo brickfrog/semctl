@@ -6,7 +6,7 @@
     <WarnOn>$(WarnOn);3390;1182</WarnOn>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Deterministic>true</Deterministic>
-    <Version>0.6.1</Version>
+    <Version>0.7.0</Version>
     <Authors>Justin</Authors>
     <Copyright>Copyright (c) 2026 Justin</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
