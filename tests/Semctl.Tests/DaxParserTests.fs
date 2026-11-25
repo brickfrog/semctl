@@ -102,6 +102,16 @@ let private bounded (what: string) (f: unit -> 'a) : 'a = boundedOn 256 what f
 /// recursing over the tree must fit.
 let private boundedDefault (what: string) (f: unit -> 'a) : 'a = boundedOn 1024 what f
 
+[<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+let rec private withSmallHeadroom (headroom: int) (f: unit -> 'a) : Result<'a, int> =
+    if not (System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack()) then
+        Error headroom
+    else
+        match withSmallHeadroom headroom f with
+        | Error 0 -> Ok(f ())
+        | Error n -> Error(n - 1)
+        | Ok _ as result -> result
+
 /// What every parse must satisfy, whatever the text: it returns, and its errors are usable.
 let private wellBehaved (text: string) =
     let length = if isNull text then 0 else text.Length
@@ -1870,19 +1880,22 @@ let fuzzTests =
         testCase "on a stack too small for the nesting, an error rather than a crash"
         <| fun () ->
             for opener in [ "("; "{"; "F("; "- "; "IF(a, 1 + "; "VAR x = " ] do
+                let input = String.replicate 250 opener + "1"
+
                 boundedOn 160 opener (fun () ->
-                    match parseExpression (String.replicate 250 opener + "1") with
-                    // How much stack a level costs, and the smallest stack a thread can have, differ by
-                    // platform: where 160 KB turns out to be enough (seen on macOS arm64), parsing is fine.
-                    | Ok _ when
-                        not (
-                            System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform
-                                System.Runtime.InteropServices.OSPlatform.Linux
-                        )
-                        ->
-                        ()
-                    | Ok _ -> failtestf "%s parsed" opener
+                    match parseExpression input with
+                    | Ok _ -> ()
                     | Error errors -> Expect.isNonEmpty errors opener)
+
+                boundedOn 256 $"{opener} (headroom)" (fun () ->
+                    match withSmallHeadroom 5 (fun () -> parseExpression input) with
+                    | Ok(Error errors) ->
+                        Expect.exists
+                            errors
+                            (fun e -> e.Message.Contains "this is nested too deeply to read on this thread's stack")
+                            $"{opener}: {messages errors}"
+                    | Ok(Ok _) -> failtestf "%s parsed with small stack headroom" opener
+                    | Error remaining -> failtestf "%s: stack exhausted before headroom (%d)" opener remaining)
 
         testCase "walking a hand-built tree deeper than the stack raises, it does not crash"
         <| fun () ->
