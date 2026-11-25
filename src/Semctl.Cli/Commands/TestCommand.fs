@@ -6,13 +6,13 @@ module Semctl.Cli.TestCommand
 open System
 open System.Diagnostics
 open System.IO
-open System.Security.Cryptography
 open System.Text
 open System.Text.Json
 open System.Text.Json.Nodes
 open System.Xml.Linq
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.TestRun
 open Semctl.Xmla
 open Semctl.Cli.Output
@@ -502,9 +502,6 @@ let private reportJson (r: Report) (findings: Findings.Finding list) : JsonNode 
             ]
     ]
 
-let private plural (n: int) (one: string) (many: string) =
-    if n = 1 then $"1 {one}" else $"{n} {many}"
-
 let private summaryLine (c: Counts) (elapsed: TimeSpan) =
     let parts = [
         if c.Passed > 0 then
@@ -512,7 +509,7 @@ let private summaryLine (c: Counts) (elapsed: TimeSpan) =
         if c.Failed > 0 then
             $"{c.Failed} failed"
         if c.Errored > 0 then
-            plural c.Errored "error" "errors"
+            pluralOf c.Errored "error" "errors"
         if c.Unsupported > 0 then
             $"{c.Unsupported} unsupported"
         if c.Skipped > 0 then
@@ -522,7 +519,7 @@ let private summaryLine (c: Counts) (elapsed: TimeSpan) =
     let seconds =
         elapsed.TotalSeconds.ToString("0.0", Globalization.CultureInfo.InvariantCulture)
 
-    let tests = plural c.Total "test" "tests"
+    let tests = pluralOf c.Total "test" "tests"
 
     if parts.IsEmpty then
         $"{tests} ({seconds} s)"
@@ -562,13 +559,12 @@ let private renderText (out: TextWriter) (r: Report) =
     if r.Invalid.IsEmpty then
         out.WriteLine(summaryLine (count (r.Suites |> List.collect _.Results)) r.Elapsed)
     else
-        out.WriteLine((plural r.Invalid.Length "suite is" "suites are" + " not valid: nothing was run."))
+        out.WriteLine(
+            (pluralOf r.Invalid.Length "suite is" "suites are"
+             + " not valid: nothing was run.")
+        )
 
 // ---- TRX and JUnit ---------------------------------------------------------------------------------
-
-/// A GUID that depends only on the text: a test keeps its id from run to run.
-let private stableGuid (text: string) =
-    Guid(MD5.HashData(Encoding.UTF8.GetBytes text))
 
 let private outcomeMessage (o: TestOutcome) =
     match o with
@@ -578,33 +574,10 @@ let private outcomeMessage (o: TestOutcome) =
     | TestOutcome.Unsupported message -> Some message
     | TestOutcome.Skipped reason -> Some reason
 
-/// Characters XML 1.0 can't hold (control characters, mostly) as U+FFFD.
-let private xmlSafe (s: string) =
-    String(
-        s.ToCharArray()
-        |> Array.map (fun c ->
-            if c = '\t' || c = '\n' || c = '\r' || (c >= ' ' && c <> '￾' && c <> '￿') then
-                c
-            else
-                '�')
-    )
-
 /// Whether an unsupported test counts as a failure in the report files (--strict).
 let private trx (r: Report) (strict: bool) (finished: DateTime) : XDocument =
-    let ns = XNamespace.Get "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
-    let x (name: string) = ns + name
-    let attr (name: string) (value: obj) = XAttribute(XName.Get name, value)
     let iso (d: DateTime) = d.ToString("o")
     let started = finished - r.Elapsed
-    let listId = "8c84fa94-04c1-424b-9868-57a2d4851a1d"
-    let unitTestType = "13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b"
-
-    let tests = [
-        for s in r.Suites do
-            for t in s.Results ->
-                let key = s.Suite.File + "\u0000" + t.Test.Name
-                s, t, stableGuid ("test:" + key), stableGuid ("execution:" + key)
-    ]
 
     let outcomeOf (o: TestOutcome) =
         match o with
@@ -615,111 +588,51 @@ let private trx (r: Report) (strict: bool) (finished: DateTime) : XDocument =
         | TestOutcome.Unsupported _
         | TestOutcome.Skipped _ -> "NotExecuted"
 
-    let all = tests |> List.map (fun (_, t, _, _) -> outcomeOf t.Outcome)
+    let entries: Trx.Entry list = [
+        for s in r.Suites do
+            for t in s.Results ->
+                let key = s.Suite.File + "\u0000" + t.Test.Name
+                let outcome = outcomeOf t.Outcome
 
-    let n (outcome: string) =
-        all |> List.filter ((=) outcome) |> List.length
+                let output =
+                    match outcomeMessage t.Outcome with
+                    | None -> Trx.EntryOutput.None
+                    | Some message when outcome = "NotExecuted" -> Trx.EntryOutput.StdOut message
+                    | Some message -> Trx.EntryOutput.ErrorInfo(message, None)
 
-    let bad = n "Failed" + n "Error" > 0 || not r.Invalid.IsEmpty
+                {
+                    TestName = t.Test.Name
+                    Storage = s.Suite.File
+                    CodeBase = s.Suite.File
+                    AdapterTypeName = "executor://sm/test"
+                    ClassName = s.Suite.Name
+                    MethodName = t.Test.Name
+                    Outcome = outcome
+                    Duration = t.Duration
+                    Output = output
+                    TestId = Trx.stableGuid ("test:" + key)
+                    ExecutionId = Trx.stableGuid ("execution:" + key)
+                }
+    ]
 
-    XDocument(
-        XElement(
-            x "TestRun",
-            attr "id" (stableGuid ("run:" + r.Source + iso finished)),
-            attr "name" $"sm {r.Command}: {r.Source}",
-            XElement(x "Times", attr "creation" (iso started), attr "start" (iso started), attr "finish" (iso finished)),
-            XElement(
-                x "ResultSummary",
-                attr "outcome" (if bad then "Failed" else "Completed"),
-                XElement(
-                    x "Counters",
-                    attr "total" all.Length,
-                    attr "executed" (all.Length - n "NotExecuted"),
-                    attr "passed" (n "Passed"),
-                    attr "failed" (n "Failed"),
-                    attr "error" (n "Error"),
-                    attr "notExecuted" (n "NotExecuted")
-                ),
-                XElement(
-                    x "RunInfos",
-                    [
-                        for (file, issues) in r.Invalid do
-                            for i in issues ->
-                                XElement(
-                                    x "RunInfo",
-                                    attr "computerName" "sm",
-                                    attr "outcome" "Error",
-                                    attr "timestamp" (iso finished),
-                                    XElement(x "Text", xmlSafe $"{file}: {SuiteIssue.format i}")
-                                )
-                    ]
-                )
-            ),
-            XElement(
-                x "TestDefinitions",
-                [
-                    for (s, t, testId, executionId) in tests ->
-                        XElement(
-                            x "UnitTest",
-                            attr "name" (xmlSafe t.Test.Name),
-                            attr "storage" s.Suite.File,
-                            attr "id" testId,
-                            XElement(x "Execution", attr "id" executionId),
-                            XElement(
-                                x "TestMethod",
-                                attr "codeBase" s.Suite.File,
-                                attr "adapterTypeName" "executor://sm/test",
-                                attr "className" (xmlSafe s.Suite.Name),
-                                attr "name" (xmlSafe t.Test.Name)
-                            )
-                        )
-                ]
-            ),
-            XElement(x "TestLists", XElement(x "TestList", attr "name" "Results Not in a List", attr "id" listId)),
-            XElement(
-                x "TestEntries",
-                [
-                    for (_, _, testId, executionId) in tests ->
-                        XElement(
-                            x "TestEntry",
-                            attr "testId" testId,
-                            attr "executionId" executionId,
-                            attr "testListId" listId
-                        )
-                ]
-            ),
-            XElement(
-                x "Results",
-                [
-                    for (_, t, testId, executionId) in tests ->
-                        XElement(
-                            x "UnitTestResult",
-                            attr "executionId" executionId,
-                            attr "testId" testId,
-                            attr "testName" (xmlSafe t.Test.Name),
-                            attr "computerName" "sm",
-                            attr "duration" (t.Duration.ToString "c"),
-                            attr "startTime" (iso started),
-                            attr "endTime" (iso finished),
-                            attr "testType" unitTestType,
-                            attr "outcome" (outcomeOf t.Outcome),
-                            attr "testListId" listId,
-                            [
-                                match outcomeMessage t.Outcome with
-                                | None -> ()
-                                | Some message when outcomeOf t.Outcome = "NotExecuted" ->
-                                    XElement(x "Output", XElement(x "StdOut", xmlSafe message))
-                                | Some message ->
-                                    XElement(
-                                        x "Output",
-                                        XElement(x "ErrorInfo", XElement(x "Message", xmlSafe message))
-                                    )
-                            ]
-                        )
-                ]
-            )
-        )
-    )
+    let runInfos: Trx.RunInfo list = [
+        for file, issues in r.Invalid do
+            for i in issues ->
+                {
+                    Timestamp = finished
+                    Text = $"{file}: {SuiteIssue.format i}"
+                }
+    ]
+
+    Trx.document {
+        RunId = Trx.stableGuid ("run:" + r.Source + iso finished)
+        RunName = $"sm {r.Command}: {r.Source}"
+        Started = started
+        Finished = finished
+        ComputerName = "sm"
+        Entries = entries
+        RunInfos = runInfos
+    }
 
 let private junit (r: Report) (strict: bool) : XDocument =
     let attr (name: string) (value: obj) = XAttribute(XName.Get name, value)
@@ -769,7 +682,7 @@ let private junit (r: Report) (strict: bool) : XDocument =
                                 XName.Get "error",
                                 attr "type" "TEST_SUITE_INVALID",
                                 attr "message" "the suite is not valid",
-                                xmlSafe (issues |> List.map SuiteIssue.format |> String.concat "\n")
+                                Trx.xmlSafe (issues |> List.map SuiteIssue.format |> String.concat "\n")
                             )
                         )
                     )
@@ -777,7 +690,7 @@ let private junit (r: Report) (strict: bool) : XDocument =
                 for s in r.Suites ->
                     XElement(
                         XName.Get "testsuite",
-                        attr "name" (xmlSafe s.Suite.Name),
+                        attr "name" (Trx.xmlSafe s.Suite.Name),
                         attr "file" s.Suite.File,
                         attr "tests" s.Results.Length,
                         attr "failures" (failures s.Results),
@@ -788,8 +701,8 @@ let private junit (r: Report) (strict: bool) : XDocument =
                             for t in s.Results ->
                                 XElement(
                                     XName.Get "testcase",
-                                    attr "name" (xmlSafe t.Test.Name),
-                                    attr "classname" (xmlSafe s.Suite.Name),
+                                    attr "name" (Trx.xmlSafe t.Test.Name),
+                                    attr "classname" (Trx.xmlSafe s.Suite.Name),
                                     attr "time" (seconds t.Duration),
                                     [
                                         match t.Outcome with
@@ -798,26 +711,26 @@ let private junit (r: Report) (strict: bool) : XDocument =
                                             XElement(
                                                 XName.Get "failure",
                                                 attr "type" "TEST_FAIL",
-                                                attr "message" (xmlSafe message),
-                                                xmlSafe (String.concat "\n" (message :: details))
+                                                attr "message" (Trx.xmlSafe message),
+                                                Trx.xmlSafe (String.concat "\n" (message :: details))
                                             )
                                         | TestOutcome.Errored(code, message) ->
                                             XElement(
                                                 XName.Get "error",
                                                 attr "type" code,
-                                                attr "message" (xmlSafe message),
-                                                xmlSafe message
+                                                attr "message" (Trx.xmlSafe message),
+                                                Trx.xmlSafe message
                                             )
                                         | TestOutcome.Unsupported message when strict ->
                                             XElement(
                                                 XName.Get "failure",
                                                 attr "type" "TEST_UNSUPPORTED",
-                                                attr "message" (xmlSafe message),
-                                                xmlSafe message
+                                                attr "message" (Trx.xmlSafe message),
+                                                Trx.xmlSafe message
                                             )
                                         | TestOutcome.Unsupported message
                                         | TestOutcome.Skipped message ->
-                                            XElement(XName.Get "skipped", attr "message" (xmlSafe message))
+                                            XElement(XName.Get "skipped", attr "message" (Trx.xmlSafe message))
                                     ]
                                 )
                         ]
@@ -1246,18 +1159,18 @@ let private snapshot (ctx: Ctx) (args: ParseResults<SnapshotArgs>) =
                         elif changed = 0 then
                             ctx.Out.WriteLine "The snapshots are up to date."
                         elif save then
-                            ctx.Out.WriteLine(("Recorded: " + plural changed "snapshot" "snapshots" + " changed."))
+                            ctx.Out.WriteLine(("Recorded: " + pluralOf changed "snapshot" "snapshots" + " changed."))
                         else
                             ctx.Out.WriteLine(
                                 "Dry run: "
-                                + plural changed "snapshot" "snapshots"
+                                + pluralOf changed "snapshot" "snapshots"
                                 + " would change (a difference reads: now, expected what is recorded). Use --save to record."
                             )
 
                         if notRecorded > 0 then
                             ctx.Err.WriteLine(
                                 "sm: "
-                                + plural notRecorded "snapshot" "snapshots"
+                                + pluralOf notRecorded "snapshot" "snapshots"
                                 + " could not be recorded (see above)."
                             )
 
@@ -1365,7 +1278,7 @@ let private init (ctx: Ctx) (args: ParseResults<InitArgs>) =
                     if ctx.Json then
                         writeJson ctx.Out (obj [ "command", str "test init"; "file", str output; "tests", num tests ])
                     else
-                        ctx.Out.WriteLine(("Wrote " + output + ": " + plural tests "test" "tests" + "."))
+                        ctx.Out.WriteLine(("Wrote " + output + ": " + pluralOf tests "test" "tests" + "."))
 
                     Done
                 with

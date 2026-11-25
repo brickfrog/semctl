@@ -2,12 +2,10 @@ module Semctl.Cli.BpaCommand
 
 open System
 open System.IO
-open System.Security.Cryptography
-open System.Text
 open System.Text.Json.Nodes
-open System.Xml.Linq
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.BpaRules
 open Semctl.Cli.Output
 open Semctl.Cli.Common
@@ -211,9 +209,6 @@ let private resultsJson
         ]
     ]
 
-let private plural (n: int) (word: string) =
-    if n = 1 then $"{n} {word}" else $"{n} {word}s"
-
 /// severity  ref  ruleId  rule name, then a summary line. Problems with rules go to stderr.
 let private resultsText (ctx: Ctx) (results: Bpa.RuleResult list) =
     for rule, stage, error in problems results do
@@ -275,28 +270,14 @@ let private rulesText (out: TextWriter) (rules: (Rule * Result<unit, string>) li
         out.WriteLine
             $"{r.Id.PadRight width}  {r.Severity}  {r.Category}  {r.Name}  ({scopesText r}; {RuleSource.describe r.Source}){status}"
 
-/// A stable GUID for a string, so a rule keeps its test id across runs.
-let private guidOf (s: string) =
-    Guid(MD5.HashData(Encoding.UTF8.GetBytes s))
-
 /// The results as a VSTest results file: one test per rule.
 let trx (modelPath: string) (started: DateTime) (results: Bpa.RuleResult list) =
-    let ns = XNamespace.Get "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
-
-    let el (name: string) (content: obj list) =
-        XElement(ns + name, Array.ofList content)
-
-    let at (name: string) (value: obj) =
-        XAttribute(XName.Get name, value) :> obj
-
-    let listId = "8c84fa94-04c1-424b-9868-57a2d4851a1d"
-    let unitTestType = "13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b"
-    let time (d: DateTime) = d.ToString("o")
     let finished = DateTime.Now
+    let timestamp = started.ToString("o")
 
     let outcome (r: Bpa.RuleResult) =
         match r.Status with
-        | Bpa.Evaluated when r.Findings.IsEmpty -> "Passed", None
+        | Bpa.Evaluated when r.Findings.IsEmpty -> "Passed", Trx.EntryOutput.None
         | Bpa.Evaluated ->
             let objects =
                 r.Findings
@@ -304,110 +285,41 @@ let trx (modelPath: string) (started: DateTime) (results: Bpa.RuleResult list) =
                 |> String.concat "\n"
 
             let count = plural r.Findings.Length "object"
-            "Failed", Some($"{count} in violation of rule \"{r.Rule.Name}\"", objects)
-        | Bpa.Unsupported e -> "Inconclusive", Some($"Rule not supported: {e}", "")
-        | Bpa.Failed e -> "Inconclusive", Some($"Rule failed: {e}", "")
-        | Bpa.Skipped level -> "NotExecuted", Some($"Rule needs compatibility level {level}", "")
-        | Bpa.Disabled -> "NotExecuted", Some("Rule ignored by the model's annotation", "")
+            "Failed", Trx.EntryOutput.ErrorInfo($"{count} in violation of rule \"{r.Rule.Name}\"", Some objects)
+        | Bpa.Unsupported e -> "Inconclusive", Trx.EntryOutput.ErrorInfo($"Rule not supported: {e}", Some "")
+        | Bpa.Failed e -> "Inconclusive", Trx.EntryOutput.ErrorInfo($"Rule failed: {e}", Some "")
+        | Bpa.Skipped level ->
+            "NotExecuted", Trx.EntryOutput.ErrorInfo($"Rule needs compatibility level {level}", Some "")
+        | Bpa.Disabled -> "NotExecuted", Trx.EntryOutput.ErrorInfo("Rule ignored by the model's annotation", Some "")
 
-    let rows =
-        results
-        |> List.map (fun r ->
-            let testId = guidOf ("test:" + r.Rule.Id)
-            let executionId = guidOf ("execution:" + r.Rule.Id + time started)
-            r, testId, executionId, outcome r)
+    let entries: Trx.Entry list = [
+        for r in results ->
+            let o, output = outcome r
 
-    let count o =
-        rows |> List.filter (fun (_, _, _, (x, _)) -> x = o) |> List.length
+            {
+                TestName = $"{r.Rule.Id}: {r.Rule.Name}"
+                Storage = modelPath
+                CodeBase = modelPath
+                AdapterTypeName = "executor://semctl/bpa"
+                ClassName = if r.Rule.Category = "" then "BPA" else r.Rule.Category
+                MethodName = r.Rule.Id
+                Outcome = o
+                Duration = TimeSpan.Zero
+                Output = output
+                TestId = Trx.stableGuid ("test:" + r.Rule.Id)
+                ExecutionId = Trx.stableGuid ("execution:" + r.Rule.Id + timestamp)
+            }
+    ]
 
-    let failed = count "Failed"
-
-    let doc: XDocument =
-        XDocument(
-            XDeclaration("1.0", "utf-8", null),
-            box (
-                el "TestRun" [
-                    at "id" (Guid.NewGuid())
-                    at "name" $"sm bpa {Path.GetFileName modelPath}"
-                    el "Times" [
-                        at "creation" (time started)
-                        at "queuing" (time started)
-                        at "start" (time started)
-                        at "finish" (time finished)
-                    ]
-                    el "Results" [
-                        for r, testId, executionId, (o, info) in rows ->
-                            el "UnitTestResult" [
-                                at "executionId" executionId
-                                at "testId" testId
-                                at "testName" $"{r.Rule.Id}: {r.Rule.Name}"
-                                at "computerName" Environment.MachineName
-                                at "duration" "00:00:00"
-                                at "startTime" (time started)
-                                at "endTime" (time finished)
-                                at "testType" unitTestType
-                                at "outcome" o
-                                at "testListId" listId
-                                match info with
-                                | Some(message, details) ->
-                                    el "Output" [
-                                        el "ErrorInfo" [ el "Message" [ message ]; el "StackTrace" [ details ] ]
-                                    ]
-                                | None -> ()
-                            ]
-                    ]
-                    el "TestDefinitions" [
-                        for r, testId, executionId, _ in rows ->
-                            el "UnitTest" [
-                                at "name" $"{r.Rule.Id}: {r.Rule.Name}"
-                                at "storage" modelPath
-                                at "id" testId
-                                el "Execution" [ at "id" executionId ]
-                                el "TestMethod" [
-                                    at "codeBase" modelPath
-                                    at "adapterTypeName" "executor://semctl/bpa"
-                                    at "className" (if r.Rule.Category = "" then "BPA" else r.Rule.Category)
-                                    at "name" r.Rule.Id
-                                ]
-                            ]
-                    ]
-                    el "TestEntries" [
-                        for _, testId, executionId, _ in rows ->
-                            el "TestEntry" [ at "testId" testId; at "executionId" executionId; at "testListId" listId ]
-                    ]
-                    el "TestLists" [
-                        el "TestList" [ at "name" "Results Not in a List"; at "id" listId ]
-                        el "TestList" [
-                            at "name" "All Loaded Results"
-                            at "id" "19431567-8539-422a-85d7-44ee4e166bda"
-                        ]
-                    ]
-                    el "ResultSummary" [
-                        at "outcome" (if failed > 0 then "Failed" else "Completed")
-                        el "Counters" [
-                            at "total" rows.Length
-                            at "executed" (rows.Length - count "NotExecuted")
-                            at "passed" (count "Passed")
-                            at "failed" failed
-                            at "error" 0
-                            at "timeout" 0
-                            at "aborted" 0
-                            at "inconclusive" (count "Inconclusive")
-                            at "passedButRunAborted" 0
-                            at "notRunnable" 0
-                            at "notExecuted" (count "NotExecuted")
-                            at "disconnected" 0
-                            at "warning" 0
-                            at "completed" 0
-                            at "inProgress" 0
-                            at "pending" 0
-                        ]
-                    ]
-                ]
-            )
-        )
-
-    doc.Declaration.ToString() + "\n" + doc.ToString()
+    Trx.render {
+        RunId = Guid.NewGuid()
+        RunName = $"sm bpa {Path.GetFileName modelPath}"
+        Started = started
+        Finished = finished
+        ComputerName = Environment.MachineName
+        Entries = entries
+        RunInfos = []
+    }
 
 /// The results as SARIF: the rules that ran, every finding, and the rules that couldn't run as
 /// notifications. Findings ignored by annotations are left out, as they are from "findings" (code
@@ -486,8 +398,9 @@ let private fixEffect (unfixable: int) (result: BpaFix.FixResult) : Semctl.Mutat
                 // One line per rule and reason.
                 for (id, reason), outcomes in
                     BpaFix.FixResult.refused result
-                    |> List.groupBy (fun o -> o.Finding.Rule.Id, o.Refused.Value) do
-                    let refs = outcomes |> List.map (fun o -> ObjectRef.format o.Finding.Ref)
+                    |> List.choose (fun o -> o.Refused |> Option.map (fun reason -> o, reason))
+                    |> List.groupBy (fun (o, reason) -> o.Finding.Rule.Id, reason) do
+                    let refs = outcomes |> List.map (fun (o, _) -> ObjectRef.format o.Finding.Ref)
 
                     let where =
                         match refs with

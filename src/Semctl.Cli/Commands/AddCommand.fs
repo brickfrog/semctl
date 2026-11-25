@@ -4,6 +4,7 @@ open System
 open Argu
 open Microsoft.AnalysisServices.Tabular
 open Semctl
+open Semctl.Prelude
 open Semctl.AddObject
 open Semctl.Cli.Common
 
@@ -322,42 +323,38 @@ let private details (args: ParseResults<Args>) (kind: ObjectKind) : Result<Detai
                     dataType t
                     |> Result.map (fun t -> Details.Column(ColumnSource.Data(t, args.TryGetResult Args.Source_Column))))
     | ObjectKind.Table ->
-        Result.bind
-            (fun dax ->
-                Result.bind
-                    (fun m ->
-                        let group = args.Contains Args.Calculation_Group
+        result {
+            let! dax = dax
+            let! m = m
+            let group = args.Contains Args.Calculation_Group
 
-                        match dax, m, group with
-                        | Some e, None, false when not (args.Contains Args.Mode) ->
-                            Ok(Details.Table(TableSource.Calculated e))
-                        | None, Some m, false ->
-                            opt mode (args.TryGetResult Args.Mode)
-                            |> Result.map (fun mode ->
-                                Details.Table(TableSource.M(m, defaultArg mode ModeType.Import)))
-                        | None, None, true when not (args.Contains Args.Mode) ->
-                            Ok(
-                                Details.Table(
-                                    TableSource.CalculationGroup(
-                                        args.TryGetResult Args.Precedence,
-                                        args.TryGetResult Args.Column
-                                    )
-                                )
+            let! d =
+                match dax, m, group with
+                | Some e, None, false when not (args.Contains Args.Mode) -> Ok(Details.Table(TableSource.Calculated e))
+                | None, Some m, false ->
+                    opt mode (args.TryGetResult Args.Mode)
+                    |> Result.map (fun mode -> Details.Table(TableSource.M(m, defaultArg mode ModeType.Import)))
+                | None, None, true when not (args.Contains Args.Mode) ->
+                    Ok(
+                        Details.Table(
+                            TableSource.CalculationGroup(
+                                args.TryGetResult Args.Precedence,
+                                args.TryGetResult Args.Column
                             )
-                        | Some _, None, false -> Error "--mode applies to M tables (-m); a calculated table is import"
-                        | None, None, true -> Error "--mode doesn't apply to a calculation group"
-                        | None, None, false ->
-                            Error
-                                "adding a table needs one of -e <DAX> (calculated), -m <M> (import) or --calculation-group"
-                        | _ -> Error "use only one of -e, -m and --calculation-group")
-                    m)
-            dax
-        |> Result.bind (fun d ->
+                        )
+                    )
+                | Some _, None, false -> Error "--mode applies to M tables (-m); a calculated table is import"
+                | None, None, true -> Error "--mode doesn't apply to a calculation group"
+                | None, None, false ->
+                    Error "adding a table needs one of -e <DAX> (calculated), -m <M> (import) or --calculation-group"
+                | _ -> Error "use only one of -e, -m and --calculation-group"
+
             match d with
-            | Details.Table(TableSource.CalculationGroup _) -> Ok d
+            | Details.Table(TableSource.CalculationGroup _) -> return d
             | _ when args.Contains Args.Precedence || args.Contains Args.Column ->
-                Error "--precedence and --column apply to calculation groups (--calculation-group)"
-            | _ -> Ok d)
+                return! Error "--precedence and --column apply to calculation groups (--calculation-group)"
+            | _ -> return d
+        }
     | ObjectKind.Hierarchy ->
         match parseList (args.GetResults Args.Levels) with
         | [] -> Error "adding a hierarchy needs --levels <column,column,...>"

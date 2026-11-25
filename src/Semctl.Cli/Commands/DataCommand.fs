@@ -5,6 +5,7 @@ open System.IO
 open System.Text.Json.Nodes
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.Validate
 open Semctl.Cli.Output
 open Semctl.Cli.Common
@@ -460,35 +461,34 @@ let private embed (ctx: Ctx) (args: ParseResults<EmbedArgs>) =
     match target with
     | Error message -> UsageError message
     | Ok(format, destination) ->
-        let result =
-            ModelIO.loadPath model
-            |> Result.bind (fun (source, db) ->
-                Fixture.loadAndCheck db directory
-                |> Result.bind (fun (loaded, issues) ->
-                    // Invalid values are BLANK in the store: embedding them would deploy other data
-                    // than the fixture says.
+        let runEmbed =
+            result {
+                let! source, db = ModelIO.loadPath model
+                let! loaded, issues = Fixture.loadAndCheck db directory
+
+                // Invalid values are BLANK in the store: embedding them would deploy other data
+                // than the fixture says.
+                do!
                     match issues |> List.filter (fun i -> i.Severity = Severity.Error) with
-                    | [] -> Ok loaded
+                    | [] -> Ok()
                     | errors ->
-                        let n =
-                            if errors.Length = 1 then
-                                "1 error"
-                            else
-                                $"{errors.Length} errors"
-
+                        let n = plural errors.Length "error"
                         Error(InvalidFixture(loaded.Directory, $"it has {n}; run `sm data check` to see them"))
-                    |> Result.bind (fun loaded ->
-                        FixtureEmbed.embed db loaded.Store
-                        |> Result.bind (fun embedded ->
-                            let opts = {
-                                ModelIO.SaveOptions.defaults with
-                                    Eol = ModelIO.Eol.resolveAuto source.Path destination
-                            }
 
-                            ModelIO.save format opts (args.Contains EmbedArgs.Force) embedded.Database destination
-                            |> Result.map (fun saved -> loaded, embedded, saved)))))
+                let! embedded = FixtureEmbed.embed db loaded.Store
 
-        match result with
+                let opts = {
+                    ModelIO.SaveOptions.defaults with
+                        Eol = ModelIO.Eol.resolveAuto source.Path destination
+                }
+
+                let! saved =
+                    ModelIO.save format opts (args.Contains EmbedArgs.Force) embedded.Database destination
+
+                return loaded, embedded, saved
+            }
+
+        match runEmbed with
         | Error e -> Failed e
         | Ok(loaded, embedded, saved) ->
             if ctx.Json then

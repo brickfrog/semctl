@@ -21,6 +21,7 @@ open System.Text
 open System.Text.Json.Nodes
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.Cli.Output
 open Semctl.Cli.Common
 open Semctl.Cli.Staging
@@ -206,9 +207,6 @@ type Options = {
     HistoryFile: string option
 }
 
-let private plural n (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
-
 /// Commands the session doesn't run: they'd take over its input or never return.
 let private refusedCommands =
     Map.ofList [
@@ -244,7 +242,7 @@ type private State = {
     Input: string
     Model: StagedModel
     Source: LineSource
-    mutable History: string list
+    History: ResizeArray<string>
 }
 
 let private name (s: State) =
@@ -284,7 +282,7 @@ let private status (s: State) (json: bool) =
     let files = m.Files |> Map.toList |> List.map snd
 
     if json then
-        let o = Changes.changesJson "status" changes :?> JsonObject
+        let o = Changes.changesJson "status" changes
         o.["model"] <- str m.Source.Path
         o.["format"] <- str (ModelFormat.token m.Source.Format)
         o.["unsavedChanges"] <- num m.Unsaved
@@ -552,7 +550,7 @@ let private run1 (s: State) (line: string) : Next =
         | _ -> Next.Continue(command s (word :: rest))
 
 let private remember (s: State) (line: string) =
-    s.History <- s.History @ [ line ]
+    s.History.Add line
 
     match s.Options.HistoryFile with
     | Some file ->
@@ -579,13 +577,13 @@ let runSession
         Input = input
         Model = StagedModel.create source db
         Source = lines
-        History = []
+        History = ResizeArray()
     }
 
     match options.HistoryFile with
     | Some file when File.Exists file ->
         try
-            s.History <- File.ReadAllLines file |> Array.filter (fun l -> l <> "") |> List.ofArray
+            s.History.AddRange(File.ReadAllLines file |> Array.filter (fun l -> l <> ""))
         with e ->
             ctx.Err.WriteLine($"sm: warning: can't read the history file {file}: {e.Message}")
     | _ -> ()
@@ -596,7 +594,7 @@ let runSession
 
     // A failure of piped input in batch mode ends the run with its code; otherwise the run's code is 0.
     let rec loop () =
-        match lines.Read (prompt s) s.History with
+        match lines.Read (prompt s) (List.ofSeq s.History) with
         | LineEditor.Read.Cancelled -> loop ()
         | LineEditor.Read.EndOfInput ->
             match leave s false with

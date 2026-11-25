@@ -18,6 +18,7 @@
     <Compile Include="Connections.fs" />
     <Compile Include="Findings.fs" />
     <Compile Include="Sarif.fs" />
+    <Compile Include="Trx.fs" />
     <Compile Include="Changes.fs" />
     <Compile Include="Staging.fs" />
     <Compile Include="Mutation.fs" />

@@ -2,6 +2,7 @@ module Semctl.Cli.RenameCommand
 
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.Inventory
 open Semctl.Rename
 open Semctl.Cli.Common
@@ -33,9 +34,6 @@ let private counts (p: RenamePlan) =
     let objects = expressions |> List.map (fun e -> e.Owner.Ref) |> List.distinct
     let sourceColumns = (RenamePlan.sourceColumnEdits p).Length
     expressions.Length, objects.Length, sourceColumns, p.Edits.Length - expressions.Length - sourceColumns
-
-let private plural n (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
 
 let private updatedText (p: RenamePlan) =
     let expressions, objects, sourceColumns, annotations = counts p

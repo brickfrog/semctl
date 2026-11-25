@@ -12,6 +12,8 @@ let jsonOptions =
 
 let str (s: string) : JsonNode = JsonValue.Create s
 let num (n: int) : JsonNode = JsonValue.Create n
+let num64 (n: int64) : JsonNode = JsonValue.Create n
+let numFloat (n: float) : JsonNode = JsonValue.Create n
 let bool (b: bool) : JsonNode = JsonValue.Create b
 
 /// An optional string: absent (a null node, which `obj` leaves out) when None.
@@ -20,9 +22,8 @@ let optStr =
     | Some s -> str s
     | None -> null
 
-/// A JSON object. A key whose value is null is left out: sm (like the Tabular Editor CLI) omits
-/// absent values rather than writing `null`. Where null is itself the value, use objWithNulls.
-let obj (props: (string * JsonNode) list) : JsonNode =
+/// Like `obj`, returning the strongly-typed `JsonObject` directly.
+let jsonObj (props: (string * JsonNode) list) : JsonObject =
     let o = JsonObject()
 
     for k, v in props do
@@ -31,15 +32,22 @@ let obj (props: (string * JsonNode) list) : JsonNode =
 
     o
 
-/// A JSON object that keeps null values: for a property that holds no value (`get --properties`,
-/// a change's before/after), where `null` is the value rather than a missing one.
-let objWithNulls (props: (string * JsonNode) list) : JsonNode =
+/// A JSON object. A key whose value is null is left out: sm (like the Tabular Editor CLI) omits
+/// absent values rather than writing `null`. Where null is itself the value, use objWithNulls.
+let obj (props: (string * JsonNode) list) : JsonNode = jsonObj props
+
+/// Like `objWithNulls`, returning the strongly-typed `JsonObject` directly.
+let jsonObjWithNulls (props: (string * JsonNode) list) : JsonObject =
     let o = JsonObject()
 
     for k, v in props do
         o.[k] <- v
 
     o
+
+/// A JSON object that keeps null values: for a property that holds no value (`get --properties`,
+/// a change's before/after), where `null` is the value rather than a missing one.
+let objWithNulls (props: (string * JsonNode) list) : JsonNode = jsonObjWithNulls props
 
 let arr (items: JsonNode seq) : JsonNode = JsonArray(Array.ofSeq items)
 

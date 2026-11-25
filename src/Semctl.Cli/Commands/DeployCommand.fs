@@ -6,6 +6,7 @@ open System.IO
 open System.Text.Json.Nodes
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.Xmla
 open Semctl.Cli.Output
 open Semctl.Cli.Common
@@ -70,9 +71,8 @@ type private Outcome' = {
     ServerMessages: string list
 }
 
-let private resultJson (dryRun: bool) (r: Outcome') : JsonNode =
-    let o =
-        Changes.changesJson "deploy" (ChangeSet.ofDiff r.Plan.Changes) :?> JsonObject
+let private resultJson (dryRun: bool) (r: Outcome') : JsonObject =
+    let o = Changes.changesJson "deploy" (ChangeSet.ofDiff r.Plan.Changes)
 
     o.["server"] <- str r.Address.DataSource
     o.["database"] <- str r.Plan.Database
@@ -141,77 +141,78 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             && (match XmlaAddress.parse model with
                 | Ok s ->
                     XmlaAddress.sameServer s a
-                    && s.Database
-                       |> Option.exists (fun d ->
-                           System.String.Equals(d, a.Database.Value, System.StringComparison.OrdinalIgnoreCase))
+                    && match s.Database, a.Database with
+                       | Some d, Some targetDb ->
+                           System.String.Equals(d, targetDb, System.StringComparison.OrdinalIgnoreCase)
+                       | _ -> false
                 | Error _ -> false)
 
         let result =
-            address
-            |> Result.bind (fun address ->
+            result {
+                let! address = address
+
                 if sameAsSource address then
-                    Error(RemoteSourceUnsupported(model, "it is the database being deployed to"))
+                    return! Error(RemoteSourceUnsupported(model, "it is the database being deployed to"))
                 else
-                    Source.load ctx model
-                    |> Result.bind (fun (_, local) ->
+                    let! _, local = Source.load ctx model
+
+                    return!
                         Remote.withConnection (Source.access ctx) address (fun c ->
-                            let name = address.Database.Value
+                            result {
+                                let name = Option.defaultValue "" address.Database
+                                let! server = Remote.serverProperties c
+                                let! existing = Remote.findDatabase c name
 
-                            Remote.serverProperties c
-                            |> Result.bind (fun server ->
-                                Remote.findDatabase c name
-                                |> Result.bind (fun existing ->
-                                    let deployed =
-                                        match existing with
-                                        | Some d -> Remote.readDatabase c d.Name |> Result.map Some
-                                        | None -> Ok None
+                                let! deployed =
+                                    match existing with
+                                    | Some d -> Remote.readDatabase c d.Name |> Result.map Some
+                                    | None -> Ok None
 
-                                    deployed
-                                    |> Result.bind (fun deployed ->
-                                        let target: Deploy.Target = {
-                                            // An existing database keeps its exact name.
-                                            Database = existing |> Option.map _.Name |> Option.defaultValue name
-                                            Deployed = deployed
-                                            CompatibilityMode = server.CompatibilityMode
-                                            SupportedCompatibilityLevels = server.SupportedCompatibilityLevels
-                                        }
+                                let target: Deploy.Target = {
+                                    // An existing database keeps its exact name.
+                                    Database = existing |> Option.map _.Name |> Option.defaultValue name
+                                    Deployed = deployed
+                                    CompatibilityMode = server.CompatibilityMode
+                                    SupportedCompatibilityLevels = server.SupportedCompatibilityLevels
+                                }
 
-                                        SaveGate.deployPlan opts diffOptions target local
-                                        |> Result.mapError (function
-                                            | DeployFailed(_, database, messages) ->
-                                                DeployFailed(address.DataSource, database, messages)
-                                            | e -> e)
-                                        |> Result.bind (fun plan ->
-                                            let refused =
-                                                if not execute then
-                                                    None
-                                                elif not plan.Creates && not (args.Contains Overwrite) then
-                                                    Some(DatabaseExists(address.DataSource, plan.Database))
-                                                elif
-                                                    not plan.IntroducedErrors.IsEmpty
-                                                    && not (args.Contains Force)
-                                                then
-                                                    Some(DeployIntroducesErrors plan.IntroducedErrors.Length)
-                                                else
-                                                    None
+                                let! plan =
+                                    SaveGate.deployPlan opts diffOptions target local
+                                    |> Result.mapError (function
+                                        | DeployFailed(_, database, messages) ->
+                                            DeployFailed(address.DataSource, database, messages)
+                                        | e -> e)
 
-                                            let outcome = {
-                                                Address = address
-                                                Plan = plan
-                                                Refused = refused
-                                                Deployed = false
-                                                ServerMessages = []
-                                            }
+                                let refused =
+                                    if not execute then
+                                        None
+                                    elif not plan.Creates && not (args.Contains Overwrite) then
+                                        Some(DatabaseExists(address.DataSource, plan.Database))
+                                    elif not plan.IntroducedErrors.IsEmpty && not (args.Contains Force) then
+                                        Some(DeployIntroducesErrors plan.IntroducedErrors.Length)
+                                    else
+                                        None
 
-                                            if execute && refused.IsNone then
-                                                Remote.execute c plan.Database plan.Tmsl
-                                                |> Result.map (fun messages -> {
-                                                    outcome with
-                                                        Deployed = true
-                                                        ServerMessages = messages
-                                                })
-                                            else
-                                                Ok outcome)))))))
+                                let outcome = {
+                                    Address = address
+                                    Plan = plan
+                                    Refused = refused
+                                    Deployed = false
+                                    ServerMessages = []
+                                }
+
+                                if execute && refused.IsNone then
+                                    let! messages = Remote.execute c plan.Database plan.Tmsl
+
+                                    return {
+                                        outcome with
+                                            Deployed = true
+                                            ServerMessages = messages
+                                    }
+                                else
+                                    return outcome
+                            })
+            }
 
         match result with
         | Error e -> Failed e

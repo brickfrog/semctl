@@ -41,8 +41,8 @@ let summaryJson (s: Summary) =
     ]
 
 /// {command, summary, changes[]} plus command-specific keys.
-let changesJson (command: string) (changes: ObjectChange list) =
-    obj [
+let changesJson (command: string) (changes: ObjectChange list) : JsonObject =
+    jsonObj [
         "command", str command
         "summary", summaryJson (summarize changes)
         "changes", arr (changes |> List.map changeJson)
@@ -51,7 +51,7 @@ let changesJson (command: string) (changes: ObjectChange list) =
 let private quote (v: string option) =
     match v with
     | None -> "(none)"
-    | Some s -> JsonSerializer.Serialize(s, jsonOptions |> fun o -> JsonSerializerOptions(o, WriteIndented = false))
+    | Some s -> JsonSerializer.Serialize(s, Semctl.Prelude.relaxedJsonOptions)
 
 /// Changed lines with this many unchanged lines of context around them.
 let private context = 2

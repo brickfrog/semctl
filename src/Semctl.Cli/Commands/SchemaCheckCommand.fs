@@ -4,11 +4,9 @@ module Semctl.Cli.SchemaCheckCommand
 
 open System
 open System.IO
-open System.Security.Cryptography
-open System.Text
-open System.Xml.Linq
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.SchemaCheck
 open Semctl.Cli.Output
 open Semctl.Cli.Common
@@ -64,9 +62,6 @@ let private toSeverity =
 
 let toFinding (i: Issue) : Findings.Finding =
     Findings.about i.Ref (toSeverity i.Severity) "schemaCheck" i.Code i.Message
-
-let private plural (n: int) (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
 
 let private statusToken =
     function
@@ -161,136 +156,54 @@ let reportText (out: TextWriter) (r: Report) =
 
 // ---- TRX --------------------------------------------------------------------------------------------
 
-let private guidOf (s: string) =
-    Guid(MD5.HashData(Encoding.UTF8.GetBytes s))
-
 /// One result per finding (as the Tabular Editor CLI writes it), plus a passed result for each table
 /// checked without one. Errors fail; warnings are `Warning`; info (a skipped table) is NotExecuted.
 let trx (modelPath: string) (started: DateTime) (r: Report) : string =
-    let ns = XNamespace.Get "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
-
-    let el (name: string) (content: obj list) =
-        XElement(ns + name, Array.ofList content)
-
-    let at (name: string) (value: obj) =
-        XAttribute(XName.Get name, value) :> obj
-
-    let listId = "8c84fa94-04c1-424b-9868-57a2d4851a1d"
-    let unitTestType = "13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b"
-    let time (d: DateTime) = d.ToString("o")
     let finished = DateTime.Now
+    let timestamp = started.ToString("o")
 
-    let rows = [
+    let entries: Trx.Entry list = [
         for t in r.Tables do
-            if t.Issues.IsEmpty then
-                $"{t.Table}: schema matches", t.Table, "Passed", None
-            else
-                for n, i in List.indexed t.Issues do
-                    let outcome =
-                        match i.Severity with
-                        | Severity.Error -> "Failed"
-                        | Severity.Warning -> "Warning"
-                        | Severity.Info -> "NotExecuted"
+            let rows =
+                if t.Issues.IsEmpty then
+                    [ $"{t.Table}: schema matches", "Passed", Trx.EntryOutput.None ]
+                else
+                    [
+                        for n, i in List.indexed t.Issues ->
+                            let outcome =
+                                match i.Severity with
+                                | Severity.Error -> "Failed"
+                                | Severity.Warning -> "Warning"
+                                | Severity.Info -> "NotExecuted"
 
-                    $"{t.Table}: {i.Code} #{n + 1}", t.Table, outcome, Some i.Message
+                            $"{t.Table}: {i.Code} #{n + 1}", outcome, Trx.EntryOutput.ErrorInfo(i.Message, None)
+                    ]
+
+            for name, outcome, output in rows ->
+                {
+                    TestName = name
+                    Storage = modelPath
+                    CodeBase = modelPath
+                    AdapterTypeName = "executor://semctl/schemacheck"
+                    ClassName = "SchemaCheck"
+                    MethodName = t.Table
+                    Outcome = outcome
+                    Duration = TimeSpan.Zero
+                    Output = output
+                    TestId = Trx.stableGuid ("test:" + name)
+                    ExecutionId = Trx.stableGuid ("execution:" + name + timestamp)
+                }
     ]
 
-    let rows =
-        rows
-        |> List.map (fun (name, table, outcome, message) ->
-            name, table, outcome, message, guidOf ("test:" + name), guidOf ("execution:" + name + time started))
-
-    let count o =
-        rows |> List.filter (fun (_, _, x, _, _, _) -> x = o) |> List.length
-
-    let summaryOutcome =
-        if count "Failed" > 0 then "Failed"
-        elif count "Warning" > 0 then "Warning"
-        else "Completed"
-
-    let doc =
-        XDocument(
-            XDeclaration("1.0", "utf-8", null),
-            box (
-                el "TestRun" [
-                    at "id" (Guid.NewGuid())
-                    at "name" $"sm schemacheck {Path.GetFileName modelPath}"
-                    el "Times" [
-                        at "creation" (time started)
-                        at "queuing" (time started)
-                        at "start" (time started)
-                        at "finish" (time finished)
-                    ]
-                    el "Results" [
-                        for name, _, outcome, message, testId, executionId in rows ->
-                            el "UnitTestResult" [
-                                at "executionId" executionId
-                                at "testId" testId
-                                at "testName" name
-                                at "computerName" Environment.MachineName
-                                at "duration" "00:00:00"
-                                at "startTime" (time started)
-                                at "endTime" (time finished)
-                                at "testType" unitTestType
-                                at "outcome" outcome
-                                at "testListId" listId
-                                match message with
-                                | Some m -> el "Output" [ el "ErrorInfo" [ el "Message" [ m ] ] ]
-                                | None -> ()
-                            ]
-                    ]
-                    el "TestDefinitions" [
-                        for name, table, _, _, testId, executionId in rows ->
-                            el "UnitTest" [
-                                at "name" name
-                                at "storage" modelPath
-                                at "id" testId
-                                el "Execution" [ at "id" executionId ]
-                                el "TestMethod" [
-                                    at "codeBase" modelPath
-                                    at "adapterTypeName" "executor://semctl/schemacheck"
-                                    at "className" "SchemaCheck"
-                                    at "name" table
-                                ]
-                            ]
-                    ]
-                    el "TestEntries" [
-                        for _, _, _, _, testId, executionId in rows ->
-                            el "TestEntry" [ at "testId" testId; at "executionId" executionId; at "testListId" listId ]
-                    ]
-                    el "TestLists" [
-                        el "TestList" [ at "name" "Results Not in a List"; at "id" listId ]
-                        el "TestList" [
-                            at "name" "All Loaded Results"
-                            at "id" "19431567-8539-422a-85d7-44ee4e166bda"
-                        ]
-                    ]
-                    el "ResultSummary" [
-                        at "outcome" summaryOutcome
-                        el "Counters" [
-                            at "total" rows.Length
-                            at "executed" (rows.Length - count "NotExecuted")
-                            at "passed" (count "Passed")
-                            at "failed" (count "Failed")
-                            at "error" 0
-                            at "timeout" 0
-                            at "aborted" 0
-                            at "inconclusive" 0
-                            at "passedButRunAborted" 0
-                            at "notRunnable" 0
-                            at "notExecuted" (count "NotExecuted")
-                            at "disconnected" 0
-                            at "warning" (count "Warning")
-                            at "completed" 0
-                            at "inProgress" 0
-                            at "pending" 0
-                        ]
-                    ]
-                ]
-            )
-        )
-
-    doc.Declaration.ToString() + "\n" + doc.ToString()
+    Trx.render {
+        RunId = Guid.NewGuid()
+        RunName = $"sm schemacheck {Path.GetFileName modelPath}"
+        Started = started
+        Finished = finished
+        ComputerName = Environment.MachineName
+        Entries = entries
+        RunInfos = []
+    }
 
 // ---- Running -------------------------------------------------------------------------------------
 

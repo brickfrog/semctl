@@ -385,6 +385,9 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
     let data = args.TryGetResult Args.Data
     let now = args.TryGetResult Args.Now |> Option.map Engine.Clock.parse
 
+    let connProps = connectionProperties args
+    let parsedNow = now
+
     // The model and the query may have options between them (`query <model> --data <dir> "<DAX>"`).
     match args.GetResults Args.Target |> List.concat with
     | [] -> UsageError "expected a model (xmla:<server>;<database>, or model files with --data) and a DAX query"
@@ -401,23 +404,18 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
         && args.Contains Args.Coverage
         ->
         UsageError "--role and the identity options are for running a query: --coverage reports every role's filters"
-    | source :: _ when
-        XmlaAddress.isRemote source
-        && (match connectionProperties args with
-            | Error _ -> true
-            | Ok _ -> false)
-        ->
-        match connectionProperties args with
+    | source :: _ when XmlaAddress.isRemote source && Result.isError connProps ->
+        match connProps with
         | Error message -> UsageError message
         | Ok _ -> UsageError "--role"
-    | _ when now.IsSome && (data.IsNone || args.Contains Args.Coverage) ->
+    | _ when parsedNow.IsSome && (data.IsNone || args.Contains Args.Coverage) ->
         UsageError "--now sets the clock of the local engine: it goes with --data and a query"
     | _ when
-        (match now with
+        (match parsedNow with
          | Some(Error _) -> true
          | _ -> false)
         ->
-        match now with
+        match parsedNow with
         | Some(Error message) -> UsageError $"--now: {message}"
         | _ -> UsageError "--now: not a date and time"
     | source :: rest when args.Contains Args.Coverage ->
@@ -425,20 +423,22 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             UsageError "--coverage takes the model only, not a query"
         else
             coverage ctx source
-    | source :: _ when not (XmlaAddress.isRemote source) && data.IsNone ->
-        UsageError
-            $"'{source}' is model files: give the fixture data to evaluate over with --data <directory> (see `sm data init`), or query a server model (xmla:<server>;<database>)"
     | source :: rest when not (XmlaAddress.isRemote source) ->
-        match readDax args rest with
-        | Error outcome -> outcome
-        | Ok dax when String.IsNullOrWhiteSpace dax -> UsageError "the DAX query is empty"
-        | Ok dax ->
-            let now =
-                match now with
-                | Some(Ok clock) -> Some clock
-                | _ -> None
+        match data with
+        | None ->
+            UsageError
+                $"'{source}' is model files: give the fixture data to evaluate over with --data <directory> (see `sm data init`), or query a server model (xmla:<server>;<database>)"
+        | Some dataDir ->
+            match readDax args rest with
+            | Error outcome -> outcome
+            | Ok dax when String.IsNullOrWhiteSpace dax -> UsageError "the DAX query is empty"
+            | Ok dax ->
+                let clock =
+                    match parsedNow with
+                    | Some(Ok c) -> Some c
+                    | _ -> None
 
-            local ctx args source data.Value dax maxRows now
+                local ctx args source dataDir dax maxRows clock
     | source :: rest ->
         match readDax args rest with
         | Error outcome -> outcome
@@ -448,7 +448,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             let limit = if maxRows = 0 then None else Some maxRows
 
             let extra =
-                match connectionProperties args with
+                match connProps with
                 | Ok extra -> extra
                 | Error _ -> []
 

@@ -59,11 +59,7 @@ let private errorsWith (extra: Checks) (db: Database) =
     @ (extra g db |> List.filter (fun i -> i.Severity = Validate.Severity.Error))
 
 /// `apply`, gating on `extra` too.
-let applyWith
-    (extra: Checks)
-    (db: Database)
-    (edit: Database -> Result<Effect, SemctlError>)
-    : Result<Applied, SemctlError> =
+let applyWith (extra: Checks) (db: Database) (edit: Database -> Result<Effect, 'err>) : Result<Applied, 'err> =
     let errors = errorsWith extra
     let before = ModelIO.clone db
     let beforeErrors = errors before
@@ -101,7 +97,7 @@ let applyWith
 /// Apply `edit` to `db` (mutating it). Before-and-after comparison runs on a snapshot, so the
 /// change set is exact. Issues of renamed objects are matched to their old names, so they don't
 /// count as new. Gates on Validate's rules only; SaveGate.apply adds ValidateSemantic's.
-let apply (db: Database) (edit: Database -> Result<Effect, SemctlError>) : Result<Applied, SemctlError> =
+let apply (db: Database) (edit: Database -> Result<Effect, 'err>) : Result<Applied, 'err> =
     applyWith Checks.none db edit
 
 /// `gatedErrors`, with `extra` too.
@@ -114,8 +110,8 @@ let gatedErrors (db: Database) = gatedErrorsWith Checks.none db
 let applyResolvingWith
     (extra: Checks)
     (db: Database)
-    (edit: Database -> Result<Effect, SemctlError>)
-    : Result<Applied * Validate.Issue list, SemctlError> =
+    (edit: Database -> Result<Effect, 'err>)
+    : Result<Applied * Validate.Issue list, 'err> =
     let errors = errorsWith extra
     let before = errors db
 
@@ -137,6 +133,6 @@ let applyResolvingWith
 /// ("resolved"). Issues of renamed objects are matched under their old names, as in `apply`.
 let applyResolving
     (db: Database)
-    (edit: Database -> Result<Effect, SemctlError>)
-    : Result<Applied * Validate.Issue list, SemctlError> =
+    (edit: Database -> Result<Effect, 'err>)
+    : Result<Applied * Validate.Issue list, 'err> =
     applyResolvingWith Checks.none db edit

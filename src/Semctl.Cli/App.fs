@@ -112,9 +112,9 @@ let private insertModel (words: string list) (model: string) : string list =
         match rest with
         | w :: more ->
             match subcommands p |> List.tryFind (fun (names, _) -> List.contains w names) with
-            | Some(_, sub) -> walk sub (taken @ [ w ]) more
-            | None -> p, taken, rest
-        | [] -> p, taken, rest
+            | Some(_, sub) -> walk sub (w :: taken) more
+            | None -> p, List.rev taken, rest
+        | [] -> p, List.rev taken, rest
 
     let p, taken, rest = walk parser.Value [] words
     let takesModel = p.GetArgumentCases() |> List.exists (fun c -> c.IsMainCommand)

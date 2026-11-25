@@ -14,6 +14,7 @@ open System.Text.Json
 open System.Text.Json.Nodes
 open Microsoft.AnalysisServices.Tabular
 open Semctl
+open Semctl.Prelude
 open Semctl.Inventory
 open Semctl.Cli
 open Semctl.Cli.Output
@@ -117,7 +118,7 @@ type Tool = {
     Description: string
     Grant: Grant
     /// JSON Schema for the arguments.
-    Schema: string
+    Schema: JsonObject
     ReadOnly: bool
     Destructive: bool
     Run: Session -> JsonObject -> Result<JsonNode, Failure>
@@ -254,141 +255,122 @@ let private overview (s: Session) (_: JsonObject) =
     )
 
 let private listObjects (s: Session) (args: JsonObject) =
-    let glob (pattern: string option) =
-        pattern |> Option.map Where.glob |> Option.defaultValue (fun _ -> true)
+    result {
+        let glob (pattern: string option) =
+            pattern |> Option.map Where.glob |> Option.defaultValue (fun _ -> true)
 
-    Args.optString args "container"
-    |> Result.bind (fun container ->
-        Args.optStrings args "kinds"
-        |> Result.bind ofKinds
-        |> Result.bind (fun kinds ->
-            Args.optString args "name"
-            |> Result.bind (fun name ->
-                Args.optStrings args "where"
-                |> Result.bind (fun conditions ->
-                    let parsed = conditions |> List.map Where.Condition.parse
+        let! container = Args.optString args "container"
+        let! kindTokens = Args.optStrings args "kinds"
+        let! kinds = ofKinds kindTokens
+        let! name = Args.optString args "name"
+        let! rawConditions = Args.optStrings args "where"
 
-                    match
-                        parsed
-                        |> List.tryPick (function
-                            | Error e -> Some e
-                            | Ok _ -> None)
-                    with
-                    | Some message -> Error(BadArguments message)
-                    | None ->
-                        let conditions = parsed |> List.choose Result.toOption
+        let! conditions =
+            rawConditions
+            |> resultTraverse (Where.Condition.parse >> Result.mapError BadArguments)
 
-                        resolve s (defaultArg container "model")
-                        |> Result.bind (fun c ->
-                            (if conditions.IsEmpty then
-                                 Ok(Where.within (objects s.Db) c)
-                             else
-                                 Where.filter s.Db c conditions)
-                            |> semctl)
-                        |> Result.map (fun found ->
-                            let byName = glob name
+        let! c = resolve s (defaultArg container "model")
 
-                            let found =
-                                found
-                                |> List.filter (fun e ->
-                                    (kinds.IsEmpty || List.contains e.Ref.Kind kinds)
-                                    && byName (ObjectEntry.name e))
+        let! found =
+            (if conditions.IsEmpty then
+                 Ok(Where.within (objects s.Db) c)
+             else
+                 Where.filter s.Db c conditions)
+            |> semctl
 
-                            obj (capped "objects" found ListCommand.listJson))))))
+        let byName = glob name
+
+        let found =
+            found
+            |> List.filter (fun e -> (kinds.IsEmpty || List.contains e.Ref.Kind kinds) && byName (ObjectEntry.name e))
+
+        return obj (capped "objects" found ListCommand.listJson)
+    }
 
 let private search (s: Session) (args: JsonObject) =
-    Args.string args "text"
-    |> Result.bind (fun text ->
-        Args.bool args "regex" false
-        |> Result.bind (fun regex ->
-            Args.bool args "caseSensitive" false
-            |> Result.bind (fun caseSensitive ->
-                Args.optStrings args "in"
-                |> Result.bind (fun properties ->
-                    Args.optStrings args "kinds"
-                    |> Result.bind ofKinds
-                    |> Result.bind (fun kinds ->
-                        let opts: Find.Options = {
-                            Find.Options.literal text with
-                                Regex = regex
-                                CaseSensitive = caseSensitive
-                                Properties = properties
-                                Objects = { Filter.none with Kinds = kinds }
-                        }
+    result {
+        let! text = Args.string args "text"
+        let! regex = Args.bool args "regex" false
+        let! caseSensitive = Args.bool args "caseSensitive" false
+        let! properties = Args.optStrings args "in"
+        let! kindTokens = Args.optStrings args "kinds"
+        let! kinds = ofKinds kindTokens
 
-                        Find.search s.Db opts
-                        |> semctl
-                        |> Result.map (fun hits -> obj (capped "hits" hits FindCommand.findJson)))))))
+        let opts: Find.Options = {
+            Find.Options.literal text with
+                Regex = regex
+                CaseSensitive = caseSensitive
+                Properties = properties
+                Objects = { Filter.none with Kinds = kinds }
+        }
+
+        let! hits = Find.search s.Db opts |> semctl
+        return obj (capped "hits" hits FindCommand.findJson)
+    }
 
 let private getObjects (s: Session) (args: JsonObject) =
-    Args.optStrings args "objects"
-    |> Result.bind (fun objects' ->
-        Args.optStrings args "properties"
-        |> Result.bind (fun paths ->
-            Args.optString args "format"
-            |> Result.bind (fun format ->
-                Args.bool args "children" false
-                |> Result.bind (fun children ->
-                    match objects', format with
-                    | [], _ ->
-                        Error(BadArguments "missing 'objects': the objects to show, in any form `sm get` takes")
-                    | _, Some f when f <> "json" && f <> "tmdl" -> Error(BadArguments "'format' is json or tmdl")
-                    | _ ->
-                        let one (selector: string) =
-                            match resolve s selector with
-                            | Error(Semctl e) ->
-                                obj [ "object", str selector; "error", (semctlErrorJson e).["error"].DeepClone() ]
-                            | Error f -> obj [ "object", str selector; "error", str (string f) ]
-                            | Ok e ->
-                                match paths, format with
-                                | _ :: _, _ ->
-                                    let props = Serialize.properties s.Db e
+    result {
+        let! objects' = Args.optStrings args "objects"
+        let! paths = Args.optStrings args "properties"
+        let! format = Args.optString args "format"
+        let! children = Args.bool args "children" false
 
-                                    GetCommand.propertiesJson
-                                        e
-                                        (paths |> List.collect (fun p -> Serialize.select p props))
-                                | [], Some "tmdl" ->
-                                    obj (refFields e @ [ "tmdl", str (Serialize.objectTmdl children e.Object) ])
-                                | [], _ -> GetCommand.getJson e (Serialize.objectJson s.Db children e.Object)
+        do!
+            match objects', format with
+            | [], _ -> Error(BadArguments "missing 'objects': the objects to show, in any form `sm get` takes")
+            | _, Some f when f <> "json" && f <> "tmdl" -> Error(BadArguments "'format' is json or tmdl")
+            | _ -> Ok()
 
-                        Ok(obj [ "objects", arr (objects' |> List.map one) ])))))
+        let one (selector: string) =
+            match resolve s selector with
+            | Error(Semctl e) -> obj [ "object", str selector; "error", (semctlErrorJson e).["error"].DeepClone() ]
+            | Error f -> obj [ "object", str selector; "error", str (string f) ]
+            | Ok e ->
+                match paths, format with
+                | _ :: _, _ ->
+                    let props = Serialize.properties s.Db e
+                    GetCommand.propertiesJson e (paths |> List.collect (fun p -> Serialize.select p props))
+                | [], Some "tmdl" -> obj (refFields e @ [ "tmdl", str (Serialize.objectTmdl children e.Object) ])
+                | [], _ -> GetCommand.getJson e (Serialize.objectJson s.Db children e.Object)
+
+        return obj [ "objects", arr (objects' |> List.map one) ]
+    }
 
 let private listProperties (s: Session) (args: JsonObject) =
-    Args.string args "object"
-    |> Result.bind (fun selector ->
-        Args.bool args "all" false
-        |> Result.bind (fun all ->
-            resolve s selector
-            |> Result.map (fun e ->
-                let descriptors =
-                    SetProperty.catalog s.Db e |> List.filter (fun d -> all || d.Writable)
+    result {
+        let! selector = Args.string args "object"
+        let! all = Args.bool args "all" false
+        let! e = resolve s selector
 
-                obj (refFields e @ [ "properties", GetCommand.catalogJson descriptors ]))))
+        let descriptors =
+            SetProperty.catalog s.Db e |> List.filter (fun d -> all || d.Writable)
+
+        return obj (refFields e @ [ "properties", GetCommand.catalogJson descriptors ])
+    }
 
 let private dependencies (s: Session) (args: JsonObject) =
-    Args.string args "object"
-    |> Result.bind (fun selector ->
-        Args.optString args "direction"
-        |> Result.bind (fun direction ->
-            Args.optInt args "depth"
-            |> Result.bind (fun depth ->
-                let directions =
-                    match defaultArg direction "both" with
-                    | "dependsOn" -> Ok [ Deps.DependsOn ]
-                    | "referencedBy" -> Ok [ Deps.ReferencedBy ]
-                    | "both" -> Ok [ Deps.DependsOn; Deps.ReferencedBy ]
-                    | other -> Error(BadArguments $"'direction' is dependsOn, referencedBy or both, not '{other}'")
+    result {
+        let! selector = Args.string args "object"
+        let! direction = Args.optString args "direction"
+        let! depth = Args.optInt args "depth"
 
-                match directions, depth with
-                | Error e, _ -> Error e
-                | _, Some d when d < 0 -> Error(BadArguments "'depth' is 0 (unlimited) or more")
-                | Ok directions, depth ->
-                    resolve s selector
-                    |> Result.map (fun e ->
-                        let g = Deps.build s.Db
-                        let depth = defaultArg depth 1
+        let! directions =
+            match defaultArg direction "both" with
+            | "dependsOn" -> Ok [ Deps.DependsOn ]
+            | "referencedBy" -> Ok [ Deps.ReferencedBy ]
+            | "both" -> Ok [ Deps.DependsOn; Deps.ReferencedBy ]
+            | other -> Error(BadArguments $"'direction' is dependsOn, referencedBy or both, not '{other}'")
 
-                        DepsCommand.depsJson e.Ref [ for d in directions -> d, Deps.tree d depth g e.Ref ]))))
+        do!
+            match depth with
+            | Some d when d < 0 -> Error(BadArguments "'depth' is 0 (unlimited) or more")
+            | _ -> Ok()
+
+        let! e = resolve s selector
+        let g = Deps.build s.Db
+        let depth = defaultArg depth 1
+        return DepsCommand.depsJson e.Ref [ for d in directions -> d, Deps.tree d depth g e.Ref ]
+    }
 
 let private validate (s: Session) (_: JsonObject) =
     let clock = Stopwatch.StartNew()
@@ -397,60 +379,56 @@ let private validate (s: Session) (_: JsonObject) =
     Ok(ValidateCommand.validateJsonGrouped clock.Elapsed (Validate.group g issues))
 
 let private lint (s: Session) (args: JsonObject) =
-    Args.optStrings args "objects"
-    |> Result.bind (fun selectors ->
+    result {
+        let! selectors = Args.optStrings args "objects"
         let clock = Stopwatch.StartNew()
+        let! entries = resultTraverse (resolve s) selectors
+        let only = entries |> List.map _.Ref |> Set.ofList
 
-        selectors
-        |> List.fold
-            (fun acc sel ->
-                acc
-                |> Result.bind (fun refs -> resolve s sel |> Result.map (fun e -> Set.add e.Ref refs)))
-            (Ok Set.empty)
-        |> Result.map (fun only ->
-            let findings =
-                Lint.lint s.Db |> List.filter (fun f -> only.IsEmpty || only.Contains f.Ref)
+        let findings =
+            Lint.lint s.Db |> List.filter (fun f -> only.IsEmpty || only.Contains f.Ref)
 
-            LintCommand.lintJson clock.Elapsed findings))
+        return LintCommand.lintJson clock.Elapsed findings
+    }
 
 let private formatDax (s: Session) (args: JsonObject) =
-    Args.optString args "dax"
-    |> Result.bind (fun dax ->
-        Args.optString args "object"
-        |> Result.bind (fun selector ->
-            Args.bool args "long" false
-            |> Result.bind (fun long ->
-                let opts = {
-                    Format.FormatOptions.defaults with
-                        Long = long
-                }
+    result {
+        let! dax = Args.optString args "dax"
+        let! selector = Args.optString args "object"
+        let! long = Args.bool args "long" false
 
-                let format (text: string) =
-                    Format.format opts text
-                    |> Result.mapError (fun e -> BadArguments(Format.FormatError.message e))
+        let opts = {
+            Format.FormatOptions.defaults with
+                Long = long
+        }
 
-                match dax, selector with
-                | Some text, None ->
-                    format text
-                    |> Result.map (fun f -> obj [ "formatted", str f; "changed", bool (f <> text) ])
-                | None, Some selector ->
-                    resolve s selector
-                    |> Result.bind (fun e ->
-                        match Serialize.properties s.Db e |> List.tryFind (fun (p, _) -> p = "expression") with
-                        | None -> Error(BadArguments $"{ObjectRef.format e.Ref} has no DAX expression")
-                        | Some(_, text) ->
-                            format text
-                            |> Result.map (fun f ->
-                                obj (
-                                    refFields e
-                                    @ [
-                                        "property", str "expression"
-                                        "formatted", str f
-                                        "changed", bool (f <> text)
-                                    ]
-                                )))
-                | _ ->
-                    Error(BadArguments "give either 'dax' (text to format) or 'object' (whose expression to format)"))))
+        let format (text: string) =
+            Format.format opts text
+            |> Result.mapError (fun e -> BadArguments(Format.FormatError.message e))
+
+        match dax, selector with
+        | Some text, None ->
+            let! f = format text
+            return obj [ "formatted", str f; "changed", bool (f <> text) ]
+        | None, Some selector ->
+            let! e = resolve s selector
+
+            match Serialize.properties s.Db e |> List.tryFind (fun (p, _) -> p = "expression") with
+            | None -> return! Error(BadArguments $"{ObjectRef.format e.Ref} has no DAX expression")
+            | Some(_, text) ->
+                let! f = format text
+
+                return
+                    obj (
+                        refFields e
+                        @ [
+                            "property", str "expression"
+                            "formatted", str f
+                            "changed", bool (f <> text)
+                        ]
+                    )
+        | _ -> return! Error(BadArguments "give either 'dax' (text to format) or 'object' (whose expression to format)")
+    }
 
 let private fullModel (s: Session) (_: JsonObject) =
     Ok(obj [ "tmdl", str (Serialize.objectTmdl true s.Db.Model) ])
@@ -497,28 +475,28 @@ let private listRules (s: Session) (_: JsonObject) =
         ])
 
 let private runBpa (s: Session) (args: JsonObject) =
-    Args.optStrings args "rules"
-    |> Result.bind (fun ids ->
+    result {
+        let! ids = Args.optStrings args "rules"
         let clock = Stopwatch.StartNew()
+        let! collected = collectRules s
 
-        collectRules s
-        |> Result.map (fun collected ->
-            let selected (r: BpaRules.Rule) =
-                ids.IsEmpty
-                || ids
-                   |> List.exists (fun id -> String.Equals(id, r.Id, StringComparison.OrdinalIgnoreCase))
+        let selected (r: BpaRules.Rule) =
+            ids.IsEmpty
+            || ids
+               |> List.exists (fun id -> String.Equals(id, r.Id, StringComparison.OrdinalIgnoreCase))
 
-            let results = Bpa.analyze s.Db (collected.Effective |> List.filter selected)
-            let findings = results |> List.collect (fun r -> r.Findings)
+        let results = Bpa.analyze s.Db (collected.Effective |> List.filter selected)
+        let findings = results |> List.collect (fun r -> r.Findings)
 
-            let problems = [
-                for r in results do
-                    match r.Status with
-                    | Bpa.Unsupported reason -> r.Rule, "unsupported", reason
-                    | Bpa.Failed reason -> r.Rule, "failed", reason
-                    | _ -> ()
-            ]
+        let problems = [
+            for r in results do
+                match r.Status with
+                | Bpa.Unsupported reason -> r.Rule, "unsupported", reason
+                | Bpa.Failed reason -> r.Rule, "failed", reason
+                | _ -> ()
+        ]
 
+        return
             Findings.envelope "bpa" clock.Elapsed (findings |> List.map BpaCommand.toFinding) [
                 "rulesEvaluated", num (results |> List.filter (fun r -> r.Status = Bpa.Evaluated) |> List.length)
                 "ruleErrors",
@@ -527,7 +505,8 @@ let private runBpa (s: Session) (args: JsonObject) =
                         obj [ "ruleId", str rule.Id; "stage", str stage; "message", str reason ]
                 ]
                 "warnings", arr (collected.Warnings |> List.map str)
-            ]))
+            ]
+    }
 
 // ---- data --------------------------------------------------------------------------------------
 
@@ -556,61 +535,61 @@ let private prepared (s: Session) (directory: string) =
         p
 
 let private runQuery (s: Session) (args: JsonObject) =
-    Args.string args "dax"
-    |> Result.bind (fun dax ->
-        Args.optInt args "maxRows"
-        |> Result.bind (fun requested ->
-            match requested with
-            | Some n when n < 1 -> Error(BadArguments $"'maxRows' is 1 to {maxRows}")
-            | _ when String.IsNullOrWhiteSpace dax -> Error(BadArguments "the DAX query is empty")
-            | _ ->
-                let limit = min maxRows (defaultArg requested defaultRows)
+    result {
+        let! dax = Args.string args "dax"
+        let! requested = Args.optInt args "maxRows"
 
-                let cap (r: QueryResult) =
-                    if r.Rows.Length > limit then
-                        {
-                            r with
-                                Rows = List.truncate limit r.Rows
-                                Truncated = true
-                        }
-                    else
-                        r
+        match requested with
+        | Some n when n < 1 -> return! Error(BadArguments $"'maxRows' is 1 to {maxRows}")
+        | _ when String.IsNullOrWhiteSpace dax -> return! Error(BadArguments "the DAX query is empty")
+        | _ ->
+            let limit = min maxRows (defaultArg requested defaultRows)
 
-                let source, results =
-                    match s.Options.Data with
-                    | DataSource.Fixture directory ->
-                        "local engine", prepared s directory |> Result.bind (fun p -> Engine.evaluateQuery p dax)
-                    | DataSource.Server address ->
-                        // Capped while reading: no more rows than asked come over the wire.
-                        XmlaAddress.display address,
-                        Semctl.Xmla.Remote.query (Semctl.Cli.Source.access s.Ctx) address dax (Some limit)
-                        |> Result.map snd
-                    | DataSource.NoData ->
-                        "none", Error(LoadFailed("run_query", "no data source: start sm mcp with --data or --server"))
+            let cap (r: QueryResult) =
+                if r.Rows.Length > limit then
+                    {
+                        r with
+                            Rows = List.truncate limit r.Rows
+                            Truncated = true
+                    }
+                else
+                    r
 
-                results
-                |> semctl
-                |> Result.map (fun results ->
-                    let results = results |> List.map cap
-                    let truncated = results |> List.exists _.Truncated
+            let source, rawResults =
+                match s.Options.Data with
+                | DataSource.Fixture directory ->
+                    "local engine", prepared s directory |> Result.bind (fun p -> Engine.evaluateQuery p dax)
+                | DataSource.Server address ->
+                    // Capped while reading: no more rows than asked come over the wire.
+                    XmlaAddress.display address,
+                    Semctl.Xmla.Remote.query (Semctl.Cli.Source.access s.Ctx) address dax (Some limit)
+                    |> Result.map snd
+                | DataSource.NoData ->
+                    "none", Error(LoadFailed("run_query", "no data source: start sm mcp with --data or --server"))
 
-                    obj [
-                        "source", str source
-                        "maxRows", num limit
-                        "results", QueryResult.listToJson results
-                        "truncated", bool truncated
-                        if truncated then
-                            "note",
-                            str (
-                                if limit < maxRows then
-                                    $"only the first {limit} rows of each result: pass maxRows (at most {maxRows}) for more, or aggregate in the query"
-                                else
-                                    $"only the first {maxRows} rows of each result (the most this server returns): aggregate or filter in the query"
-                            )
-                        match requested with
-                        | Some n when n > maxRows -> "maxRowsCapped", str $"maxRows is at most {maxRows}"
-                        | _ -> ()
-                    ])))
+            let! results = rawResults |> semctl
+            let results = results |> List.map cap
+            let truncated = results |> List.exists _.Truncated
+
+            return
+                obj [
+                    "source", str source
+                    "maxRows", num limit
+                    "results", QueryResult.listToJson results
+                    "truncated", bool truncated
+                    if truncated then
+                        "note",
+                        str (
+                            if limit < maxRows then
+                                $"only the first {limit} rows of each result: pass maxRows (at most {maxRows}) for more, or aggregate in the query"
+                            else
+                                $"only the first {maxRows} rows of each result (the most this server returns): aggregate or filter in the query"
+                        )
+                    match requested with
+                    | Some n when n > maxRows -> "maxRowsCapped", str $"maxRows is at most {maxRows}"
+                    | _ -> ()
+                ]
+    }
 
 // ---- write -------------------------------------------------------------------------------------
 
@@ -653,40 +632,43 @@ let private operation
     (db: Database)
     (op: JsonObject)
     : Result<Mutation.Effect, Failure> =
-    let entry selector =
-        Selector.resolve (objects db) selector |> semctl
+    result {
+        let entry selector =
+            Selector.resolve (objects db) selector |> semctl
 
-    let metadata () =
-        Args.optString op "description"
-        |> Result.bind (fun description ->
-            Args.optString op "displayFolder"
-            |> Result.bind (fun displayFolder ->
-                Args.optString op "formatString"
-                |> Result.bind (fun formatString ->
-                    Args.bool op "hidden" false
-                    |> Result.map (fun hidden -> {
-                        AddObject.Metadata.none with
-                            Description = description
-                            DisplayFolder = displayFolder
-                            FormatString = formatString
-                            Hidden = hidden
-                    }))))
+        let metadata () =
+            result {
+                let! description = Args.optString op "description"
+                let! displayFolder = Args.optString op "displayFolder"
+                let! formatString = Args.optString op "formatString"
+                let! hidden = Args.bool op "hidden" false
 
-    let add (r: ObjectRef) (details: AddObject.Details) =
-        metadata ()
-        |> Result.bind (fun m ->
-            AddObject.add db {
-                AddObject.AddSpec.create r details with
-                    Metadata = m
+                return {
+                    AddObject.Metadata.none with
+                        Description = description
+                        DisplayFolder = displayFolder
+                        FormatString = formatString
+                        Hidden = hidden
+                }
             }
-            |> semctl)
 
-    match Args.string op "op" with
-    | Error e -> Error e
-    | Ok "set" ->
-        Args.string op "object"
-        |> Result.bind (fun selector ->
-            let properties =
+        let add (r: ObjectRef) (details: AddObject.Details) =
+            result {
+                let! m = metadata ()
+
+                return!
+                    AddObject.add db {
+                        AddObject.AddSpec.create r details with
+                            Metadata = m
+                    }
+                    |> semctl
+            }
+
+        match! Args.string op "op" with
+        | "set" ->
+            let! selector = Args.string op "object"
+
+            let! assigned =
                 match Args.node op "properties" with
                 | null -> Ok []
                 | :? JsonObject as props ->
@@ -703,278 +685,252 @@ let private operation
                     ]
                 | _ -> Error(BadArguments "'properties' must be an object: {\"<path>\": <value or null>}")
 
-            properties
-            |> Result.bind (fun assigned ->
-                Args.optStrings op "unset"
-                |> Result.bind (fun unset ->
-                    match assigned @ (unset |> List.map SetProperty.Assignment.unset) with
-                    | [] -> Error(BadArguments "set: give 'properties' (and/or 'unset')")
-                    | assignments ->
-                        entry selector
-                        |> Result.bind (fun e -> SetProperty.set db e assignments |> semctl))))
-    | Ok "rename" ->
-        Args.string op "object"
-        |> Result.bind (fun selector ->
-            Args.string op "newName"
-            |> Result.bind (fun newName ->
-                entry selector
-                |> Result.bind (fun target -> Rename.plan db target newName |> semctl)
-                |> Result.map (fun p ->
-                    if Rename.RenamePlan.isNoOp p then
+            let! unset = Args.optStrings op "unset"
+
+            match assigned @ (unset |> List.map SetProperty.Assignment.unset) with
+            | [] -> return! Error(BadArguments "set: give 'properties' (and/or 'unset')")
+            | assignments ->
+                let! e = entry selector
+                return! SetProperty.set db e assignments |> semctl
+        | "rename" ->
+            let! selector = Args.string op "object"
+            let! newName = Args.string op "newName"
+            let! target = entry selector
+            let! p = Rename.plan db target newName |> semctl
+
+            if Rename.RenamePlan.isNoOp p then
+                return {
+                    Mutation.Effect.none with
+                        Notes = [ $"{ObjectRef.format p.Target.Ref} is already named '{p.NewName}'." ]
+                }
+            else
+                Rename.apply p
+
+                // Report files that name the field are rewritten as `sm rename` does,
+                // staged with the batch and written by save_model.
+                let reports = Staging.reportsOf s.Source
+
+                let files, warnings =
+                    match reports, Report.Change.ofMove p.Target.Ref p.NewRef with
+                    | [], _
+                    | _, None -> [], []
+                    | _, Some change -> Report.planWith batch.Read reports change
+
+                batch.Add files
+
+                let updated =
+                    match files with
+                    | [] -> []
+                    | _ ->
+                        let refs = plural (files |> List.sumBy _.References) "reference"
+                        let fileCount = plural files.Length "file"
+
+                        [
+                            $"Updated {refs} in {fileCount} of the report (staged; written by save_model)"
+                        ]
+
+                return {
+                    Warnings = p.Warnings @ warnings
+                    Renamed = [ p.Target.Ref, p.NewRef ]
+                    Notes =
+                        $"Renamed {ObjectRef.format p.Target.Ref} -> {ObjectRef.format p.NewRef}"
+                        :: updated
+                }
+        | "add" ->
+            let! kind = Args.string op "kind"
+            let! table = Args.optString op "table"
+            let! name = Args.optString op "name"
+            let! expression = Args.optString op "expression"
+
+            let need what (v: string option) =
+                match v with
+                | Some x -> Ok x
+                | None -> Error(BadArguments $"add {kind}: missing '{what}'")
+
+            match kind with
+            | "measure" ->
+                let! t = need "table" table
+                let! n = need "name" name
+                let! x = need "expression" expression
+                return! add (ObjectRef.inTable ObjectKind.Measure t n) (AddObject.Details.Measure x)
+            | "calculatedColumn" ->
+                let! t = need "table" table
+                let! n = need "name" name
+                let! x = need "expression" expression
+
+                return!
+                    add
+                        (ObjectRef.inTable ObjectKind.Column t n)
+                        (AddObject.Details.Column(AddObject.ColumnSource.Calculated x))
+            | "dataColumn" ->
+                let! t = need "table" table
+                let! n = need "name" name
+                let! dt = Args.string op "dataType"
+
+                match Enum.TryParse<DataType>(dt, true) with
+                | true, dataType when dataType <> DataType.Automatic ->
+                    let! sourceColumn = Args.optString op "sourceColumn"
+
+                    return!
+                        add
+                            (ObjectRef.inTable ObjectKind.Column t n)
+                            (AddObject.Details.Column(AddObject.ColumnSource.Data(dataType, sourceColumn)))
+                | _ ->
+                    return!
+                        Error(
+                            BadArguments
+                                $"add dataColumn: unknown dataType '{dt}' (string, int64, double, decimal, dateTime, boolean, binary)"
+                        )
+            | "calculatedTable" ->
+                let! n = need "name" name
+                let! x = need "expression" expression
+                return! add (ObjectRef.table n) (AddObject.Details.Table(AddObject.TableSource.Calculated x))
+            | "relationship" ->
+                let! from = Args.string op "from"
+                let! ``to`` = Args.string op "to"
+                let! active = Args.bool op "active" true
+
+                return!
+                    add
                         {
-                            Mutation.Effect.none with
-                                Notes = [ $"{ObjectRef.format p.Target.Ref} is already named '{p.NewName}'." ]
+                            Kind = ObjectKind.Relationship
+                            Path = Option.toList name
                         }
-                    else
-                        Rename.apply p
+                        (AddObject.Details.Relationship {
+                            AddObject.RelationshipSpec.between from ``to`` with
+                                Inactive = not active
+                        })
+            | other ->
+                return!
+                    Error(
+                        BadArguments
+                            $"add: unknown kind '{other}' (measure, calculatedColumn, dataColumn, calculatedTable, relationship; for anything else use a 'script' operation)"
+                    )
+        | "remove" ->
+            let! selectors = Args.optStrings op "objects"
+            let! cascade = Args.bool op "cascade" false
+            let! force = Args.bool op "force" false
 
-                        // Report files that name the field are rewritten as `sm rename` does,
-                        // staged with the batch and written by save_model.
-                        let reports = Staging.reportsOf s.Source
+            match selectors with
+            | [] -> return! Error(BadArguments "remove: missing 'objects'")
+            | selectors ->
+                // Refused while a report next to the model uses what would go, unless forced.
+                let check = ReportUsage.checkWith batch.Read (Staging.reportsOf s.Source)
 
-                        let files, warnings =
-                            match reports, Report.Change.ofMove p.Target.Ref p.NewRef with
-                            | [], _
-                            | _, None -> [], []
-                            | _, Some change -> Report.planWith batch.Read reports change
-
-                        batch.Add files
-
-                        let updated =
-                            match files with
-                            | [] -> []
-                            | _ ->
-                                let n = files |> List.sumBy (fun f -> f.References)
-                                let refs = if n = 1 then "1 reference" else $"{n} references"
-
-                                let fileCount =
-                                    if files.Length = 1 then
-                                        "1 file"
-                                    else
-                                        $"{files.Length} files"
-
-                                [
-                                    $"Updated {refs} in {fileCount} of the report (staged; written by save_model)"
-                                ]
-
-                        {
-                            Warnings = p.Warnings @ warnings
-                            Renamed = [ p.Target.Ref, p.NewRef ]
-                            Notes =
-                                $"Renamed {ObjectRef.format p.Target.Ref} -> {ObjectRef.format p.NewRef}"
-                                :: updated
-                        })))
-    | Ok "add" ->
-        Args.string op "kind"
-        |> Result.bind (fun kind ->
-            Args.optString op "table"
-            |> Result.bind (fun table ->
-                Args.optString op "name"
-                |> Result.bind (fun name ->
-                    Args.optString op "expression"
-                    |> Result.bind (fun expression ->
-                        let need what (v: string option) =
-                            match v with
-                            | Some x -> Ok x
-                            | None -> Error(BadArguments $"add {kind}: missing '{what}'")
-
-                        match kind with
-                        | "measure" ->
-                            need "table" table
-                            |> Result.bind (fun t ->
-                                need "name" name
-                                |> Result.bind (fun n ->
-                                    need "expression" expression
-                                    |> Result.bind (fun x ->
-                                        add
-                                            (ObjectRef.inTable ObjectKind.Measure t n)
-                                            (AddObject.Details.Measure x))))
-                        | "calculatedColumn" ->
-                            need "table" table
-                            |> Result.bind (fun t ->
-                                need "name" name
-                                |> Result.bind (fun n ->
-                                    need "expression" expression
-                                    |> Result.bind (fun x ->
-                                        add
-                                            (ObjectRef.inTable ObjectKind.Column t n)
-                                            (AddObject.Details.Column(AddObject.ColumnSource.Calculated x)))))
-                        | "dataColumn" ->
-                            need "table" table
-                            |> Result.bind (fun t ->
-                                need "name" name
-                                |> Result.bind (fun n ->
-                                    Args.string op "dataType"
-                                    |> Result.bind (fun dt ->
-                                        match Enum.TryParse<DataType>(dt, true) with
-                                        | true, dataType when dataType <> DataType.Automatic ->
-                                            Args.optString op "sourceColumn"
-                                            |> Result.bind (fun sourceColumn ->
-                                                add
-                                                    (ObjectRef.inTable ObjectKind.Column t n)
-                                                    (AddObject.Details.Column(
-                                                        AddObject.ColumnSource.Data(dataType, sourceColumn)
-                                                    )))
-                                        | _ ->
-                                            Error(
-                                                BadArguments
-                                                    $"add dataColumn: unknown dataType '{dt}' (string, int64, double, decimal, dateTime, boolean, binary)"
-                                            ))))
-                        | "calculatedTable" ->
-                            need "name" name
-                            |> Result.bind (fun n ->
-                                need "expression" expression
-                                |> Result.bind (fun x ->
-                                    add
-                                        (ObjectRef.table n)
-                                        (AddObject.Details.Table(AddObject.TableSource.Calculated x))))
-                        | "relationship" ->
-                            Args.string op "from"
-                            |> Result.bind (fun from ->
-                                Args.string op "to"
-                                |> Result.bind (fun ``to`` ->
-                                    Args.bool op "active" true
-                                    |> Result.bind (fun active ->
-                                        add
-                                            {
-                                                Kind = ObjectKind.Relationship
-                                                Path = Option.toList name
-                                            }
-                                            (AddObject.Details.Relationship {
-                                                AddObject.RelationshipSpec.between from ``to`` with
-                                                    Inactive = not active
-                                            }))))
-                        | other ->
-                            Error(
-                                BadArguments
-                                    $"add: unknown kind '{other}' (measure, calculatedColumn, dataColumn, calculatedTable, relationship; for anything else use a 'script' operation)"
-                            )))))
-    | Ok "remove" ->
-        Args.optStrings op "objects"
-        |> Result.bind (fun selectors ->
-            Args.bool op "cascade" false
-            |> Result.bind (fun cascade ->
-                Args.bool op "force" false
-                |> Result.bind (fun force ->
-                    match selectors with
-                    | [] -> Error(BadArguments "remove: missing 'objects'")
-                    | selectors ->
-                        // Refused while a report next to the model uses what would go, unless forced.
-                        let check = ReportUsage.checkWith batch.Read (Staging.reportsOf s.Source)
-
-                        RemoveObject.removeWith check db {
-                            RemoveObject.RemoveSpec.ofSelectors selectors with
-                                Cascade = cascade
-                                Force = force
-                        }
-                        |> semctl)))
-    | Ok "move" ->
-        Args.string op "measure"
-        |> Result.bind (fun measure ->
-            Args.string op "table"
-            |> Result.bind (fun table ->
-                Args.optString op "displayFolder"
-                |> Result.bind (fun folder ->
-                    MoveObject.move db {
-                        MoveObject.MoveSpec.Measure = measure
-                        Table = table
-                        DisplayFolder = folder
+                return!
+                    RemoveObject.removeWith check db {
+                        RemoveObject.RemoveSpec.ofSelectors selectors with
+                            Cascade = cascade
+                            Force = force
                     }
-                    |> semctl)))
-    | Ok "script" ->
-        Args.string op "dax"
-        |> Result.bind (fun text -> ApplyScript.applyText "script" db text |> semctl)
-    | Ok other -> Error(BadArguments $"unknown op '{other}' (set, rename, add, remove, move, script)")
+                    |> semctl
+        | "move" ->
+            let! measure = Args.string op "measure"
+            let! table = Args.string op "table"
+            let! folder = Args.optString op "displayFolder"
+
+            return!
+                MoveObject.move db {
+                    MoveObject.MoveSpec.Measure = measure
+                    Table = table
+                    DisplayFolder = folder
+                }
+                |> semctl
+        | "script" ->
+            let! text = Args.string op "dax"
+            return! ApplyScript.applyText "script" db text |> semctl
+        | other -> return! Error(BadArguments $"unknown op '{other}' (set, rename, add, remove, move, script)")
+    }
 
 let private issuesJson (issues: Validate.Issue list) =
     arr (issues |> List.map (ValidateCommand.toFinding >> Findings.findingJson))
 
 let private applyChanges (s: Session) (args: JsonObject) =
-    match Args.node args "operations" with
-    | :? JsonArray as ops when ops.Count > 0 ->
-        match ops |> Seq.tryFindIndex (fun o -> not (o :? JsonObject)) with
-        | Some i -> Error(BadArguments $"operations[{i}] is not an object")
-        | None ->
-            // One batch, all or nothing: applied to a copy, which replaces the model only if every
-            // operation succeeds.
-            let work = ModelIO.clone s.Db
-            let batch = BatchFiles(s.Model)
-            let mutable failure = None
-
-            let edit (db: Database) =
+    result {
+        let! ops =
+            match Args.node args "operations" with
+            | :? JsonArray as ops when ops.Count > 0 ->
                 ops
                 |> Seq.indexed
-                |> Seq.fold
-                    (fun (acc: Result<Mutation.Effect, SemctlError>) (i, op) ->
-                        acc
-                        |> Result.bind (fun (soFar: Mutation.Effect) ->
-                            match operation s batch db (op :?> JsonObject) with
-                            | Ok e ->
-                                Ok {
-                                    Warnings = soFar.Warnings @ e.Warnings
-                                    Notes = soFar.Notes @ e.Notes
-                                    Renamed = soFar.Renamed @ e.Renamed
-                                }
-                            | Error f ->
-                                // Stop at the first failure; the copy is dropped.
-                                failure <- Some(AtOperation(i, f))
+                |> Seq.toList
+                |> resultTraverse (fun (i, node) ->
+                    match node with
+                    | :? JsonObject as o -> Ok(i, o)
+                    | _ -> Error(BadArguments $"operations[{i}] is not an object"))
+            | _ -> Error(BadArguments "missing 'operations': a non-empty array of operations")
 
-                                match f with
-                                | Semctl e -> Error e
-                                | _ -> Error(LoadFailed("apply_changes", "invalid operation"))))
-                    (Ok Mutation.Effect.none)
+        // One batch, all or nothing: applied to a copy, which replaces the model only if every
+        // operation succeeds.
+        let work = ModelIO.clone s.Db
+        let batch = BatchFiles(s.Model)
 
-            match SaveGate.applyResolving work edit with
-            | Error e -> Error(defaultArg failure (Semctl e))
-            | Ok(applied, resolved) ->
-                let files = batch.Edits
-                Staging.StagedModel.stage s.Model work applied.Changes files
-                s.Prepared <- None
-                let sinceLoad = Session.introducedSinceLoad s
-                let o = Changes.changesJson "apply_changes" applied.Changes :?> JsonObject
-                o.["introducedErrors"] <- issuesJson applied.IntroducedErrors
-                o.["resolvedErrors"] <- issuesJson resolved
-                o.["errorsIntroducedSinceLoad"] <- num sinceLoad.Length
-                o.["warnings"] <- arr (applied.Effect.Warnings |> List.map str)
-                o.["notes"] <- arr (applied.Effect.Notes |> List.map str)
-                o.["unsavedChanges"] <- num s.Unsaved
+        let edit (db: Database) : Result<Mutation.Effect, Failure> =
+            ops
+            |> List.fold
+                (fun acc (i, op) ->
+                    acc
+                    |> Result.bind (fun (soFar: Mutation.Effect) ->
+                        match operation s batch db op with
+                        | Ok e ->
+                            Ok {
+                                Warnings = soFar.Warnings @ e.Warnings
+                                Notes = soFar.Notes @ e.Notes
+                                Renamed = soFar.Renamed @ e.Renamed
+                            }
+                        | Error f -> Error(AtOperation(i, f))))
+                (Ok Mutation.Effect.none)
 
-                if not files.IsEmpty then
-                    o.["reportFiles"] <-
-                        arr [
-                            for f in files ->
-                                obj [ "path", str f.Path; "display", str f.Display; "references", num f.References ]
-                        ]
+        let! applied, resolved = SaveGate.applyResolving work edit
+        let files = batch.Edits
+        Staging.StagedModel.stage s.Model work applied.Changes files
+        s.Prepared <- None
+        let sinceLoad = Session.introducedSinceLoad s
+        let o = Changes.changesJson "apply_changes" applied.Changes
+        o.["introducedErrors"] <- issuesJson applied.IntroducedErrors
+        o.["resolvedErrors"] <- issuesJson resolved
+        o.["errorsIntroducedSinceLoad"] <- num sinceLoad.Length
+        o.["warnings"] <- arr (applied.Effect.Warnings |> List.map str)
+        o.["notes"] <- arr (applied.Effect.Notes |> List.map str)
+        o.["unsavedChanges"] <- num s.Unsaved
 
-                o.["saved"] <-
-                    str (
-                        if s.Options.Save then
-                            "no: the change is in memory; call save_model to write it"
-                        else
-                            "no: this server keeps changes in memory (started without --save)"
-                    )
+        if not files.IsEmpty then
+            o.["reportFiles"] <-
+                arr [
+                    for f in files ->
+                        obj [ "path", str f.Path; "display", str f.Display; "references", num f.References ]
+                ]
 
-                Ok(o :> JsonNode)
-    | _ -> Error(BadArguments "missing 'operations': a non-empty array of operations")
+        o.["saved"] <-
+            str (
+                if s.Options.Save then
+                    "no: the change is in memory; call save_model to write it"
+                else
+                    "no: this server keeps changes in memory (started without --save)"
+            )
+
+        return o :> JsonNode
+    }
 
 let private save (s: Session) (args: JsonObject) =
-    Args.bool args "force" false
-    |> Result.bind (fun force ->
+    result {
+        let! force = Args.bool args "force" false
+
         if s.Source.Format = ModelFormat.Xmla then
-            Error(
-                Semctl(
-                    RemoteSourceUnsupported(
-                        s.Source.Path,
-                        "sm mcp can't save to a server; changes stay in memory (`sm deploy` deploys files)"
+            return!
+                Error(
+                    Semctl(
+                        RemoteSourceUnsupported(
+                            s.Source.Path,
+                            "sm mcp can't save to a server; changes stay in memory (`sm deploy` deploys files)"
+                        )
                     )
                 )
-            )
         elif not (Staging.StagedModel.isDirty s.Model) then
-            Ok(obj [ "saved", bool false; "note", str "no unsaved changes" ])
+            return obj [ "saved", bool false; "note", str "no unsaved changes" ]
         else
-            Staging.StagedModel.save s.Model force
-            |> semctl
-            |> Result.map (fun saved ->
+            let! saved = Staging.StagedModel.save s.Model force |> semctl
+
+            return
                 obj [
                     "saved", bool true
                     "format", str (ModelIO.OutputFormat.token saved.Model.Format)
@@ -987,12 +943,43 @@ let private save (s: Session) (args: JsonObject) =
                             for f in saved.Files ->
                                 obj [ "path", str f.Path; "display", str f.Display; "references", num f.References ]
                         ]
-                ]))
+                ]
+    }
 
 // ---- the tool table ----------------------------------------------------------------------------
 
-let private objectsSchema =
-    """{"type":"array","items":{"type":"string"},"description":"objects, in any form `sm get` takes: a ref (measure:Sales/Total), DAX style ('Sales'[Total], [Total]) or a bare name"}"""
+let private schemaObj (props: (string * JsonNode) list) =
+    jsonObj [
+        "type", str "object"
+        "properties", obj props
+        "additionalProperties", bool false
+    ]
+
+let private requiredSchema (props: (string * JsonNode) list) (required: string list) =
+    jsonObj [
+        "type", str "object"
+        "properties", obj props
+        "required", arr (required |> List.map str)
+        "additionalProperties", bool false
+    ]
+
+let private strProp (desc: string option) =
+    obj [ "type", str "string"; "description", optStr desc ]
+
+let private boolProp () = obj [ "type", str "boolean" ]
+
+let private strArrayProp (desc: string option) =
+    obj [
+        "type", str "array"
+        "items", obj [ "type", str "string" ]
+        "description", optStr desc
+    ]
+
+let private objectsSchema () =
+    strArrayProp (
+        Some
+            "objects, in any form `sm get` takes: a ref (measure:Sales/Total), DAX style ('Sales'[Total], [Total]) or a bare name"
+    )
 
 let tools: Tool list = [
     {
@@ -1003,7 +990,7 @@ let tools: Tool list = [
             + "measure, hierarchy and partition counts) and every relationship. Cheap; then use list_objects or "
             + "search_model to narrow down, and get_objects for detail."
         Grant = Grant.Read
-        Schema = """{"type":"object","properties":{},"additionalProperties":false}"""
+        Schema = schemaObj []
         ReadOnly = true
         Destructive = false
         Run = overview
@@ -1018,10 +1005,24 @@ let tools: Tool list = [
             + "to the other tools. At most 500."
         Grant = Grant.Read
         Schema =
-            """{"type":"object","properties":{"container":{"type":"string","description":"an object; default the model"},"""
-            + """"kinds":{"type":"array","items":{"type":"string","enum":["table","column","measure","hierarchy","level","partition","calcitem","calendar","relationship","role","perspective","culture","expression","function","datasource"]}},"""
-            + """"name":{"type":"string","description":"wildcard on the object's name"},"""
-            + """"where":{"type":"array","items":{"type":"string"},"description":"<path>=<pattern> or <path>!=<pattern>; `objectKind` is the object's kind (measure, column, ...)"}},"additionalProperties":false}"""
+            schemaObj [
+                "container", strProp (Some "an object; default the model")
+                "kinds",
+                obj [
+                    "type", str "array"
+                    "items",
+                    obj [
+                        "type", str "string"
+                        "enum", arr [ for k in ObjectKind.all -> str (ObjectKind.token k) ]
+                    ]
+                ]
+                "name", strProp (Some "wildcard on the object's name")
+                "where",
+                strArrayProp (
+                    Some
+                        "<path>=<pattern> or <path>!=<pattern>; `objectKind` is the object's kind (measure, column, ...)"
+                )
+            ]
         ReadOnly = true
         Destructive = false
         Run = listObjects
@@ -1035,8 +1036,13 @@ let tools: Tool list = [
             + "property paths (wildcards, e.g. 'expression', 'annotations.*'). Returns one hit per matching line."
         Grant = Grant.Read
         Schema =
-            """{"type":"object","properties":{"text":{"type":"string"},"regex":{"type":"boolean"},"caseSensitive":{"type":"boolean"},"""
-            + """"in":{"type":"array","items":{"type":"string"}},"kinds":{"type":"array","items":{"type":"string"}}},"required":["text"],"additionalProperties":false}"""
+            requiredSchema [
+                "text", strProp None
+                "regex", boolProp ()
+                "caseSensitive", boolProp ()
+                "in", strArrayProp None
+                "kinds", strArrayProp None
+            ] [ "text" ]
         ReadOnly = true
         Destructive = false
         Run = search
@@ -1050,9 +1056,12 @@ let tools: Tool list = [
             + "'annotations.X'). 'children' includes child objects (a table's columns, measures, ...)."
         Grant = Grant.Read
         Schema =
-            """{"type":"object","properties":{"objects":"""
-            + objectsSchema
-            + ""","properties":{"type":"array","items":{"type":"string"}},"format":{"type":"string","enum":["json","tmdl"]},"children":{"type":"boolean"}},"required":["objects"],"additionalProperties":false}"""
+            requiredSchema [
+                "objects", objectsSchema ()
+                "properties", strArrayProp None
+                "format", obj [ "type", str "string"; "enum", arr [ str "json"; str "tmdl" ] ]
+                "children", boolProp ()
+            ] [ "objects" ]
         ReadOnly = true
         Destructive = false
         Run = getObjects
@@ -1064,8 +1073,7 @@ let tools: Tool list = [
             "The properties a 'set' operation can write on an object: path, type, current value, allowed "
             + "values of enums, what a reference points at. 'all' adds read-only ones with the reason."
         Grant = Grant.Read
-        Schema =
-            """{"type":"object","properties":{"object":{"type":"string"},"all":{"type":"boolean"}},"required":["object"],"additionalProperties":false}"""
+        Schema = requiredSchema [ "object", strProp None; "all", boolProp () ] [ "object" ]
         ReadOnly = true
         Destructive = false
         Run = listProperties
@@ -1076,7 +1084,15 @@ let tools: Tool list = [
         Description = "What an object's DAX depends on and what refers to it, to 'depth' levels (default 1, 0 for all)."
         Grant = Grant.Read
         Schema =
-            """{"type":"object","properties":{"object":{"type":"string"},"direction":{"type":"string","enum":["dependsOn","referencedBy","both"]},"depth":{"type":"integer","minimum":0}},"required":["object"],"additionalProperties":false}"""
+            requiredSchema [
+                "object", strProp None
+                "direction",
+                obj [
+                    "type", str "string"
+                    "enum", arr [ str "dependsOn"; str "referencedBy"; str "both" ]
+                ]
+                "depth", obj [ "type", str "integer"; "minimum", num 0 ]
+            ] [ "object" ]
         ReadOnly = true
         Destructive = false
         Run = dependencies
@@ -1088,7 +1104,7 @@ let tools: Tool list = [
             "The model's errors and warnings (unresolved references, circular references, duplicate names, "
             + "invalid DAX, TOM's own checks), with dependent errors grouped under their root cause."
         Grant = Grant.Read
-        Schema = """{"type":"object","properties":{},"additionalProperties":false}"""
+        Schema = schemaObj []
         ReadOnly = true
         Destructive = false
         Run = validate
@@ -1100,10 +1116,7 @@ let tools: Tool list = [
             "DAX anti-patterns in the model's expressions (or only these objects'), with the rule and whether "
             + "sm lint --fix can fix it."
         Grant = Grant.Read
-        Schema =
-            """{"type":"object","properties":{"objects":"""
-            + objectsSchema
-            + """},"additionalProperties":false}"""
+        Schema = schemaObj [ "objects", objectsSchema () ]
         ReadOnly = true
         Destructive = false
         Run = lint
@@ -1115,8 +1128,7 @@ let tools: Tool list = [
             "Format DAX text, or an object's expression, in sm's (SQLBI-style) layout. Changes nothing: "
             + "use apply_changes to store the result."
         Grant = Grant.Read
-        Schema =
-            """{"type":"object","properties":{"dax":{"type":"string"},"object":{"type":"string"},"long":{"type":"boolean"}},"additionalProperties":false}"""
+        Schema = schemaObj [ "dax", strProp None; "object", strProp None; "long", boolProp () ]
         ReadOnly = true
         Destructive = false
         Run = formatDax
@@ -1128,7 +1140,7 @@ let tools: Tool list = [
             "The whole model as TMDL. Large models use a great many tokens: prefer model_overview, "
             + "list_objects and get_objects."
         Grant = Grant.Read
-        Schema = """{"type":"object","properties":{},"additionalProperties":false}"""
+        Schema = schemaObj []
         ReadOnly = true
         Destructive = false
         Run = fullModel
@@ -1140,7 +1152,7 @@ let tools: Tool list = [
             "The Best Practice Analyzer rules that apply: sm's built-in rules, the model's own, and the "
             + "user's rule files (never any URL)."
         Grant = Grant.Bpa
-        Schema = """{"type":"object","properties":{},"additionalProperties":false}"""
+        Schema = schemaObj []
         ReadOnly = true
         Destructive = false
         Run = listRules
@@ -1150,8 +1162,7 @@ let tools: Tool list = [
         Title = "Run the Best Practice Analyzer"
         Description = "Run the Best Practice Analyzer (all rules, or these rule IDs) and list the violations."
         Grant = Grant.Bpa
-        Schema =
-            """{"type":"object","properties":{"rules":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}"""
+        Schema = schemaObj [ "rules", strArrayProp None ]
         ReadOnly = true
         Destructive = false
         Run = runBpa
@@ -1165,7 +1176,10 @@ let tools: Tool list = [
             + "reading many rows."
         Grant = Grant.DataRead
         Schema =
-            """{"type":"object","properties":{"dax":{"type":"string"},"maxRows":{"type":"integer","minimum":1,"maximum":500}},"required":["dax"],"additionalProperties":false}"""
+            requiredSchema [
+                "dax", strProp None
+                "maxRows", obj [ "type", str "integer"; "minimum", num 1; "maximum", num 500 ]
+            ] [ "dax" ]
         ReadOnly = true
         Destructive = false
         Run = runQuery
@@ -1187,7 +1201,21 @@ let tools: Tool list = [
             + "Returns the changes, and the errors the batch introduced and resolved. Changes stay in memory."
         Grant = Grant.MetadataWrite
         Schema =
-            """{"type":"object","properties":{"operations":{"type":"array","minItems":1,"items":{"type":"object","properties":{"op":{"type":"string","enum":["set","rename","add","remove","move","script"]}},"required":["op"]}}},"required":["operations"],"additionalProperties":false}"""
+            requiredSchema [
+                "operations",
+                obj [
+                    "type", str "array"
+                    "minItems", num 1
+                    "items",
+                    requiredSchema [
+                        "op",
+                        obj [
+                            "type", str "string"
+                            "enum", arr (List.map str [ "set"; "rename"; "add"; "remove"; "move"; "script" ])
+                        ]
+                    ] [ "op" ]
+                ]
+            ] [ "operations" ]
         ReadOnly = false
         Destructive = true
         Run = applyChanges
@@ -1199,7 +1227,7 @@ let tools: Tool list = [
             "Write the changes made this session back to the model's files, then the report files they "
             + "rewrite. Refused if they introduced errors, unless 'force' is true."
         Grant = Grant.MetadataWrite
-        Schema = """{"type":"object","properties":{"force":{"type":"boolean"}},"additionalProperties":false}"""
+        Schema = schemaObj [ "force", boolProp () ]
         ReadOnly = false
         Destructive = true
         Run = save
@@ -1219,7 +1247,7 @@ let private toolJson (t: Tool) : JsonNode =
         "name", str t.Name
         "title", str t.Title
         "description", str t.Description
-        "inputSchema", JsonNode.Parse t.Schema
+        "inputSchema", t.Schema.DeepClone()
         "annotations",
         obj [
             "title", str t.Title

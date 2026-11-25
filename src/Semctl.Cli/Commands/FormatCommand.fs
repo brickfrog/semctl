@@ -6,6 +6,7 @@ open System.IO
 open System.Text.Json.Nodes
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.Cli.Output
 open Semctl.Cli.Common
 
@@ -147,15 +148,13 @@ let private loose
         if ctx.Json then
             let o =
                 match result with
-                | Ok formatted ->
-                    obj [ "success", bool true; "formatted", str formatted; "errors", arr [] ] :?> JsonObject
+                | Ok formatted -> jsonObj [ "success", bool true; "formatted", str formatted; "errors", arr [] ]
                 | Error e ->
-                    obj [
+                    jsonObj [
                         "success", bool false
                         "formatted", null
                         "errors", arr (errorsOf e |> List.map problemJson)
                     ]
-                    :?> JsonObject
 
             if check then
                 o.["changed"] <-
@@ -200,11 +199,8 @@ let private warnings (result: Format.ModelFormat) = [
         | Ok _ -> ()
 ]
 
-let private plural n (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
-
-let private outcomeJson (o: Format.Outcome) =
-    obj [
+let private outcomeJson (o: Format.Outcome) : JsonObject =
+    jsonObj [
         "ref", str (ObjectRef.format o.Source.Owner.Ref)
         "kind", str (ObjectKind.token o.Source.Owner.Ref.Kind)
         "property", str o.Source.Property
@@ -222,12 +218,12 @@ let private check (ctx: Ctx) (result: Format.ModelFormat) =
                 "command", str "format"
                 "check", bool true
                 "expressions", num result.Outcomes.Length
-                "unformatted", arr (changed |> List.map outcomeJson)
+                "unformatted", arr (changed |> List.map (fun o -> outcomeJson o :> JsonNode))
                 "failed",
                 arr (
                     failed
                     |> List.map (fun o ->
-                        let j = outcomeJson o :?> JsonObject
+                        let j = outcomeJson o
 
                         j.["errors"] <-
                             match o.Result with

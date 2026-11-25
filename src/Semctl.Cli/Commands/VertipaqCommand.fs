@@ -457,22 +457,18 @@ type private StatsSource =
 let private checkTables (s: Stats) (names: string list) : Result<string list, SemctlError> =
     let known = s.Tables |> List.map _.Table
 
-    names
-    |> List.fold
-        (fun acc name ->
-            acc
-            |> Result.bind (fun found ->
-                match
-                    known
-                    |> List.tryFind (fun t -> String.Equals(t, name, StringComparison.OrdinalIgnoreCase))
-                with
-                | Some t -> Ok(found @ [ t ])
-                | None ->
-                    match Suggest.closest known name with
-                    | [] -> Error(ObjectNotFound $"table:{name}")
-                    | close ->
-                        Error(ObjectNotFoundSuggest($"table:{name}", close |> List.map (fun n -> $"table:{n}")))))
-        (Ok [])
+    Semctl.Prelude.resultTraverse
+        (fun name ->
+            match
+                known
+                |> List.tryFind (fun t -> String.Equals(t, name, StringComparison.OrdinalIgnoreCase))
+            with
+            | Some t -> Ok t
+            | None ->
+                match Suggest.closest known name with
+                | [] -> Error(ObjectNotFound $"table:{name}")
+                | close -> Error(ObjectNotFoundSuggest($"table:{name}", close |> List.map (fun n -> $"table:{n}"))))
+        names
 
 let private isModelPath (p: string) =
     XmlaAddress.isRemote p || File.Exists p || Directory.Exists p
@@ -715,8 +711,8 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
                     let result = render ctx (views args) top (exported |> Option.map fst) tables stats
 
                     match exported with
-                    | Some(node, _) when not ctx.Json ->
-                        let path = (node :?> JsonObject).["path"].GetValue<string>()
+                    | Some(:? JsonObject as exp, _) when not ctx.Json ->
+                        let path = exp.["path"].GetValue<string>()
                         ctx.Err.WriteLine($"Wrote {path}")
 
                         if args.Contains Obfuscate then

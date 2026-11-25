@@ -122,10 +122,10 @@ let private sourceJson (s: RuleSource) =
         "source", str (RuleSource.describe s)
     ]
 
-let private ruleJson (c: Bpa.CollectedRules) (disabled: Set<string>) (r: Rule) =
+let private ruleJson (c: Bpa.CollectedRules) (disabled: Set<string>) (r: Rule) : JsonObject =
     let support = Bpa.compile r
 
-    obj [
+    jsonObj [
         "id", str r.Id
         "name", str r.Name
         "category", str r.Category
@@ -238,7 +238,7 @@ let private list (ctx: Ctx) (args: ParseResults<ListArgs>) =
                 writeJson
                     ctx.Out
                     (obj [
-                        "rules", arr (rules |> List.map (ruleJson c disabled))
+                        "rules", arr (rules |> List.map (fun r -> ruleJson c disabled r :> JsonNode))
                         yield! collectedFields c
                     ])
             else
@@ -314,7 +314,7 @@ let private show (ctx: Ctx) (args: ParseResults<ShowArgs>) =
             let disabled = disabledIds db
 
             if ctx.Json then
-                let o = ruleJson c disabled r :?> JsonObject
+                let o = ruleJson c disabled r
 
                 for k, v in collectedFields c do
                     o.[k] <- v

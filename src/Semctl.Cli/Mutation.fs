@@ -85,8 +85,8 @@ let private resultJson
     (opts: Options)
     (applied: Mutation.Applied)
     (saved: ModelIO.SavedModel option)
-    : JsonNode =
-    let o = Changes.changesJson command applied.Changes :?> JsonObject
+    : JsonObject =
+    let o = Changes.changesJson command applied.Changes
     o.["dryRun"] <- bool (opts.Target = DryRun)
     o.["introducedErrors"] <- arr (applied.IntroducedErrors |> List.map (findingOf >> Findings.findingJson))
     o.["warnings"] <- arr (applied.Effect.Warnings |> List.map str)
@@ -170,19 +170,18 @@ and runWith
     match loaded with
     | Error e -> Failed e
     | Ok(source, db) ->
-        let files = ref []
+        let mutable files = []
 
         let applied =
             SaveGate.apply db (fun db ->
                 edit source db
                 |> Result.map (fun (effect, fs) ->
-                    files.Value <- fs
+                    files <- fs
                     effect))
 
         match applied with
         | Error e -> Failed e
         | Ok applied ->
-            let files = files.Value
 
             // Inside `sm interactive`, an edit of the session's model is staged (--save also saves
             // the session); --save-to still writes elsewhere.
@@ -245,7 +244,7 @@ and runWith
                 let blockedError = ChangeIntroducesErrors blockedCount
 
                 if ctx.Json then
-                    let json = resultJson command opts applied saved :?> JsonObject
+                    let json = resultJson command opts applied saved
                     json.["files"] <- filesJson files filesWritten
 
                     match staging with
@@ -310,16 +309,16 @@ and runWith
                             ctx.Err.WriteLine($"  {ObjectRef.format i.Ref}  {i.Message}  [{i.Rule}]")
 
                     if not applied.Changes.IsEmpty then
-                        match opts.Target, saved with
-                        | DryRun, _ when staging.IsSome ->
-                            let n = staging.Value.Model.Unsaved
+                        match opts.Target, saved, staging with
+                        | DryRun, _, Some a ->
+                            let n = a.Model.Unsaved
                             let changes = if n = 1 then "1 unsaved change" else $"{n} unsaved changes"
 
                             ctx.Err.WriteLine(
                                 $"Staged ({changes} in this session): `save` writes them, `undo` takes this back."
                             )
-                        | DryRun, _ -> ctx.Err.WriteLine("Dry run - nothing saved. Add --save to persist.")
-                        | _, Some s ->
+                        | DryRun, _, None -> ctx.Err.WriteLine("Dry run - nothing saved. Add --save to persist.")
+                        | _, Some s, _ ->
                             let format = ModelIO.OutputFormat.token s.Format
                             ctx.Err.WriteLine($"Saved {format}  {s.Path}  ({ModelIO.Eol.token s.Eol})")
 
@@ -333,7 +332,7 @@ and runWith
                                         $"{files.Length} files"
 
                                 ctx.Err.WriteLine($"Updated {referencesText n} in {fileCount} of the report")
-                        | _, None -> ()
+                        | _, None, _ -> ()
 
                 match blocked, ctx.Json with
                 | true, true -> DoneWith(ExitCode.ofError blockedError)

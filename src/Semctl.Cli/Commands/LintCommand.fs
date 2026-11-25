@@ -4,6 +4,7 @@ open System
 open System.IO
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.Cli.Output
 open Semctl.Cli.Common
 
@@ -71,9 +72,6 @@ let sarifRule (r: Lint.Rule) : Sarif.Rule = {
     HelpUri = None
     Category = Some r.Category
 }
-
-let private plural n (word: string) =
-    if n = 1 then $"1 {word}" else $"{n} {word}s"
 
 /// The aligned validate-style report, plus how many findings --fix would fix.
 let lintText (out: TextWriter) (findings: Lint.Finding list) =

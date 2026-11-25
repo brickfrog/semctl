@@ -30,6 +30,7 @@ open System.Runtime.InteropServices
 open System.Text.Json
 open System.Text.Json.Nodes
 open Semctl
+open Semctl.Prelude
 
 // ---------------------------------------------------------------------------------------------
 // Profiles
@@ -121,6 +122,8 @@ let private readJson (file: string) : Result<JsonObject, SemctlError> =
     with e ->
         Error(InvalidConfig(file, e.Message))
 
+let private jsonWriteOptions = JsonSerializerOptions(WriteIndented = true)
+
 let private writeJson (file: string) (o: JsonObject) : Result<unit, SemctlError> =
     try
         match Path.GetDirectoryName(Path.GetFullPath file) with
@@ -130,7 +133,7 @@ let private writeJson (file: string) (o: JsonObject) : Result<unit, SemctlError>
         let tmp = $"{file}.{Guid.NewGuid():N}.tmp"
 
         try
-            File.WriteAllText(tmp, o.ToJsonString(JsonSerializerOptions(WriteIndented = true)) + "\n")
+            File.WriteAllText(tmp, o.ToJsonString(jsonWriteOptions) + "\n")
             File.Move(tmp, file, true)
             Ok()
         with _ ->
@@ -270,37 +273,40 @@ let check (p: Profile) : Result<Profile, SemctlError> =
 
 /// Write (create or replace) a profile, keeping the rest of the config file as it is.
 let saveProfile getEnv (p: Profile) : Result<string, SemctlError> =
-    check p
-    |> Result.bind (fun p ->
-        needConfig getEnv
-        |> Result.bind (fun file ->
-            readJson file
-            |> Result.bind (fun root ->
-                if not (root.ContainsKey "formatVersion") then
-                    root.["formatVersion"] <- JsonValue.Create 1
+    result {
+        let! p = check p
+        let! file = needConfig getEnv
+        let! root = readJson file
 
-                let ps =
-                    match root.["profiles"] with
-                    | :? JsonObject as ps -> ps
-                    | _ ->
-                        let ps = JsonObject()
-                        root.["profiles"] <- ps
-                        ps
+        if not (root.ContainsKey "formatVersion") then
+            root.["formatVersion"] <- JsonValue.Create 1
 
-                ps.[p.Name] <- profileJson p
-                writeJson file root |> Result.map (fun () -> file))))
+        let ps =
+            match root.["profiles"] with
+            | :? JsonObject as ps -> ps
+            | _ ->
+                let ps = JsonObject()
+                root.["profiles"] <- ps
+                ps
+
+        ps.[p.Name] <- profileJson p
+        do! writeJson file root
+        return file
+    }
 
 /// Remove a profile. False if there was none of that name.
 let removeProfile getEnv (name: string) : Result<bool, SemctlError> =
-    needConfig getEnv
-    |> Result.bind (fun file ->
-        readJson file
-        |> Result.bind (fun root ->
-            match root.["profiles"] with
-            | :? JsonObject as ps when ps.ContainsKey name ->
-                ps.Remove name |> ignore
-                writeJson file root |> Result.map (fun () -> true)
-            | _ -> Ok false))
+    result {
+        let! file = needConfig getEnv
+        let! root = readJson file
+
+        match root.["profiles"] with
+        | :? JsonObject as ps when ps.ContainsKey name ->
+            ps.Remove name |> ignore
+            do! writeJson file root
+            return true
+        | _ -> return false
+    }
 
 // ---------------------------------------------------------------------------------------------
 // The terminal's session
@@ -572,24 +578,27 @@ let prepare (getEnv: string -> string option) (argv: string array) =
                     |> Result.bind (fun (args, used) ->
                         if a = activeArgument then
                             activeModel getEnv
-                            |> Result.bind (fun active ->
-                                match active.Profile with
-                                | Some name ->
-                                    match tryProfile getEnv name with
-                                    | Ok p -> Ok(args @ [ active.Model ], used @ [ p ])
-                                    // A profile removed since: the connection still stands.
-                                    | Error _ -> Ok(args @ [ active.Model ], used)
-                                | None -> Ok(args @ [ active.Model ], used))
+                            |> Result.map (fun active ->
+                                match
+                                    active.Profile
+                                    |> Option.bind (fun name -> Result.toOption (tryProfile getEnv name))
+                                with
+                                | Some p -> active.Model :: args, p :: used
+                                | None -> active.Model :: args, used)
                         elif uses a then
-                            tryProfile getEnv (a.Substring profilePrefix.Length)
-                            |> Result.bind (fun p ->
-                                Profile.modelArgument p |> Result.map (fun m -> args @ [ m ], used @ [ p ]))
+                            result {
+                                let! p = tryProfile getEnv (a.Substring profilePrefix.Length)
+                                let! m = Profile.modelArgument p
+                                return m :: args, p :: used
+                            }
                         else
-                            Ok(args @ [ a ], used)))
+                            Ok(a :: args, used)))
                 (Ok([], []))
 
         resolved
         |> Result.map (fun (args, used) ->
+            let used = List.rev used
+
             let overrides =
                 used
                 |> List.fold
@@ -601,4 +610,4 @@ let prepare (getEnv: string -> string option) (argv: string array) =
                 | Some v -> Some v
                 | None -> Map.tryFind name overrides
 
-            Array.ofList args, env)
+            Array.ofList (List.rev args), env)

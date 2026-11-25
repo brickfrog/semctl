@@ -9,6 +9,7 @@ open System
 open System.IO
 open Argu
 open Semctl
+open Semctl.Prelude
 open Semctl.Xmla
 open Semctl.Cli.Output
 open Semctl.Cli.Common
@@ -48,8 +49,8 @@ type private Report = {
     Databases: DatabaseSummary list
 }
 
-let private reportJson (r: Report) =
-    obj [
+let private reportJson (r: Report) : System.Text.Json.Nodes.JsonObject =
+    jsonObj [
         "server", str r.Address.DataSource
         "database", optStr r.Address.Database
         "authentication", str r.Credential
@@ -217,28 +218,31 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
         let access = Source.access ctx
 
         let result =
-            XmlaAddress.parseServer server
-            |> Result.bind (fun address ->
-                Remote.withConnection access address (fun c ->
-                    Remote.serverProperties c
-                    |> Result.bind (fun server ->
-                        Remote.databases c
-                        |> Result.bind (fun databases ->
+            result {
+                let! address = XmlaAddress.parseServer server
+
+                return!
+                    Remote.withConnection access address (fun c ->
+                        result {
+                            let! server = Remote.serverProperties c
+                            let! databases = Remote.databases c
+
                             // A database in the address must exist.
-                            let known =
+                            do!
                                 match address.Database with
                                 | Some _ -> Remote.resolveDatabase c |> Result.map ignore
                                 | None -> Ok()
 
-                            known
-                            |> Result.bind (fun () ->
-                                Credentials.resolve access.Environment address
-                                |> Result.map (fun credential -> {
-                                    Address = address
-                                    Credential = XmlaCredential.describe credential
-                                    Server = server
-                                    Databases = databases
-                                }))))))
+                            let! credential = Credentials.resolve access.Environment address
+
+                            return {
+                                Address = address
+                                Credential = XmlaCredential.describe credential
+                                Server = server
+                                Databases = databases
+                            }
+                        })
+            }
 
         match result with
         | Error e -> Failed e
@@ -252,7 +256,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             let kept = if remembering then remember ctx active else None
 
             if ctx.Json then
-                let json = reportJson report :?> System.Text.Json.Nodes.JsonObject
+                let json = reportJson report
 
                 if kept.IsSome then
                     json.["active"] <- activeJson active

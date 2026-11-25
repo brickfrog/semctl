@@ -20,11 +20,11 @@ let gatedErrors (db: Database) =
     Mutation.gatedErrorsWith semanticChecks db
 
 /// Mutation.apply with every gating rule.
-let apply (db: Database) (edit: Database -> Result<Mutation.Effect, SemctlError>) =
+let apply (db: Database) (edit: Database -> Result<Mutation.Effect, 'err>) =
     Mutation.applyWith semanticChecks db edit
 
 /// Mutation.applyResolving with every gating rule.
-let applyResolving (db: Database) (edit: Database -> Result<Mutation.Effect, SemctlError>) =
+let applyResolving (db: Database) (edit: Database -> Result<Mutation.Effect, 'err>) =
     Mutation.applyResolvingWith semanticChecks db edit
 
 /// Deploy.plan with every validate rule's errors.

@@ -192,10 +192,12 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             UsageError "--data is for model files: a server model is read on the server"
         else
             remote ctx args source table rows columns
-    | [ source; _ ] when data.IsNone ->
-        UsageError
-            $"'{source}' is model files: give the fixture data to read with --data <directory> (see `sm data init`), or preview a server model (xmla:<server>;<database>)"
-    | [ source; table ] -> local ctx args source data.Value table rows columns
+    | [ source; table ] ->
+        match data with
+        | None ->
+            UsageError
+                $"'{source}' is model files: give the fixture data to read with --data <directory> (see `sm data init`), or preview a server model (xmla:<server>;<database>)"
+        | Some dataDir -> local ctx args source dataDir table rows columns
     | [ _ ] -> UsageError "expected a table after the model"
     | [] -> UsageError "expected a model and a table: sm preview <model> <table> [--rows N]"
     | _ -> UsageError "expected a model and one table (quote a name with spaces)"
