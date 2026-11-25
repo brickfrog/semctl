@@ -34,16 +34,16 @@ let tests =
         <| fun () ->
             let r = semctl [ "list"; "x"; "--bogus"; "--json" ]
             Expect.equal r.Code ExitCode.usage ""
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "usage" ""
+            let doc = json r
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "usage" ""
 
         testCase "info --json"
         <| fun () ->
             use t = project ()
             let r = semctl [ "info"; t.Path; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("compatibilityLevel").GetInt32()) 1702 ""
             Expect.equal (root.GetProperty("source").GetProperty("format").GetString()) "tmdl" ""
             Expect.equal (root.GetProperty("counts").GetProperty("measure").GetInt32()) 2 ""
@@ -54,7 +54,7 @@ let tests =
             use t = project ()
             let r = semctl [ "--json"; "info"; t.Path ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use _ = json r
+            json r |> ignore
             ()
 
         testCase "info text"
@@ -81,8 +81,8 @@ let tests =
             use t = project ()
             let r = semctl [ "list"; t.Path; "--kind"; "relationship,role"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let items = doc.RootElement.EnumerateArray() |> List.ofSeq
+            let doc = json r
+            let items = doc.EnumerateArray() |> List.ofSeq
             Expect.equal items.Length 2 ""
             Expect.equal (items.[0].GetProperty("detail").GetString()) "Sales[DateKey] -> Date[DateKey]" ""
             Expect.equal (items.[1].GetProperty("ref").GetString()) "role:Readers" ""
@@ -109,8 +109,8 @@ let tests =
             Expect.equal r1.Code ExitCode.ok r1.Err
             let r2 = semctl [ "convert"; bim; t.Combine "Copy.SemanticModel"; "--json" ]
             Expect.equal r2.Code ExitCode.ok r2.Err
-            use doc = json r2
-            Expect.equal (doc.RootElement.GetProperty("output").GetProperty("format").GetString()) "pbip" ""
+            let doc = json r2
+            Expect.equal (doc.GetProperty("output").GetProperty("format").GetString()) "pbip" ""
             Expect.isTrue (File.Exists(t.Combine("Copy.SemanticModel", ".platform"))) ""
 
         testCase "convert onto a non-empty destination is an output error unless --force"
@@ -120,12 +120,9 @@ let tests =
             Expect.equal (semctl [ "convert"; t.Path; dest ]).Code ExitCode.ok ""
             let again = semctl [ "convert"; t.Path; dest; "--json" ]
             Expect.equal again.Code ExitCode.output ""
-            use doc = json again
+            let doc = json again
 
-            Expect.equal
-                (doc.RootElement.GetProperty("error").GetProperty("code").GetString())
-                "destination-not-empty"
-                ""
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "destination-not-empty" ""
 
             Expect.equal (semctl [ "convert"; t.Path; dest; "--force" ]).Code ExitCode.ok ""
 
@@ -156,8 +153,8 @@ let tests =
             Expect.equal (semctl [ "convert"; t.Path; dest; "--eol"; "crlf" ]).Code ExitCode.ok ""
             let r = semctl [ "convert"; t.Path; dest; "--force"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("output").GetProperty("eol").GetString()) "crlf" ""
+            let doc = json r
+            Expect.equal (doc.GetProperty("output").GetProperty("eol").GetString()) "crlf" ""
             Expect.stringContains (File.ReadAllText(Path.Combine(dest, "model.tmdl"))) "\r\n" ""
 
         testCase "get prints TMDL by default"
@@ -188,12 +185,12 @@ let tests =
             use t = project ()
             let r = semctl [ "get"; t.Path; "Sales"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("ref").GetString()) "table:Sales" ""
-            Expect.equal (doc.RootElement.GetProperty("object").GetProperty("name").GetString()) "Sales" ""
+            let doc = json r
+            Expect.equal (doc.GetProperty("ref").GetString()) "table:Sales" ""
+            Expect.equal (doc.GetProperty("object").GetProperty("name").GetString()) "Sales" ""
 
             let mutable columns = Unchecked.defaultof<JsonElement>
-            Expect.isFalse (doc.RootElement.GetProperty("object").TryGetProperty("columns", &columns)) "no children"
+            Expect.isFalse (doc.GetProperty("object").TryGetProperty("columns", &columns)) "no children"
 
         testCase "get --children includes child objects"
         <| fun () ->
@@ -213,8 +210,8 @@ let tests =
                 ] do
                 let r = semctl ([ "get"; t.Path ] @ args @ [ "--json" ])
                 Expect.equal r.Code ExitCode.input (String.concat " " args)
-                use doc = json r
-                Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) code ""
+                let doc = json r
+                Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) code ""
 
         testCase "find: matches exit 0, nothing found exits 1 (like grep)"
         <| fun () ->
@@ -242,8 +239,8 @@ let tests =
                 ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let hits = doc.RootElement.EnumerateArray() |> List.ofSeq
+            let doc = json r
+            let hits = doc.EnumerateArray() |> List.ofSeq
             Expect.hasLength hits 1 ""
             Expect.equal (hits.[0].GetProperty("ref").GetString()) "measure:Sales/Total" ""
             Expect.equal (hits.[0].GetProperty("line").GetInt32()) 1 ""
@@ -280,8 +277,8 @@ let tests =
 
             let ignored = semctl [ "diff"; sm; edited; "--ignore"; "expression"; "--json" ]
             Expect.equal ignored.Code ExitCode.ok ignored.Err
-            use doc = json ignored
-            Expect.equal (doc.RootElement.GetProperty("summary").GetProperty("modified").GetInt32()) 0 ""
+            let doc = json ignored
+            Expect.equal (doc.GetProperty("summary").GetProperty("modified").GetInt32()) 0 ""
 
         testCase "diff shows multi-line changes as a line diff"
         <| fun () ->
@@ -316,12 +313,12 @@ let tests =
                 semctl [ "deps"; t.Path; "calcitem:Time Intelligence/YTD"; "--depends-on"; "--json" ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
+            let doc = json r
             let mutable referencedBy = Unchecked.defaultof<JsonElement>
-            Expect.isFalse (doc.RootElement.TryGetProperty("referencedBy", &referencedBy)) ""
+            Expect.isFalse (doc.TryGetProperty("referencedBy", &referencedBy)) ""
 
             let refs =
-                doc.RootElement.GetProperty("dependsOn").EnumerateArray()
+                doc.GetProperty("dependsOn").EnumerateArray()
                 |> Seq.map (fun n -> n.GetProperty("ref").GetString())
                 |> List.ofSeq
 

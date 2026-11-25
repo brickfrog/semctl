@@ -997,10 +997,9 @@ let modelTests =
 [<Tests>]
 let sampleTests =
     testList "Format: sample model (SEMCTL_SAMPLE_MODEL)" [
-        match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-        | null
-        | "" -> testCase "not configured" <| fun () -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-        | path ->
+        match sampleModelPath () with
+        | None -> testCase "not configured" <| fun () -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+        | Some path ->
             testCase "every expression formats safely and settles; references and validation are unchanged"
             <| fun () ->
                 let _, db = ModelIO.loadPath path |> ok

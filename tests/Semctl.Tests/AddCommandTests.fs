@@ -14,16 +14,12 @@ let private snapshot (dir: string) =
     |> Array.sort
     |> Array.map (fun f -> f, File.ReadAllText f)
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 let private changes (r: Run) =
     let doc = json r
 
     [
-        for c in doc.RootElement.GetProperty("changes").EnumerateArray() ->
+        for c in doc.GetProperty("changes").EnumerateArray() ->
             c.GetProperty("objectPath").GetString(), c.GetProperty("changeKind").GetString()
     ]
 
@@ -64,7 +60,7 @@ let tests =
 
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.stringContains r.Err "Saved pbip" ""
-            let m = (load t.Path).Model.Tables.["Sales"].Measures.["Margin"]
+            let m = (loadModel t.Path).Model.Tables.["Sales"].Measures.["Margin"]
             Expect.equal m.Expression "[Total] * 0.1" ""
             Expect.equal m.FormatString "0.0%" ""
             Expect.equal m.DisplayFolder "KPIs" ""
@@ -91,9 +87,9 @@ let tests =
                 ""
 
             let doc = json r
-            Expect.equal (doc.RootElement.GetProperty("command").GetString()) "add" ""
-            Expect.isTrue (doc.RootElement.GetProperty("dryRun").GetBoolean()) ""
-            Expect.equal (doc.RootElement.GetProperty("summary").GetProperty("created").GetInt32()) 3 ""
+            Expect.equal (doc.GetProperty("command").GetString()) "add" ""
+            Expect.isTrue (doc.GetProperty("dryRun").GetBoolean()) ""
+            Expect.equal (doc.GetProperty("summary").GetProperty("created").GetInt32()) 3 ""
 
         testCase "a change that introduces errors is shown, but --save refuses it unless --force"
         <| fun () ->
@@ -123,12 +119,9 @@ let tests =
             Expect.equal r.Code ExitCode.findings r.Out
             let doc = json r
 
-            Expect.equal
-                (doc.RootElement.GetProperty("error").GetProperty("code").GetString())
-                "change-introduces-errors"
-                ""
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "change-introduces-errors" ""
 
-            Expect.equal (doc.RootElement.GetProperty("introducedErrors").GetArrayLength()) 1 ""
+            Expect.equal (doc.GetProperty("introducedErrors").GetArrayLength()) 1 ""
 
             let r =
                 semctl [
@@ -142,7 +135,7 @@ let tests =
                 ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            Expect.isTrue ((load t.Path).Model.Tables.["Sales"].Measures.Contains "Broken") "forced"
+            Expect.isTrue ((loadModel t.Path).Model.Tables.["Sales"].Measures.Contains "Broken") "forced"
 
         testCase "exit codes: usage errors 2, model refusals 3"
         <| fun () ->
@@ -170,10 +163,7 @@ let tests =
             Expect.stringContains r.Err "did you mean table:Sales?" ""
             let r = semctl [ "add"; t.Path; "measure:Sles/X"; "-e"; "1"; "--json" ]
 
-            Expect.equal
-                ((json r).RootElement.GetProperty("error").GetProperty("code").GetString())
-                "object-not-found"
-                ""
+            Expect.equal ((json r).GetProperty("error").GetProperty("code").GetString()) "object-not-found" ""
 
         testCase "--if-not-exists: exit 0, a note, no changes"
         <| fun () ->
@@ -210,7 +200,8 @@ let tests =
             Expect.stringContains r.Err "different data types" ""
 
             let rel =
-                (load t.Path).Model.Relationships |> Seq.find (fun r -> r.Name <> "Sales-Date")
+                (loadModel t.Path).Model.Relationships
+                |> Seq.find (fun r -> r.Name <> "Sales-Date")
                 :?> SingleColumnRelationship
 
             Expect.isTrue (fst (System.Guid.TryParse rel.Name)) rel.Name
@@ -268,7 +259,7 @@ let tests =
             add [ "function:My.Triple"; "-e"; "(x: INT64) => x * 3" ]
             add [ "partition:Sales/Sales 2024"; "-m"; "let y = 2 in y" ]
 
-            let db = load t.Path
+            let db = loadModel t.Path
             let m = db.Model
             Expect.equal (m.Tables.["Sales"].Columns.["Qty"] :?> DataColumn).SourceColumn "qty" ""
             Expect.equal m.Tables.["Budget"].Partitions.[0].Mode ModeType.DirectQuery ""
@@ -294,14 +285,13 @@ let tests =
                 semctl [ "add"; t.Path; "measure:Sales/Margin"; "-e"; "1"; "--save-to"; out ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            Expect.isTrue ((load out).Model.Tables.["Sales"].Measures.Contains "Margin") ""
+            Expect.isTrue ((loadModel out).Model.Tables.["Sales"].Measures.Contains "Margin") ""
 
             Expect.isFalse
-                ((load (t.Combine "Sales.SemanticModel")).Model.Tables.["Sales"].Measures.Contains "Margin")
+                ((loadModel (t.Combine "Sales.SemanticModel")).Model.Tables.["Sales"].Measures.Contains "Margin")
                 "the source is untouched"
 
-        testSequenced
-        <| testList "stdin" [
+        testList "stdin" [
             testCase "-e - reads the expression from stdin"
             <| fun () ->
                 use t = project ()
@@ -319,7 +309,7 @@ let tests =
                 Expect.equal r.Code ExitCode.ok r.Err
 
                 Expect.equal
-                    (load t.Path).Model.Tables.["Sales"].Measures.["Twice"].Expression
+                    (loadModel t.Path).Model.Tables.["Sales"].Measures.["Twice"].Expression
                     "VAR x = [Total]\nRETURN x * 2"
                     "the trailing line break is dropped"
 
@@ -331,7 +321,7 @@ let tests =
                     semctlWithStdin "let x = 1 in x" [ "add"; t.Path; "table:Budget"; "-m"; "-"; "--save" ]
 
                 Expect.equal r.Code ExitCode.ok r.Err
-                let p = (load t.Path).Model.Tables.["Budget"].Partitions.[0]
+                let p = (loadModel t.Path).Model.Tables.["Budget"].Partitions.[0]
                 Expect.equal (p.Source :?> MPartitionSource).Expression "let x = 1 in x" ""
 
                 let r =

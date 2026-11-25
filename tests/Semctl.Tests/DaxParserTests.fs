@@ -8,6 +8,7 @@ open Expecto
 open FsCheck
 open FsCheck.FSharp
 open Semctl
+open Semctl.Tests.Fixtures
 open Semctl.Dax
 open Semctl.DaxAst
 open Semctl.DaxParser
@@ -2424,11 +2425,7 @@ let corpusTests =
 
 // ---- A real model (optional) --------------------------------------------------------------------
 
-let private samplePath =
-    match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-    | null
-    | "" -> None
-    | p -> Some p
+let private samplePath = sampleModelPath ()
 
 [<Tests>]
 let sampleTests =

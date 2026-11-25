@@ -89,8 +89,8 @@ let tests =
                 ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "query" "command"
             Expect.equal (root.GetProperty("source").GetString()) (Path.GetFullPath model) "source"
             Expect.isTrue (root.TryGetProperty("durationMs") |> fst) "durationMs"
@@ -123,11 +123,9 @@ let tests =
             let all =
                 semctl [ "query"; model; "--data"; dir; "-f"; file; "--json"; "--max-rows"; "2" ]
 
-            use doc = json all
+            let doc = json all
 
-            Expect.isTrue
-                (doc.RootElement.GetProperty("results").[0].GetProperty("truncated").GetBoolean())
-                "truncated")
+            Expect.isTrue (doc.GetProperty("results").[0].GetProperty("truncated").GetBoolean()) "truncated")
 
         testCase "model files need --data, and a server model can't take it" (fun () ->
             let t, model, dir = setup star
@@ -147,9 +145,9 @@ let tests =
             let q = "EVALUATE { ( USERNAME (), USERCULTURE (), ISBLANK ( CUSTOMDATA () ) ) }"
             let refused = semctl [ "query"; model; "--data"; dir; q; "--json" ]
             Expect.notEqual refused.Code ExitCode.ok refused.Out
-            use doc = json refused
+            let doc = json refused
 
-            Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "not-supported" "code"
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "not-supported" "code"
 
             let r =
                 semctl [
@@ -179,12 +177,9 @@ let tests =
             File.WriteAllText(Path.Combine(dir, "Customer.csv"), "CustomerKey,Name,Country\nx,Ann,US\n")
             let r = semctl [ "query"; model; "--data"; dir; "EVALUATE Sales"; "--json" ]
             Expect.equal r.Code ExitCode.input r.Out
-            use doc = json r
+            let doc = json r
 
-            Expect.equal
-                (doc.RootElement.GetProperty("error").GetProperty("code").GetString())
-                "fixture-has-errors"
-                "code")
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "fixture-has-errors" "code")
 
         testCase "a missing fixture directory or model" (fun () ->
             let t, model, _ = setup star
@@ -225,8 +220,8 @@ let tests =
                     "--json"
                 ]
 
-            use doc = json j
-            Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "not-supported" "code")
+            let doc = json j
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "not-supported" "code")
 
         testCase "a syntax error and a DAX error" (fun () ->
             let t, model, dir = setup star
@@ -259,8 +254,8 @@ let tests =
                 "text"
 
             let j = semctl [ "query"; model; "--coverage"; "--json" ]
-            use doc = json j
-            let root = doc.RootElement
+            let doc = json j
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "query coverage" "command"
             let measures = root.GetProperty("summary").GetProperty("measures")
 
@@ -282,15 +277,13 @@ let tests =
                 ExitCode.usage
                 "no query with --coverage")
 
-        testSequenced (
-            testCase "the query from standard input" (fun () ->
-                let t, model, dir = setup star
-                use _ = t
+        testCase "the query from standard input" (fun () ->
+            let t, model, dir = setup star
+            use _ = t
 
-                let r =
-                    semctlWithStdin "EVALUATE ROW ( \"v\", [Units] )" [ "query"; model; "--data"; dir; "-"; "--csv" ]
+            let r =
+                semctlWithStdin "EVALUATE ROW ( \"v\", [Units] )" [ "query"; model; "--data"; dir; "-"; "--csv" ]
 
-                Expect.equal r.Code ExitCode.ok r.Err
-                Expect.equal (lines r.Out) [ "[v]"; "17" ] "csv")
-        )
+            Expect.equal r.Code ExitCode.ok r.Err
+            Expect.equal (lines r.Out) [ "[v]"; "17" ] "csv")
     ]

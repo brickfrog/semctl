@@ -10,10 +10,6 @@ open Semctl.Tests.Fixtures
 open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 /// File names in a folder exactly as the file system stores them.
 let private namesIn (dir: string) =
@@ -49,7 +45,7 @@ let tests =
             Expect.contains names "SALES.tmdl" "the file has the new casing"
             Expect.isFalse (List.contains "Sales.tmdl" names) "the old casing is gone"
 
-            let db = load t.Path
+            let db = loadModel t.Path
             let sales = db.Model.Tables.Find "SALES"
             Expect.isNotNull sales "the table survives"
             Expect.equal sales.Name "SALES" "with its new name"
@@ -69,14 +65,14 @@ let tests =
             let names = namesIn (Path.Combine(tmdl, "tables"))
             Expect.contains names "DATE.tmdl" ""
             Expect.isFalse (List.contains "Date.tmdl" names) ""
-            let db = load tmdl
+            let db = loadModel tmdl
             Expect.equal (db.Model.Tables.Find "DATE").Name "DATE" ""
             Expect.equal (db.Model.Tables.["DATE"].Hierarchies.["Calendar"].Levels.Count) 2 "hierarchy intact"
 
         testCase "a role: its own file is renamed"
         <| fun () ->
             use t = project ()
-            let db = load t.Path
+            let db = loadModel t.Path
             let roles = db.Model.Roles |> Seq.map (fun r -> r.Name) |> List.ofSeq
             let role = List.head roles
             let upper = role.ToUpperInvariant()
@@ -86,7 +82,7 @@ let tests =
             let names = namesIn (t.Combine("Sales.SemanticModel", "definition", "roles"))
             Expect.contains names $"{upper}.tmdl" ""
             Expect.isFalse (List.contains $"{role}.tmdl" names) ""
-            Expect.isNotNull ((load t.Path).Model.Roles.Find upper) ""
+            Expect.isNotNull ((loadModel t.Path).Model.Roles.Find upper) ""
 
         testCase "measures and columns (inside their table's file)"
         <| fun () ->
@@ -95,7 +91,7 @@ let tests =
             Expect.equal (semctl [ "rename"; t.Path; "Sales[Amount]"; "AMOUNT"; "--save" ]).Code ExitCode.ok ""
             let names = namesIn (t.Combine("Sales.SemanticModel", "definition", "tables"))
             Expect.contains names "Sales.tmdl" "the table file stays"
-            let sales = (load t.Path).Model.Tables.["Sales"]
+            let sales = (loadModel t.Path).Model.Tables.["Sales"]
             Expect.equal sales.Measures.["TOTAL"].Name "TOTAL" ""
             Expect.equal sales.Measures.["TOTAL"].Expression "SUM(Sales[AMOUNT])" ""
             Expect.equal sales.Measures.["Total (hidden)"].Expression "[TOTAL]" ""

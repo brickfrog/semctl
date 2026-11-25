@@ -467,10 +467,9 @@ let tests =
 
         testCase "SEMCTL_SAMPLE_MODEL: export then apply changes nothing"
         <| fun () ->
-            match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-            | null
-            | "" -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-            | path ->
+            match sampleModelPath () with
+            | None -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+            | Some path ->
                 let load () = ModelIO.loadPath path |> ok |> snd
                 let e = exportAll (load ())
                 Expect.isEmpty e.Warnings "every object reads back"

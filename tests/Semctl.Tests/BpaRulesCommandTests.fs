@@ -31,13 +31,13 @@ let private named (id: string) (name: string) (expression: string) : (string * o
 let private withModelRule (id: string) (name: string) (db: Database) =
     db.Model.Annotations.Add(new Annotation(Name = "BestPracticeAnalyzer", Value = ruleJson [ named id name "true" ]))
 
-let private findingsOf (doc: JsonDocument) = [
-    for f in doc.RootElement.GetProperty("findings").EnumerateArray() ->
+let private findingsOf (doc: JsonElement) = [
+    for f in doc.GetProperty("findings").EnumerateArray() ->
         f.GetProperty("code").GetString(), f.GetProperty("objectPath").GetString()
 ]
 
-let private ruleIn (doc: JsonDocument) (id: string) =
-    doc.RootElement.GetProperty("rules").EnumerateArray()
+let private ruleIn (doc: JsonElement) (id: string) =
+    doc.GetProperty("rules").EnumerateArray()
     |> Seq.find (fun r -> r.GetProperty("id").GetString() = id)
 
 [<Tests>]
@@ -57,7 +57,7 @@ let tests =
             let env = userDirs @ [ "SM_BPA_RULES", t.Combine "env.json" ]
 
             let nameOf (r: Run) =
-                use doc = json r
+                let doc = json r
                 (ruleIn doc "SAME").GetProperty("name").GetString()
 
             let list extra =
@@ -83,14 +83,14 @@ let tests =
             let m = t.Combine "model.bim"
             let r = semctl [ "bpa"; "rules"; "list"; m; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
+            let doc = json r
             let divide = ruleIn doc "SM_DIVIDE"
             Expect.equal (divide.GetProperty("layer").GetString()) "model" ""
             Expect.equal (divide.GetProperty("source").GetString()) "model annotation" ""
             let over = divide.GetProperty("overrides").[0]
             Expect.equal (over.GetProperty("layer").GetString()) "builtin" ""
             Expect.equal ((ruleIn doc "SM_IFERROR").GetProperty("layer").GetString()) "builtin" ""
-            Expect.isTrue (doc.RootElement.GetProperty("fetched").GetArrayLength() = 0) ""
+            Expect.isTrue (doc.GetProperty("fetched").GetArrayLength() = 0) ""
 
             let text = semctl [ "bpa"; "rules"; "list"; m; "--layer"; "model" ]
             Expect.equal text.Code ExitCode.ok text.Err
@@ -109,10 +109,10 @@ let tests =
             write (t.Combine "r.json") (ruleJson [ named "FILE" "file" "false" ])
 
             let ids (r: Run) =
-                use doc = json r
+                let doc = json r
 
                 [
-                    for x in doc.RootElement.GetProperty("rules").EnumerateArray() -> x.GetProperty("id").GetString()
+                    for x in doc.GetProperty("rules").EnumerateArray() -> x.GetProperty("id").GetString()
                 ]
 
             let only = semctl [ "bpa"; "rules"; "list"; m; "--builtin-only"; "--json" ]
@@ -153,13 +153,13 @@ let tests =
             Expect.stringContains r.Out "Expression:" ""
 
             let j = semctl [ "bpa"; "rules"; "show"; m; "SM_DIVIDE"; "--json" ]
-            use doc = json j
-            Expect.equal (doc.RootElement.GetProperty("severity").GetInt32()) 2 ""
+            let doc = json j
+            Expect.equal (doc.GetProperty("severity").GetInt32()) 2 ""
 
             let missing = semctl [ "bpa"; "rules"; "show"; m; "NOPE"; "--json" ]
             Expect.equal missing.Code ExitCode.input ""
-            use err = json missing
-            Expect.equal (err.RootElement.GetProperty("error").GetProperty("code").GetString()) "rule-not-found" ""
+            let err = json missing
+            Expect.equal (err.GetProperty("error").GetProperty("code").GetString()) "rule-not-found" ""
 
         testCase "bpa rules add --to model: a dry run, then --save; bpa then runs the rule"
         <| fun () ->
@@ -186,9 +186,9 @@ let tests =
 
             let dry = semctl (args @ [ "--json" ])
             Expect.equal dry.Code ExitCode.ok dry.Err
-            use doc = json dry
-            Expect.isTrue (doc.RootElement.GetProperty("dryRun").GetBoolean()) ""
-            Expect.equal (doc.RootElement.GetProperty("command").GetString()) "bpa rules add" ""
+            let doc = json dry
+            Expect.isTrue (doc.GetProperty("dryRun").GetBoolean()) ""
+            Expect.equal (doc.GetProperty("command").GetString()) "bpa rules add" ""
             Expect.equal (File.ReadAllText m) before "nothing written"
 
             let saved = semctl (args @ [ "--save" ])
@@ -198,7 +198,7 @@ let tests =
 
             let run = semctl [ "bpa"; m; "--no-builtin"; "--json" ]
             Expect.equal run.Code ExitCode.findings run.Err
-            use findings = json run
+            let findings = json run
             Expect.contains (findingsOf findings) ("LONG_NAMES", "measure:Sales/Ratio") ""
 
             let again = semctl (args @ [ "--save" ])
@@ -285,8 +285,8 @@ let tests =
                 semctl [ "bpa"; "rules"; "remove"; m; "A"; "--from"; file; "--save"; "--json" ]
 
             Expect.equal removed.Code ExitCode.ok removed.Err
-            use doc = json removed
-            Expect.equal (doc.RootElement.GetProperty("removed").[0].GetString()) "A" ""
+            let doc = json removed
+            Expect.equal (doc.GetProperty("removed").[0].GetString()) "A" ""
 
             match BpaRules.loadFile file with
             | Ok rules -> Expect.equal (rules |> List.map (fun r -> r.Id)) [ "B" ] ""
@@ -311,7 +311,7 @@ let tests =
             let m = t.Combine "model.bim"
 
             let divideOnRatio () =
-                use doc = json (semctl [ "bpa"; m; "--json" ])
+                let doc = json (semctl [ "bpa"; m; "--json" ])
                 findingsOf doc |> List.contains ("SM_DIVIDE", "measure:Sales/Ratio")
 
             Expect.isTrue (divideOnRatio ()) "flagged to begin with"
@@ -326,15 +326,15 @@ let tests =
                 semctl [ "bpa"; "rules"; "ignore"; m; "SM_DIVIDE"; "[Ratio]"; "--save"; "--json" ]
 
             Expect.equal saved.Code ExitCode.ok saved.Err
-            use doc = json saved
-            Expect.isFalse (doc.RootElement.GetProperty("dryRun").GetBoolean()) ""
+            let doc = json saved
+            Expect.isFalse (doc.GetProperty("dryRun").GetBoolean()) ""
             Expect.isFalse (divideOnRatio ()) "ignored now"
             Expect.stringContains (File.ReadAllText m) "{\\\"RuleIDs\\\":[\\\"SM_DIVIDE\\\"]}" "TE's format"
 
-            use after = json (semctl [ "bpa"; m; "--json" ])
+            let after = json (semctl [ "bpa"; m; "--json" ])
 
             Expect.isTrue
-                (after.RootElement.GetProperty("ignored").EnumerateArray()
+                (after.GetProperty("ignored").EnumerateArray()
                  |> Seq.exists (fun f -> f.GetProperty("objectPath").GetString() = "measure:Sales/Ratio"))
                 "listed as ignored"
 
@@ -356,10 +356,10 @@ let tests =
             Expect.stringContains r.Err "on model" ""
             Expect.stringContains r.Err "no rule with ID TYPO" ""
 
-            use doc = json (semctl [ "bpa"; m; "--json" ])
+            let doc = json (semctl [ "bpa"; m; "--json" ])
 
             Expect.isTrue
-                (doc.RootElement.GetProperty("skippedRules").EnumerateArray()
+                (doc.GetProperty("skippedRules").EnumerateArray()
                  |> Seq.exists (fun s -> s.GetProperty("ruleId").GetString() = "SM_DIVIDE"))
                 "turned off for the model"
 
@@ -380,7 +380,7 @@ let tests =
             let m = t.Combine "model.bim"
 
             let paths (extra: string list) =
-                use doc = json (semctl ([ "bpa"; m; "--json" ] @ extra))
+                let doc = json (semctl ([ "bpa"; m; "--json" ] @ extra))
                 findingsOf doc |> List.map snd |> List.distinct
 
             let all = paths []
@@ -416,15 +416,16 @@ let tests =
 
             let j = semctl [ "bpa"; t.Combine "model.bim"; "--json" ]
             Expect.equal j.Err "" "nothing on stderr in JSON mode"
-            use doc = json j
-            Expect.stringContains (doc.RootElement.GetProperty("notes").[0].GetString()) "example.invalid" ""
-            Expect.equal (doc.RootElement.GetProperty("fetched").GetArrayLength()) 0 ""
+            let doc = json j
+            Expect.stringContains (doc.GetProperty("notes").[0].GetString()) "example.invalid" ""
+            Expect.equal (doc.GetProperty("fetched").GetArrayLength()) 0 ""
 
         testCase "requested URLs are always named on stderr, even with --json"
         <| fun () ->
             use err = new StringWriter()
 
             let ctx: Ctx = {
+                In = TextReader.Null
                 Out = TextWriter.Null
                 Err = err
                 Json = true

@@ -137,8 +137,81 @@ let private genValue: Gen<DaxValue> =
         2, genFloat |> Gen.map DaxValue.DateTime
     ]
 
+let private shrinkFloat (d: float) : float seq =
+    if d = 0.0 || Double.IsNaN d || Double.IsInfinity d then
+        Seq.empty
+    else
+        seq {
+            yield 0.0
+
+            if abs d > 1.0 then
+                yield truncate d
+
+            if abs d >= 1e-6 then
+                let half = d / 2.0
+
+                if half <> d then
+                    yield half
+        }
+        |> Seq.distinct
+
+let private shrinkInt64 (n: int64) : int64 seq =
+    if n = 0L then
+        Seq.empty
+    else
+        seq {
+            yield 0L
+
+            if n < 0L then
+                yield -n
+
+            let half = n / 2L
+
+            if half <> n then
+                yield half
+        }
+        |> Seq.distinct
+
+let private shrinkString (s: string) : string seq =
+    if s.Length = 0 then
+        Seq.empty
+    else
+        seq {
+            yield ""
+
+            if s.Length > 1 then
+                yield s.Substring(0, s.Length / 2)
+        }
+        |> Seq.distinct
+
+let private shrinkValue (v: DaxValue) : DaxValue seq =
+    match v with
+    | DaxValue.Blank -> Seq.empty
+    | DaxValue.Integer i ->
+        seq { for i' in shrinkInt64 i -> DaxValue.Integer i' }
+        |> Seq.append (Seq.singleton DaxValue.Blank)
+    | DaxValue.Decimal d ->
+        seq { for d' in shrinkFloat d -> DaxValue.Decimal d' }
+        |> Seq.append (Seq.singleton DaxValue.Blank)
+    | DaxValue.Currency c ->
+        seq { for c' in shrinkInt64 c -> DaxValue.Currency c' }
+        |> Seq.append (Seq.singleton DaxValue.Blank)
+    | DaxValue.String s ->
+        seq { for s' in shrinkString s -> DaxValue.String s' }
+        |> Seq.append (Seq.singleton DaxValue.Blank)
+    | DaxValue.Boolean true ->
+        seq {
+            DaxValue.Blank
+            DaxValue.Boolean false
+        }
+    | DaxValue.Boolean false -> Seq.singleton DaxValue.Blank
+    | DaxValue.DateTime d ->
+        seq { for d' in shrinkFloat d -> DaxValue.DateTime d' }
+        |> Seq.append (Seq.singleton DaxValue.Blank)
+
 type Generators =
-    static member DaxValue() = Arb.fromGen genValue
+    static member DaxValue() =
+        Arb.fromGenShrink (genValue, shrinkValue)
 
 let private config = {
     FsCheckConfig.defaultConfig with

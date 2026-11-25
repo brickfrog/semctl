@@ -35,12 +35,8 @@ let private session (args: string list) (lines: string list) =
         Err = lf (err.ToString())
     }
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
-let private measures (path: string) = [ for m in (load path).Model.Tables.["Sales"].Measures -> m.Name ]
+let private measures (path: string) = [ for m in (loadModel path).Model.Tables.["Sales"].Measures -> m.Name ]
 
 /// The sample project with one visual (ReportTests.visual).
 let private withReport () =
@@ -431,7 +427,7 @@ let sessionTests =
             let last = List.last docs
             Expect.equal (last.GetProperty("error").GetProperty("changes").[0].GetString()) "measure:Sales/A" ""
 
-        testCase "a model that doesn't load fails before the session starts"
+        testCase "a model that doesn't loadModel fails before the session starts"
         <| fun () ->
             let r = session [ "/nonexistent/model" ] [ "list" ]
             Expect.equal r.Code ExitCode.input r.Err
@@ -474,6 +470,7 @@ let terminalTests =
         use err = new StringWriter()
 
         let ctx: Ctx = {
+            In = TextReader.Null
             Out = out
             Err = err
             Json = false

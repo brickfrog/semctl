@@ -460,10 +460,9 @@ let tests =
 
             testCase "spaceparts (SEMCTL_SAMPLE_MODEL): its own TE layout, and back"
             <| fun () ->
-                match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-                | null
-                | "" -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-                | path ->
+                match sampleModelPath () with
+                | None -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+                | Some path ->
                     use t = new TempDir()
                     let original = reload path
                     let dir = sampleFolder t original
@@ -958,10 +957,9 @@ let tests =
 
             testCase "spaceparts (SEMCTL_SAMPLE_MODEL): a save back leaves every file outside the model as it was"
             <| fun () ->
-                match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-                | null
-                | "" -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-                | path ->
+                match sampleModelPath () with
+                | None -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+                | Some path ->
                     use t = new TempDir()
 
                     let rec copy (from: string) (into: string) =

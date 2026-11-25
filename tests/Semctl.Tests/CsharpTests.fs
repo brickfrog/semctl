@@ -19,9 +19,6 @@ let private script (p: TempDir) (lines: string list) =
     File.WriteAllText(path, String.concat "\n" lines + "\n")
     path
 
-let private errorCode (r: Run) =
-    use doc = json r
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 // Scripts compile with Roslyn (about a second each), and runs share Console.Out: run in sequence.
 [<Tests>]
@@ -55,8 +52,8 @@ let tests =
 
                 let saved = semctl [ "csharp"; model; s; "--save"; "--json" ]
                 Expect.equal saved.Code ExitCode.ok saved.Err
-                use doc = json saved
-                Expect.isFalse (doc.RootElement.GetProperty("dryRun").GetBoolean()) "--json stays clean"
+                let doc = json saved
+                Expect.isFalse (doc.GetProperty("dryRun").GetBoolean()) "--json stays clean"
 
                 let _, after =
                     ModelIO.loadPath model |> Result.defaultWith (fun _ -> failtest "load")

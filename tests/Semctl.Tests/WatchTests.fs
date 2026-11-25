@@ -30,6 +30,7 @@ type private Watching(options: Watch.Options, scope: Watch.Scope, json: bool, co
     let changes = new Watch.Changes()
 
     let ctx: Ctx = {
+        In = TextReader.Null
         Out = TextWriter.Synchronized out
         Err = TextWriter.Synchronized err
         Json = json
@@ -301,7 +302,7 @@ let tests =
                 let codes =
                     lines
                     |> Array.map (fun l ->
-                        let doc = JsonDocument.Parse l
+                        use doc = JsonDocument.Parse l
 
                         match doc.RootElement.TryGetProperty "error" with
                         | true, e -> e.GetProperty("code").GetString()
@@ -341,7 +342,7 @@ let tests =
                     Expect.equal outcome Done ""
 
                     for line in out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n') do
-                        let doc = JsonDocument.Parse line
+                        use doc = JsonDocument.Parse line
                         Expect.equal (doc.RootElement.GetProperty("command").GetString()) "validate" line
 
             testCase "FileSystemWatcher: saving a file runs again"
@@ -444,7 +445,7 @@ let tests =
                 let r = semctl [ "validate"; root; "--watch"; "--rule"; "bogus"; "--json" ]
                 Expect.equal r.Code ExitCode.usage r.Out
                 let doc = json r
-                Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "usage" ""
+                Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "usage" ""
 
             testCase "test run with a server model: refused"
             <| fun () ->

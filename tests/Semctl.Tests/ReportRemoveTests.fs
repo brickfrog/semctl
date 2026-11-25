@@ -23,10 +23,6 @@ let private withReport () =
     write (t.Combine("Sales.Report", "definition", "version.json")) """{ "version": "2.0.0" }"""
     t, file
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 let private errorOf (r: Run) =
     use doc = JsonDocument.Parse r.Out
@@ -102,14 +98,14 @@ let tests =
                 ""
 
             Expect.stringContains r.Err "--force" ""
-            Expect.isTrue ((load t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "nothing removed"
+            Expect.isTrue ((loadModel t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "nothing removed"
 
         testCase "schemacheck --drop-removed-columns keeps a column a visual uses, with a warning"
         <| fun () ->
             let t, _ = withReport ()
             use _ = t
             // Date's source returns every data column but Year, which the visual uses.
-            let date = (load t.Path).Model.Tables.["Date"]
+            let date = (loadModel t.Path).Model.Tables.["Date"]
 
             let columns = [
                 for c in date.Columns do
@@ -137,7 +133,7 @@ let tests =
             Expect.equal r.Code ExitCode.ok (r.Out + r.Err)
             Expect.stringContains r.Err "was kept: a report uses it" ""
             Expect.stringContains r.Err "visual v1" ""
-            Expect.isTrue ((load t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "kept"
+            Expect.isTrue ((loadModel t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "kept"
 
         testCase "--json lists the usages; --force removes it anyway"
         <| fun () ->
@@ -151,7 +147,7 @@ let tests =
 
             let forced = semctl [ "remove"; t.Path; "Date[Year]"; "--force"; "--save" ]
             Expect.equal forced.Code ExitCode.ok forced.Err
-            Expect.isFalse ((load t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "removed"
+            Expect.isFalse ((loadModel t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "removed"
 
         testCase "what no report uses is removed as before; --save-to isn't checked"
         <| fun () ->
@@ -159,7 +155,7 @@ let tests =
             use _ = t
             let r = semctl [ "remove"; t.Path; "Date[Month]"; "--save" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            Expect.isFalse ((load t.Path).Model.Tables.["Date"].Columns.ContainsName "Month") ""
+            Expect.isFalse ((loadModel t.Path).Model.Tables.["Date"].Columns.ContainsName "Month") ""
 
             let copy = t.Combine "copy.bim"
             let r = semctl [ "remove"; t.Path; "Date[Year]"; "--save-to"; copy ]
@@ -218,7 +214,7 @@ let tests =
 
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.stringContains r.Err "DEL: not fixed on column:Date/Year: a report uses it (1 report file;" ""
-            Expect.isTrue ((load t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "kept"
+            Expect.isTrue ((loadModel t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "kept"
 
             let forced =
                 semctl [
@@ -233,7 +229,7 @@ let tests =
                 ]
 
             Expect.equal forced.Code ExitCode.ok forced.Err
-            Expect.isFalse ((load t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "removed"
+            Expect.isFalse ((loadModel t.Path).Model.Tables.["Date"].Columns.ContainsName "Year") "removed"
 
         testCase "mcp remove: refused with the usages, unless force"
         <| fun () ->
@@ -286,7 +282,7 @@ let tests =
             Expect.notEqual afterBatch before ""
             Expect.stringContains afterBatch "\"Property\": \"Net Amount\"" ""
             Expect.isFalse (afterBatch.Contains "\"Property\": \"Net\"") ""
-            Expect.isTrue ((load t.Path).Model.Tables.["Sales"].Columns.ContainsName "Net Amount") ""
+            Expect.isTrue ((loadModel t.Path).Model.Tables.["Sales"].Columns.ContainsName "Net Amount") ""
 
         testCase "mcp: a failed batch drops its report edits; without save_model nothing is written"
         <| fun () ->

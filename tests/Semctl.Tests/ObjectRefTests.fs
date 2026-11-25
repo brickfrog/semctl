@@ -16,23 +16,49 @@ let private parseFails s =
     | Error(InvalidObjectRef _) -> ()
     | Error e -> failtestf "wrong error for '%s': %A" s e
 
+let private shrinkSegment (s: string) =
+    if s.Length <= 1 then
+        Seq.empty
+    else
+        seq {
+            yield s.Substring(0, 1)
+
+            if s.Length > 2 then
+                yield s.Substring(0, s.Length / 2)
+                yield s.Substring(s.Length / 2)
+        }
+        |> Seq.distinct
+
+let private shrinkRef (r: ObjectRef) : ObjectRef seq =
+    seq {
+        for i in 0 .. r.Path.Length - 1 do
+            for s' in shrinkSegment r.Path.[i] do
+                if s' <> r.Path.[i] then
+                    yield {
+                        r with
+                            Path = r.Path |> List.mapi (fun j s -> if j = i then s' else s)
+                    }
+    }
+
 /// Generates a well-formed ref: any kind, the right number of non-empty segments
 /// (including ones full of '/' and '\').
 type RefGen =
     static member ObjectRef() =
-        gen {
-            let! kind = Gen.elements ObjectKind.all
+        let genRef =
+            gen {
+                let! kind = Gen.elements ObjectKind.all
 
-            let segment =
-                Gen.oneof [
-                    ArbMap.defaults |> ArbMap.generate<NonEmptyString> |> Gen.map (fun s -> s.Get)
-                    Gen.elements [ "/"; "\\"; "a/b"; "a\\b"; "\\/"; "x:y"; " spaced " ]
-                ]
+                let segment =
+                    Gen.oneof [
+                        ArbMap.defaults |> ArbMap.generate<NonEmptyString> |> Gen.map (fun s -> s.Get)
+                        Gen.elements [ "/"; "\\"; "a/b"; "a\\b"; "\\/"; "x:y"; " spaced " ]
+                    ]
 
-            let! path = Gen.listOfLength (ObjectKind.arity kind) segment
-            return { Kind = kind; Path = path }
-        }
-        |> Arb.fromGen
+                let! path = Gen.listOfLength (ObjectKind.arity kind) segment
+                return { Kind = kind; Path = path }
+            }
+
+        Arb.fromGenShrink (genRef, shrinkRef)
 
 let private config = {
     FsCheckConfig.defaultConfig with

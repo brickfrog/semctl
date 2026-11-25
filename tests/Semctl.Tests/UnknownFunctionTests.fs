@@ -33,11 +33,7 @@ let private addMeasure (expression: string) (db: Database) =
     db.Model.Tables.["Sales"].Measures.Add(new Measure(Name = "Added", Expression = expression))
     Ok Mutation.Effect.none
 
-let private samplePath =
-    match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-    | null
-    | "" -> None
-    | p -> Some p
+let private samplePath = sampleModelPath ()
 
 /// The calls in a parsed query: its definitions' and its EVALUATEs' expressions.
 let private queryCalls (q: Query) =
@@ -337,13 +333,13 @@ let tests =
                         ]
 
                     Expect.equal r.Code Cli.Common.ExitCode.findings (r.Out + r.Err)
-                    use doc = CliHarness.json r
-                    let introduced = doc.RootElement.GetProperty("introducedErrors")
+                    let doc = CliHarness.json r
+                    let introduced = doc.GetProperty("introducedErrors")
                     Expect.equal (introduced.GetArrayLength()) 1 r.Out
                     Expect.equal (introduced.[0].GetProperty("code").GetString()) rule r.Out
 
                     Expect.equal
-                        (doc.RootElement.GetProperty("error").GetProperty("code").GetString())
+                        (doc.GetProperty("error").GetProperty("code").GetString())
                         "change-introduces-errors"
                         r.Out
 

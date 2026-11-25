@@ -62,12 +62,9 @@ let tests =
 
             let json = semctl [ "data"; "init"; model; dir; "--json" ]
             Expect.equal json.Code ExitCode.output ""
-            use doc = CliHarness.json json
+            let doc = CliHarness.json json
 
-            Expect.equal
-                (doc.RootElement.GetProperty("error").GetProperty("code").GetString())
-                "destination-not-empty"
-                ""
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "destination-not-empty" ""
 
             let forced = semctl [ "data"; "init"; model; dir; "--rows"; "5"; "--force" ]
             Expect.equal forced.Code ExitCode.ok forced.Err
@@ -82,8 +79,8 @@ let tests =
                 semctl [ "data"; "init"; model; dir; "--rows"; "50"; "--seed"; "42"; "--json" ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "data init" ""
             Expect.equal (root.GetProperty("directory").GetString()) (Path.GetFullPath dir) ""
             Expect.equal (root.GetProperty("rows").GetInt32()) 50 ""
@@ -197,8 +194,8 @@ let tests =
             File.WriteAllText(product, "ProductKey,Name\n1,Bike\nx,Bell\n")
             let r = semctl [ "data"; "check"; model; dir; "--json" ]
             Expect.equal r.Code ExitCode.findings r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "data check" ""
             Expect.isTrue (root.GetProperty("durationMs").GetInt32() >= 0) ""
             Expect.isFalse (root.GetProperty("valid").GetBoolean()) ""
@@ -289,8 +286,8 @@ let tests =
                 Expect.equal (semctl [ "data"; command; t.Combine "missing.bim"; dir ]).Code ExitCode.input ""
                 let file = semctl [ "data"; command; model; model; "--json" ]
                 Expect.equal file.Code ExitCode.input ""
-                use doc = json file
-                Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "invalid-fixture" ""
+                let doc = json file
+                Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "invalid-fixture" ""
 
         testCase "info: tables with rows, and distinct and BLANK counts per column"
         <| fun () ->
@@ -335,8 +332,8 @@ let tests =
             File.WriteAllText(Path.Combine(dir, "Sales.csv"), "OrderId\nx\n")
             let r = semctl [ "data"; "info"; model; dir; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "data info" ""
             Expect.equal (root.GetProperty("directory").GetString()) (Path.GetFullPath dir) ""
             let tables = root.GetProperty "tables"
@@ -372,11 +369,7 @@ let tests =
 
 // ---- The sample model (optional) ---------------------------------------------------------------
 
-let private samplePath =
-    match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-    | null
-    | "" -> None
-    | p -> Some p
+let private samplePath = sampleModelPath ()
 
 [<Tests>]
 let sampleTests =
@@ -397,11 +390,11 @@ let sampleTests =
                     Expect.equal init.Code ExitCode.ok init.Err
                     let check = semctl [ "data"; "check"; path; dir; "--fail-on"; "warning"; "--json" ]
                     Expect.equal check.Code ExitCode.ok check.Out
-                    use doc = json check
-                    Expect.isTrue (doc.RootElement.GetProperty("valid").GetBoolean()) ""
-                    Expect.equal (doc.RootElement.GetProperty("summary").GetProperty("warnings").GetInt32()) 0 ""
+                    let doc = json check
+                    Expect.isTrue (doc.GetProperty("valid").GetBoolean()) ""
+                    Expect.equal (doc.GetProperty("summary").GetProperty("warnings").GetInt32()) 0 ""
 
-                    for table in doc.RootElement.GetProperty("tables").EnumerateArray() do
+                    for table in doc.GetProperty("tables").EnumerateArray() do
                         Expect.isTrue (table.GetProperty("rows").GetInt32() <= rows) ""
 
             testCase "info lists every loaded table"
@@ -411,9 +404,9 @@ let sampleTests =
                 Expect.equal (semctl [ "data"; "init"; path; dir; "--rows"; "20" ]).Code ExitCode.ok ""
                 let info = semctl [ "data"; "info"; path; dir; "--json" ]
                 Expect.equal info.Code ExitCode.ok info.Err
-                use doc = json info
-                let tables = doc.RootElement.GetProperty "tables"
+                let doc = json info
+                let tables = doc.GetProperty "tables"
                 Expect.isTrue (tables.GetArrayLength() > 0) ""
-                Expect.equal (doc.RootElement.GetProperty("issues").GetProperty("errors").GetInt32()) 0 ""
+                Expect.equal (doc.GetProperty("issues").GetProperty("errors").GetInt32()) 0 ""
                 Expect.equal (Directory.GetFiles dir |> Array.length) (tables.GetArrayLength()) "one file per table"
     ]

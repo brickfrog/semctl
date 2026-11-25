@@ -774,10 +774,9 @@ let tests =
 
             testCase "save_model writes what `sm set --save` writes: the sample model (SEMCTL_SAMPLE_MODEL)"
             <| fun () ->
-                match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-                | null
-                | "" -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-                | sample ->
+                match sampleModelPath () with
+                | None -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+                | Some sample ->
                     match ModelSource.resolve sample with
                     | Error e -> failtest (SemctlError.message e)
                     | Ok source ->

@@ -181,7 +181,7 @@ let private import (ctx: Ctx) (args: ParseResults<ImportArgs>) =
 
     let text =
         if file = "-" then
-            Ok(Console.In.ReadToEnd())
+            Ok(ctx.In.ReadToEnd())
         elif File.Exists file then
             try
                 Ok(File.ReadAllText file)

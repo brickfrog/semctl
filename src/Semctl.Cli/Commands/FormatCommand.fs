@@ -328,7 +328,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
         let input =
             match expr, targets with
             | Some dax, _ -> Ok("--expr", dax, None)
-            | None, [ "-" ] -> Ok("<stdin>", Console.In.ReadToEnd(), None)
+            | None, [ "-" ] -> Ok("<stdin>", ctx.In.ReadToEnd(), None)
             | None, path :: _ -> readDaxFile path |> Result.map (fun (dax, encoding) -> path, dax, encoding)
             | None, [] -> Error(PathNotFound "-")
 

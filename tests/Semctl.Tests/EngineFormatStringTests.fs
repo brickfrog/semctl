@@ -705,10 +705,9 @@ let tests =
 [<Tests>]
 let sampleTests =
     testList "engine: format strings on a sample model (SEMCTL_SAMPLE_MODEL)" [
-        match System.Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-        | null
-        | "" -> testCase "not configured" <| fun () -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-        | path ->
+        match sampleModelPath () with
+        | None -> testCase "not configured" <| fun () -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+        | Some path ->
             // Every measure's format string at the grand total is either told, or refused: never
             // another error, and the values are those of the query without --formatted.
             testCase "each measure's format string is told or refused"

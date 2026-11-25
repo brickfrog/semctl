@@ -163,8 +163,8 @@ let tests =
                     ]
 
                 Expect.equal j.Code ExitCode.ok j.Err
-                use doc = json j
-                let items = doc.RootElement.EnumerateArray() |> List.ofSeq
+                let doc = json j
+                let items = doc.EnumerateArray() |> List.ofSeq
 
                 Expect.equal
                     (items |> List.map (fun i -> i.GetProperty("ref").GetString()))
@@ -217,8 +217,8 @@ let tests =
                         "--json"
                     ]
 
-                use doc = json j
-                let first = doc.RootElement.[0]
+                let doc = json j
+                let first = doc.[0]
                 Expect.equal (first.GetProperty("ref").GetString()) "measure:Sales/Total" ""
 
                 Expect.equal
@@ -231,8 +231,8 @@ let tests =
                 use t = project ()
                 let r = semctl [ "get"; t.Path; "model"; "--where"; "isHiden=true"; "--json" ]
                 Expect.equal r.Code ExitCode.usage r.Out
-                use doc = json r
-                let error = doc.RootElement.GetProperty("error")
+                let doc = json r
+                let error = doc.GetProperty("error")
                 Expect.equal (error.GetProperty("code").GetString()) "unknown-property" ""
 
                 Expect.equal

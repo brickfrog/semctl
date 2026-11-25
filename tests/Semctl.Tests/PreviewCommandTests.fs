@@ -32,9 +32,6 @@ let private setup () =
 let private lines (s: string) =
     s.Split('\n') |> Array.filter ((<>) "") |> List.ofArray
 
-let private errorCode (r: Run) =
-    use doc = JsonDocument.Parse r.Out
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 [<Tests>]
 let localTests =

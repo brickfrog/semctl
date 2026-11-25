@@ -193,6 +193,7 @@ let rec runWithInput
             let results = parser.Value.ParseCommandLine(argv, raiseOnUsage = true)
 
             let ctx = {
+                In = defaultArg input Console.In
                 Out = out
                 Err = err
                 Json = results.Contains Json && not isMcp

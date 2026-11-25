@@ -59,9 +59,6 @@ let private lines (s: string) =
     |> Array.filter ((<>) "")
     |> List.ofArray
 
-let private errorCode (r: Run) =
-    use doc = json r
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 let private remote = $"xmla:{workspace};Test"
 
@@ -181,8 +178,8 @@ let tests =
             use _ = t
             let r = semctl [ "query"; model; "--coverage"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let roles = doc.RootElement.GetProperty("summary").GetProperty("roles")
+            let doc = json r
+            let roles = doc.GetProperty("summary").GetProperty("roles")
             Expect.equal (roles.GetProperty("total").GetInt32()) 4 "four roles"
             Expect.equal (roles.GetProperty("supported").GetInt32()) 3 "Hidden is not"
 
@@ -270,10 +267,10 @@ tests:
 """
 
             let r = semctl [ "test"; "run"; model; "--json" ]
-            use doc = json r
+            let doc = json r
 
             let outcomes = [
-                for s in doc.RootElement.GetProperty("suites").EnumerateArray() do
+                for s in doc.GetProperty("suites").EnumerateArray() do
                     for x in s.GetProperty("tests").EnumerateArray() ->
                         x.GetProperty("name").GetString(), x.GetProperty("outcome").GetString()
             ]

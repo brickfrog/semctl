@@ -10,8 +10,8 @@ open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
 let private outputPath (r: Run) =
-    use doc = json r
-    doc.RootElement.GetProperty("output").GetProperty("path").GetString()
+    let doc = json r
+    doc.GetProperty("output").GetProperty("path").GetString()
 
 [<Tests>]
 let tests =
@@ -41,8 +41,8 @@ let tests =
             Expect.equal (outputPath r) (t.Combine "m.bim") r.Out
             Expect.isFalse (File.Exists(t.Combine "m")) "no file without the extension"
 
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("model").GetProperty("name").GetString()) "m" "named after it"
+            let doc = json r
+            Expect.equal (doc.GetProperty("model").GetProperty("name").GetString()) "m" "named after it"
 
             let v = semctl [ "validate"; t.Combine "m.bim" ]
             Expect.equal v.Code ExitCode.ok (v.Out + v.Err)

@@ -7,10 +7,6 @@ open Semctl.Tests.Fixtures
 open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 /// RenameEdgeTests' model, as a TMDL folder.
 let private folder () =
@@ -37,16 +33,16 @@ let tests =
 
             let saved = semctl [ "rename"; dir; "Sales[Amount]"; "Net"; "--save"; "--json" ]
             Expect.equal saved.Code ExitCode.ok saved.Err
-            use doc = json saved
+            let doc = json saved
 
             let change =
-                doc.RootElement.GetProperty("changes").EnumerateArray()
+                doc.GetProperty("changes").EnumerateArray()
                 |> Seq.find (fun c -> c.GetProperty("objectPath").GetString() = "column:Big Sales/Amount")
 
             Expect.equal (change.GetProperty("properties").[0].GetProperty("property").GetString()) "sourceColumn" ""
 
             let c =
-                (load dir).Model.Tables.["Big Sales"].Columns.["Amount"] :?> CalculatedTableColumn
+                (loadModel dir).Model.Tables.["Big Sales"].Columns.["Amount"] :?> CalculatedTableColumn
 
             Expect.equal c.SourceColumn "Sales[Net]" "reloads"
 
@@ -56,10 +52,10 @@ let tests =
             use _ = t
             let r = semctl [ "rename"; dir; "[Total]"; "Revenue"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
+            let doc = json r
 
             let warnings =
-                doc.RootElement.GetProperty("warnings").EnumerateArray()
+                doc.GetProperty("warnings").EnumerateArray()
                 |> Seq.map (fun w -> w.GetString())
                 |> List.ofSeq
 
@@ -67,6 +63,6 @@ let tests =
             Expect.exists warnings (fun w -> w.StartsWith "'Date'[Total] in measure:Date/Odd") (string warnings)
 
             Expect.isEmpty
-                (doc.RootElement.GetProperty("introducedErrors").EnumerateArray() |> List.ofSeq)
+                (doc.GetProperty("introducedErrors").EnumerateArray() |> List.ofSeq)
                 "the existing unresolved reference isn't new"
     ]

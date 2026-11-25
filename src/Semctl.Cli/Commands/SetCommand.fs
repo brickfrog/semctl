@@ -1,6 +1,7 @@
 module Semctl.Cli.SetCommand
 
 open System
+open System.IO
 open Argu
 open Semctl
 open Semctl.Inventory
@@ -42,7 +43,7 @@ type Args =
             | Drop_Removed_Columns -> "with --update-schema: also remove columns whose source column is gone."
 
 /// The assignments, in command-line order. At most one value can come from stdin.
-let private assignments (args: ParseResults<Args>) =
+let private assignments (stdin: TextReader) (args: ParseResults<Args>) =
     let stdinUses =
         args.GetResults Args.Property
         |> List.filter (fun p -> p.EndsWith "=-")
@@ -51,11 +52,11 @@ let private assignments (args: ParseResults<Args>) =
     if stdinUses > 1 then
         Error "only one -p value can be read from stdin (-)"
     else
-        let stdin () = Console.In.ReadToEnd()
+        let readStdin () = stdin.ReadToEnd()
 
         args.GetAllResults()
         |> List.choose (function
-            | Property text -> Some(SetProperty.Assignment.parse stdin text)
+            | Property text -> Some(SetProperty.Assignment.parse readStdin text)
             | Unset path -> Some(Ok(SetProperty.Assignment.unset path))
             | _ -> None)
         |> List.fold
@@ -129,7 +130,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
         let names = String.concat ", " schemaSwitches
         UsageError $"{names}: only with --update-schema"
     else
-        match opts, assignments args with
+        match opts, assignments ctx.In args with
         | Error message, _
         | _, Error message -> UsageError message
         | Ok opts, Ok assignments ->

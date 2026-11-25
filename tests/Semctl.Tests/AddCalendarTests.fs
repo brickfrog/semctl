@@ -66,10 +66,6 @@ let private setupAt (level: int) =
 
 let private setup () = setupAt 1702
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 let private gregorian = [
     "--category"
@@ -82,9 +78,6 @@ let private gregorian = [
     "Date=Date"
 ]
 
-let private errorCode (r: Run) =
-    use doc = JsonDocument.Parse r.Out
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 [<Tests>]
 let tests =
@@ -115,7 +108,7 @@ let tests =
 
             Expect.equal r.Code ExitCode.ok r.Err
 
-            let db = load path
+            let db = loadModel path
             let cal = db.Model.Tables.["Date"].Calendars.["Gregorian"]
             Expect.isNotEmpty cal.LineageTag "a lineage tag"
 

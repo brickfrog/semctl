@@ -5,21 +5,16 @@ open System.Text.Json
 open Expecto
 open Microsoft.AnalysisServices.Tabular
 open Semctl
+open Semctl.Tests.Fixtures
 open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 let private caption (db: Database) (culture: string) (o: MetadataObject) =
     match db.Model.Cultures.[culture].ObjectTranslations.[o, TranslatedProperty.Caption] with
     | null -> None
     | t -> Some t.Value
 
-let private errorCode (doc: JsonDocument) =
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 let private header = "object,culture,property,source,translation"
 
@@ -52,7 +47,7 @@ let tests =
             use t = project ()
             let r = semctl [ "translations"; "export"; t.Path; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            let rows = (json r).RootElement
+            let rows = (json r)
             let first = rows.[0]
             Expect.equal (first.GetProperty("object").GetString()) "model" ""
             Expect.equal (first.GetProperty("culture").GetString()) "da-DK" ""
@@ -83,20 +78,18 @@ let tests =
 
             Expect.equal j.Code ExitCode.ok j.Err
             let doc = json j
-            Expect.equal (doc.RootElement.GetProperty("format").GetString()) "json" "from the extension"
-            Expect.equal (doc.RootElement.GetProperty("cultures").[0].GetString()) "da-DK" ""
+            Expect.equal (doc.GetProperty("format").GetString()) "json" "from the extension"
+            Expect.equal (doc.GetProperty("cultures").[0].GetString()) "da-DK" ""
 
-            Expect.equal
-                (JsonDocument.Parse(File.ReadAllText(t.Combine "da.json")).RootElement.ValueKind)
-                JsonValueKind.Array
-                ""
+            use daDoc = JsonDocument.Parse(File.ReadAllText(t.Combine "da.json"))
+            Expect.equal daDoc.RootElement.ValueKind JsonValueKind.Array ""
 
         testCase "export --json --format csv without -o is a usage error"
         <| fun () ->
             use t = project ()
             let r = semctl [ "translations"; "export"; t.Path; "--json"; "--format"; "csv" ]
             Expect.equal r.Code ExitCode.usage r.Out
-            Expect.equal (errorCode (json r)) "usage" ""
+            Expect.equal (errorCode r) "usage" ""
 
         testCase "export --culture with an unknown culture: exit 3"
         <| fun () ->
@@ -125,11 +118,14 @@ let tests =
                 ""
 
             Expect.stringContains dry.Err "Dry run - nothing saved." ""
-            Expect.isNone (caption (load t.Path) "da-DK" (load t.Path).Model.Tables.["Sales"]) "nothing written"
+
+            Expect.isNone
+                (caption (loadModel t.Path) "da-DK" (loadModel t.Path).Model.Tables.["Sales"])
+                "nothing written"
 
             let saved = semctl [ "translations"; "import"; t.Path; f; "--save" ]
             Expect.equal saved.Code ExitCode.ok saved.Err
-            let db = load t.Path
+            let db = loadModel t.Path
             Expect.equal (caption db "da-DK" db.Model.Tables.["Sales"].Measures.["Total"]) (Some "I alt") ""
             Expect.equal (caption db "da-DK" db.Model.Tables.["Sales"].Columns.["Amount"]) (Some "Beløb, \"netto\"") ""
 
@@ -145,7 +141,7 @@ let tests =
             let f = file t "da.csv" [ header; "measure:Sales/Total,da-DK,Caption,Total,I alt" ]
             let r = semctl [ "translations"; "import"; t.Path; f; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Out
-            let doc = (json r).RootElement
+            let doc = (json r)
             Expect.equal (doc.GetProperty("command").GetString()) "translations import" ""
             let change = doc.GetProperty("changes").[0]
             Expect.equal (change.GetProperty("objectPath").GetString()) "measure:Sales/Total" ""
@@ -173,7 +169,7 @@ let tests =
             Expect.stringContains r.Err "bad.csv line 4: No object matches '[Nope]'" ""
 
             let j = semctl [ "translations"; "import"; t.Path; f; "--json" ]
-            Expect.equal (errorCode (json j)) "invalid-translation-file" ""
+            Expect.equal (errorCode j) "invalid-translation-file" ""
 
         testCase "import: an unknown culture is exit 3 unless --create-cultures; then it's created"
         <| fun () ->
@@ -189,7 +185,7 @@ let tests =
             Expect.equal c.Code ExitCode.ok c.Err
             Expect.stringContains c.Out "+ culture:fr-FR" ""
             Expect.stringContains c.Err "Added culture:fr-FR" ""
-            let db = load t.Path
+            let db = loadModel t.Path
             Expect.equal (caption db "fr-FR" db.Model.Tables.["Sales"]) (Some "Ventes") ""
 
         testCase "import: a missing file is exit 3; a malformed one too"
@@ -214,8 +210,7 @@ let tests =
             Expect.equal r.Code ExitCode.ok r.Out
 
             let paths = [
-                for c in (json r).RootElement.GetProperty("changes").EnumerateArray() ->
-                    c.GetProperty("objectPath").GetString()
+                for c in (json r).GetProperty("changes").EnumerateArray() -> c.GetProperty("objectPath").GetString()
             ]
 
             Expect.isFalse (paths |> List.contains "culture:da-DK") $"{paths}"
@@ -246,18 +241,15 @@ let tests =
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.stringStarts r.Out "culture:da-DK  1/19 captions, 0/1 descriptions, 0/0 display folders" ""
 
-            let j =
-                (json (semctl [ "translations"; "cultures"; t.Path; "--json" ])).RootElement.[0]
+            let j = (json (semctl [ "translations"; "cultures"; t.Path; "--json" ])).[0]
 
             Expect.equal (j.GetProperty("translated").GetInt32()) 1 ""
             Expect.equal (j.GetProperty("properties").GetProperty("caption").GetProperty("total").GetInt32()) 19 ""
     ]
 
-/// stdin is process-wide: keep these apart from other tests.
 [<Tests>]
 let stdinTests =
-    testSequenced
-    <| testList "CLI translations (stdin)" [
+    testList "CLI translations (stdin)" [
         testCase "import - reads the file from stdin, detecting JSON"
         <| fun () ->
             use t = project ()
@@ -267,6 +259,6 @@ let stdinTests =
 
             let r = semctlWithStdin text [ "translations"; "import"; t.Path; "-"; "--save" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            let db = load t.Path
+            let db = loadModel t.Path
             Expect.equal (caption db "da-DK" db.Model.Tables.["Date"]) (Some "Dato") ""
     ]

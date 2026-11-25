@@ -1081,9 +1081,9 @@ let tests =
                         ]
 
                     Expect.equal r.Code ExitCode.ok r.Err
-                    use doc = json r
+                    let doc = json r
 
-                    let row = doc.RootElement.GetProperty("results").[0].GetProperty("rows").[0]
+                    let row = doc.GetProperty("results").[0].GetProperty("rows").[0]
 
                     [ for v in row.EnumerateArray() -> v.GetString() ]
 

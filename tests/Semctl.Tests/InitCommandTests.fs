@@ -6,9 +6,6 @@ open Semctl.Tests.Fixtures
 open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
-let private errorCode (r: Run) =
-    use doc = json r
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 [<Tests>]
 let tests =
@@ -28,16 +25,16 @@ let tests =
                 ] do
                 let r = semctl [ "init"; path; "--json" ]
                 Expect.equal r.Code ExitCode.ok r.Err
-                use doc = json r
-                let root = doc.RootElement
+                let doc = json r
+                let root = doc
                 Expect.equal (root.GetProperty("output").GetProperty("format").GetString()) format path
                 Expect.equal (root.GetProperty("model").GetProperty("name").GetString()) "Sales" path
                 Expect.equal (root.GetProperty("model").GetProperty("compatibilityLevel").GetInt32()) 1702 path
 
                 let info = semctl [ "info"; path; "--json" ]
                 Expect.equal info.Code ExitCode.ok info.Err
-                use idoc = json info
-                let i = idoc.RootElement
+                let idoc = json info
+                let i = idoc
                 Expect.equal (i.GetProperty("name").GetString()) "Sales" path
                 Expect.equal (i.GetProperty("compatibilityLevel").GetInt32()) 1702 path
                 Expect.equal (i.GetProperty("compatibilityMode").GetString()) "PowerBI" path
@@ -71,10 +68,10 @@ let tests =
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.stringContains r.Out "model Finance, compatibility level 1600, culture da-DK" ""
             let info = semctl [ "info"; path; "--json" ]
-            use doc = json info
-            Expect.equal (doc.RootElement.GetProperty("name").GetString()) "Finance" ""
-            Expect.equal (doc.RootElement.GetProperty("compatibilityLevel").GetInt32()) 1600 ""
-            Expect.equal (doc.RootElement.GetProperty("culture").GetString()) "da-DK" ""
+            let doc = json info
+            Expect.equal (doc.GetProperty("name").GetString()) "Finance" ""
+            Expect.equal (doc.GetProperty("compatibilityLevel").GetInt32()) 1600 ""
+            Expect.equal (doc.GetProperty("culture").GetString()) "da-DK" ""
 
         testCase "a new model can be listed, converted and diffed"
         <| fun () ->
@@ -97,8 +94,8 @@ let tests =
             let forced = semctl [ "init"; sm; "--force" ]
             Expect.equal forced.Code ExitCode.ok forced.Err
             let info = semctl [ "info"; sm; "--json" ]
-            use doc = json info
-            Expect.equal (doc.RootElement.GetProperty("counts").GetProperty("table").GetInt32()) 0 "replaced"
+            let doc = json info
+            Expect.equal (doc.GetProperty("counts").GetProperty("table").GetInt32()) 0 "replaced"
 
         testCase "re-running init on the model it created: exit 0, a JSON reason, nothing written"
         <| fun () ->
@@ -128,8 +125,8 @@ let tests =
                 let before = stamps ()
                 let r = semctl [ "init"; path; "--culture"; "da-DK"; "--json" ]
                 Expect.equal r.Code ExitCode.ok (path + r.Out + r.Err)
-                use doc = json r
-                let root = doc.RootElement
+                let doc = json r
+                let root = doc
                 Expect.isFalse (root.GetProperty("created").GetBoolean()) path
                 Expect.stringContains (root.GetProperty("reason").GetString()) "already holds this model" path
                 Expect.equal (stamps ()) before $"{path}: nothing written"

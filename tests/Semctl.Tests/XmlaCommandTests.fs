@@ -33,9 +33,6 @@ let private salesServer () =
 let private remote = $"xmla:{workspace};Sales"
 let private run (server: FakeServer) (args: string list) = semctlOn server tokenEnv args
 
-let private errorCode (r: Run) =
-    use doc = json r
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 /// The sample model as files, in a temp folder.
 let private localModel (edit: Database -> unit) =
@@ -58,12 +55,12 @@ let sourceTests =
             let server = salesServer ()
             let r = run server [ "info"; $"xmla:{workspace};sales"; "--json" ]
             Expect.equal r.Code 0 r.Err
-            use doc = json r
-            let source = doc.RootElement.GetProperty "source"
+            let doc = json r
+            let source = doc.GetProperty "source"
             Expect.equal (source.GetProperty("format").GetString()) "xmla" ""
             Expect.equal (source.GetProperty("path").GetString()) remote "the database's exact name"
-            Expect.equal (doc.RootElement.GetProperty("name").GetString()) "Sales" ""
-            Expect.equal (doc.RootElement.GetProperty("counts").GetProperty("measure").GetInt32()) 2 ""
+            Expect.equal (doc.GetProperty("name").GetString()) "Sales" ""
+            Expect.equal (doc.GetProperty("counts").GetProperty("measure").GetInt32()) 2 ""
             Expect.equal server.Requests.Length 1 "one connection"
             Expect.equal server.Closed 1 "closed"
 
@@ -270,11 +267,11 @@ let connectTests =
             Expect.isFalse (r.Out.Contains fakeToken) ""
 
             let j = run server [ "connect"; $"xmla:{workspace}"; "--json" ]
-            use doc = json j
-            let databases = doc.RootElement.GetProperty "databases"
+            let doc = json j
+            let databases = doc.GetProperty "databases"
             Expect.equal (databases.GetArrayLength()) 2 ""
             Expect.equal (databases.[1].GetProperty("source").GetString()) remote "ready to paste as a model argument"
-            Expect.equal (doc.RootElement.GetProperty("authentication").GetString()) "access token" ""
+            Expect.equal (doc.GetProperty("authentication").GetString()) "access token" ""
 
         testCase "a database in the address must exist"
         <| fun () ->
@@ -326,8 +323,7 @@ let private queryResults: QueryResult list = [
 
 [<Tests>]
 let queryTests =
-    testSequenced
-    <| testList "CLI query" [
+    testList "CLI query" [
         testCase "a table per EVALUATE"
         <| fun () ->
             let server = salesServer ()
@@ -356,8 +352,8 @@ let queryTests =
             let server = salesServer ()
             server.OnQuery <- fun _ -> queryResults
             let r = run server [ "query"; $"xmla:{workspace};SALES"; "EVALUATE x"; "--json" ]
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
 
             Expect.equal
                 [ for p in root.EnumerateObject() -> p.Name ]
@@ -396,8 +392,8 @@ let queryTests =
             let server = salesServer ()
             server.OnQuery <- fun _ -> queryResults
             let r = run server [ "query"; remote; "EVALUATE x"; "--max-rows"; "2"; "--json" ]
-            use doc = json r
-            let results = doc.RootElement.GetProperty "results"
+            let doc = json r
+            let results = doc.GetProperty "results"
 
             Expect.equal
                 [
@@ -437,8 +433,8 @@ let queryTests =
             server.OnQuery <- fun _ -> raise (XmlaQueryError "Query (1, 10) Cannot find table 'Nope'.")
             let r = run server [ "query"; remote; "EVALUATE Nope"; "--json" ]
             Expect.equal r.Code ExitCode.remote ""
-            use doc = json r
-            let error = doc.RootElement.GetProperty "error"
+            let doc = json r
+            let error = doc.GetProperty "error"
             Expect.equal (error.GetProperty("code").GetString()) "query-failed" ""
             Expect.stringContains (error.GetProperty("message").GetString()) "Cannot find table 'Nope'" ""
 
@@ -494,10 +490,10 @@ let deployTests =
             Expect.stringContains stat.Out "measure:Sales/Average" "the database can be in the server argument"
 
             let tmsl = run server [ "deploy"; local; workspace; "Sales"; "--tmsl" ]
-            use doc = JsonDocument.Parse tmsl.Out
+            use tmslDoc = JsonDocument.Parse tmsl.Out
 
             Expect.equal
-                (doc.RootElement
+                (tmslDoc.RootElement
                     .GetProperty("createOrReplace")
                     .GetProperty("object")
                     .GetProperty("database")
@@ -519,8 +515,8 @@ let deployTests =
 
             use _ = t
             let r = run server [ "deploy"; local; workspace; "Sales"; "--json" ]
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "deploy" ""
             Expect.equal (root.GetProperty("server").GetString()) workspace ""
             Expect.equal (root.GetProperty("database").GetString()) "Sales" ""
@@ -544,11 +540,10 @@ let deployTests =
 
             use _ = t
             let r = run server [ "deploy"; local; workspace; "Sales"; "--json" ]
-            use doc = json r
+            let doc = json r
 
             let codes = [
-                for i in doc.RootElement.GetProperty("introducedErrors").EnumerateArray() ->
-                    i.GetProperty("code").GetString()
+                for i in doc.GetProperty("introducedErrors").EnumerateArray() -> i.GetProperty("code").GetString()
             ]
 
             Expect.equal (List.sort codes) [ "ignore-outside-summarizecolumns"; "unknown-function" ] r.Out
@@ -612,10 +607,10 @@ let deployTests =
                 run server [ "deploy"; local; workspace; "Brand New"; "--execute"; "--json" ]
 
             Expect.equal r.Code 0 r.Out
-            use doc = json r
-            Expect.isTrue (doc.RootElement.GetProperty("creates").GetBoolean()) ""
-            Expect.isTrue (doc.RootElement.GetProperty("deployed").GetBoolean()) ""
-            Expect.isFalse (doc.RootElement.GetProperty("dryRun").GetBoolean()) ""
+            let doc = json r
+            Expect.isTrue (doc.GetProperty("creates").GetBoolean()) ""
+            Expect.isTrue (doc.GetProperty("deployed").GetBoolean()) ""
+            Expect.isFalse (doc.GetProperty("dryRun").GetBoolean()) ""
             Expect.isSome (server.Find "Brand New") ""
 
         testCase "a model with new errors isn't deployed without --force"

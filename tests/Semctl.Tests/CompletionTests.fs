@@ -141,11 +141,7 @@ let private writeBim (t: TempDir) =
 
 let private complete (args: string list) = semctl ("__complete" :: args)
 
-let private samplePath =
-    match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-    | null
-    | "" -> None
-    | p -> Some p
+let private samplePath = sampleModelPath ()
 
 [<Tests>]
 let tests =

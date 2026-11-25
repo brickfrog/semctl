@@ -151,7 +151,7 @@ let private apply (ctx: Ctx) (args: ParseResults<ApplyArgs>) =
 
     let text =
         if script = "-" then
-            Ok("<stdin>", Console.In.ReadToEnd())
+            Ok("<stdin>", ctx.In.ReadToEnd())
         elif File.Exists script then
             try
                 Ok(script, File.ReadAllText script)

@@ -27,9 +27,6 @@ type private Home() =
 
 let private code (r: Run) = r.Code
 
-let private errorCode (r: Run) =
-    use doc = JsonDocument.Parse r.Out
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 [<Tests>]
 let profileTests =

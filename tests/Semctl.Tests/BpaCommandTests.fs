@@ -26,9 +26,9 @@ let private rulesFile (t: TempDir) (json: string) =
     write path json
     path
 
-let private ids (doc: JsonDocument) (property: string) =
+let private ids (doc: JsonElement) (property: string) =
     [
-        for f in doc.RootElement.GetProperty(property).EnumerateArray() -> f.GetProperty("code").GetString()
+        for f in doc.GetProperty(property).EnumerateArray() -> f.GetProperty("code").GetString()
     ]
     |> List.distinct
 
@@ -58,8 +58,8 @@ let tests =
             let r = semctl [ "bpa"; t.Combine "model.bim"; "--rules"; rules; "--json" ]
             Expect.equal r.Code ExitCode.findings r.Err
             Expect.equal r.Err "" "nothing on stderr in JSON mode"
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             let first = root.GetProperty("findings").[0]
 
             Expect.equal (root.GetProperty("command").GetString()) "bpa" ""
@@ -121,15 +121,15 @@ let tests =
         <| fun () ->
             use t = model ignore
             let r = semctl [ "bpa"; t.Combine "model.bim"; "--min-severity"; "3"; "--json" ]
-            use doc = json r
+            let doc = json r
 
-            for f in doc.RootElement.GetProperty("findings").EnumerateArray() do
+            for f in doc.GetProperty("findings").EnumerateArray() do
                 Expect.equal (f.GetProperty("severity").GetString()) "error" ""
 
             let r = semctl [ "bpa"; t.Combine "model.bim"; "-c"; "dax,naming"; "--json" ]
-            use doc = json r
+            let doc = json r
 
-            for f in doc.RootElement.GetProperty("findings").EnumerateArray() do
+            for f in doc.GetProperty("findings").EnumerateArray() do
                 Expect.contains [ "DAX"; "Naming" ] (f.GetProperty("category").GetString()) ""
 
         testCase "--list-rules lists rules with their support status"
@@ -160,10 +160,10 @@ let tests =
                     "-j"
                 ]
 
-            use doc = json r
+            let doc = json r
 
             let support = [
-                for x in doc.RootElement.EnumerateArray() ->
+                for x in doc.EnumerateArray() ->
                     x.GetProperty("id").GetString(), x.GetProperty("supported").GetBoolean()
             ]
 
@@ -181,10 +181,10 @@ let tests =
                     ))
 
             let r = semctl [ "bpa"; t.Combine "model.bim"; "-c"; "DAX"; "--json" ]
-            use doc = json r
+            let doc = json r
             Expect.isFalse (ids doc "findings" |> List.contains "SM_DIVIDE") ""
             Expect.equal (ids doc "ignored") [ "SM_DIVIDE" ] ""
-            Expect.equal (doc.RootElement.GetProperty("rules").GetProperty("ignoredFindings").GetInt32()) 1 ""
+            Expect.equal (doc.GetProperty("rules").GetProperty("ignoredFindings").GetInt32()) 1 ""
 
         testCase "rules embedded in the model run too, unless --no-model-rules"
         <| fun () ->
@@ -198,7 +198,7 @@ let tests =
                     ))
 
             let r = semctl [ "bpa"; t.Combine "model.bim"; "--no-default-rules"; "--json" ]
-            use doc = json r
+            let doc = json r
             Expect.equal (ids doc "findings") [ "MINE" ] ""
 
             let r =
@@ -214,8 +214,8 @@ let tests =
                 semctl [ "bpa"; t.Combine "model.bim"; "-r"; rulesFile t "{ nope"; "--json" ]
 
             Expect.equal r.Code ExitCode.input ""
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "invalid-rules" ""
+            let doc = json r
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "invalid-rules" ""
 
             let r = semctl [ "bpa"; t.Combine "model.bim"; "-r"; t.Combine "missing.json" ]
             Expect.equal r.Code ExitCode.input ""
@@ -284,8 +284,8 @@ let tests =
             let r = semctl [ "bpa"; p.Path; "--json" ]
             // The fixture project has warnings and info but no errors, so the default --fail-on passes.
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            Expect.isGreaterThan (doc.RootElement.GetProperty("rules").GetProperty("total").GetInt32()) 0 ""
+            let doc = json r
+            Expect.isGreaterThan (doc.GetProperty("rules").GetProperty("total").GetInt32()) 0 ""
 
         testCase "help lists bpa"
         <| fun () -> Expect.stringContains (semctl [ "--help" ]).Out "bpa" ""

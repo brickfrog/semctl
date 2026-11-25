@@ -26,9 +26,6 @@ let private suggestions (r: Run) =
     | true, s -> [ for x in s.EnumerateArray() -> x.GetString() ]
     | _ -> []
 
-let private errorCode (r: Run) =
-    use doc = JsonDocument.Parse r.Out
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 [<Tests>]
 let tests =

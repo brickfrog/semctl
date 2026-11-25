@@ -9,10 +9,6 @@ open Semctl.Tests.Fixtures
 open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 /// The sample PBIP project with a PBIR report holding one visual (ReportTests.visual).
 let private withReport () =
@@ -57,7 +53,7 @@ let tests =
             Expect.stringContains text "\"Property\": \"Net Amount\"" ""
             Expect.stringContains text "\"queryRef\": \"Sales.Amount\"" "queryRef kept"
             JsonDocument.Parse(text).Dispose()
-            Expect.isTrue ((load t.Path).Model.Tables.["Sales"].Columns.Contains "Net Amount") ""
+            Expect.isTrue ((loadModel t.Path).Model.Tables.["Sales"].Columns.Contains "Net Amount") ""
 
         testCase "--json lists the files and their changed lines"
         <| fun () ->
@@ -65,8 +61,8 @@ let tests =
             use _ = t
             let r = semctl [ "rename"; t.Path; "Date"; "Calendar Date"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let files = doc.RootElement.GetProperty "files"
+            let doc = json r
+            let files = doc.GetProperty "files"
             Expect.equal (files.GetArrayLength()) 1 ""
             let f = files.[0]
             Expect.equal (f.GetProperty("path").GetString()) file ""
@@ -78,8 +74,8 @@ let tests =
             Expect.stringContains (line.GetProperty("after").GetString()) "\"Entity\": \"Calendar Date\"" ""
 
             let saved = semctl [ "rename"; t.Path; "Date"; "Calendar Date"; "--save"; "--json" ]
-            use doc = json saved
-            Expect.isTrue (doc.RootElement.GetProperty("files").[0].GetProperty("written").GetBoolean()) ""
+            let doc = json saved
+            Expect.isTrue (doc.GetProperty("files").[0].GetProperty("written").GetBoolean()) ""
             Expect.stringContains (File.ReadAllText file) "\"Entity\": \"Calendar Date\"" ""
 
         testCase "--stat and --name-only list the files"
@@ -134,7 +130,7 @@ let tests =
                 Report.plan [ t.Combine "Sales.Report" ] (Report.RenameMeasure("Sales", "Total", "Changed"))
 
             let checkOriginalModel () =
-                Expect.isTrue ((load t.Path).Model.Tables.["Sales"].Measures.Contains "Total") ""
+                Expect.isTrue ((loadModel t.Path).Model.Tables.["Sales"].Measures.Contains "Total") ""
 
             File.AppendAllText(file, " ")
             Expect.isError (Report.saveBack source db edits) "report conflict"
@@ -171,7 +167,7 @@ let tests =
                 Report.plan [ t.Combine "Sales.Report" ] (Report.RenameMeasure("Sales", "Total", "Changed"))
 
             Expect.isOk (Report.saveBack source db edits) "cooperative readers must not block saving"
-            Expect.isTrue ((load t.Path).Model.Tables.["Sales"].Measures.Contains "Changed") ""
+            Expect.isTrue ((loadModel t.Path).Model.Tables.["Sales"].Measures.Contains "Changed") ""
             Expect.stringContains (File.ReadAllText file) "\"Property\": \"Changed\"" ""
 
         testCase "rolling back a failed save restores deleted model files and removes newly created ones"
@@ -222,8 +218,8 @@ let tests =
             use _ = t
             let r = semctl [ "rename"; t.Path; "role:Readers"; "Viewers"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("files").GetArrayLength()) 0 ""
+            let doc = json r
+            Expect.equal (doc.GetProperty("files").GetArrayLength()) 0 ""
 
         testCase "a report pointing at another model is not touched"
         <| fun () ->
@@ -235,8 +231,8 @@ let tests =
                 semctl [ "rename"; t.Combine "Sales.SemanticModel"; "[Total]"; "T"; "--json" ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("files").GetArrayLength()) 0 ""
+            let doc = json r
+            Expect.equal (doc.GetProperty("files").GetArrayLength()) 0 ""
             Expect.equal (File.ReadAllText file) ReportTests.visual ""
 
         testCase "PBIR-Legacy report.json and report-level measures are reported, not edited"

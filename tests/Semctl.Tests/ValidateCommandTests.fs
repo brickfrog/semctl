@@ -51,8 +51,8 @@ let tests =
             use t = new TempDir()
             let r = semctl [ "validate"; brokenModel t; "--json" ]
             Expect.equal r.Code ExitCode.findings r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "validate" ""
             Expect.isTrue (root.GetProperty("durationMs").GetInt32() >= 0) ""
             Expect.isFalse (root.GetProperty("valid").GetBoolean()) "an error makes the model invalid"
@@ -114,8 +114,8 @@ let tests =
                     "--json"
                 ]
 
-            use doc = json both
-            Expect.equal (doc.RootElement.GetProperty("findings").GetArrayLength()) 2 ""
+            let doc = json both
+            Expect.equal (doc.GetProperty("findings").GetArrayLength()) 2 ""
 
         testCase "--min-severity hides issues, but --fail-on still sees them"
         <| fun () ->
@@ -159,8 +159,8 @@ let tests =
 
             let severity = semctl [ "validate"; t.Path; "--fail-on"; "fatal"; "--json" ]
             Expect.equal severity.Code ExitCode.usage ""
-            use doc = json severity
-            Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "usage" ""
+            let doc = json severity
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "usage" ""
 
         testCase "a missing model is an input error"
         <| fun () ->

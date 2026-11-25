@@ -183,10 +183,9 @@ let tests =
 
         testCase "detach keeps a real model whole (SEMCTL_SAMPLE_MODEL)"
         <| fun () ->
-            match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-            | null
-            | "" -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-            | path ->
+            match sampleModelPath () with
+            | None -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+            | Some path ->
                 let _, db = ModelIO.loadPath path |> ok
                 let copy = ResultReader.detach db
                 Expect.isEmpty (Diff.compare Diff.Options.none db copy) ""

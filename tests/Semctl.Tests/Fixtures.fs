@@ -2,7 +2,28 @@ module Semctl.Tests.Fixtures
 
 open System
 open System.IO
+open Expecto
 open Microsoft.AnalysisServices.Tabular
+open Semctl
+
+/// Load a semantic model from a path, failing the test on error.
+let loadModel (path: string) : Database =
+    match ModelIO.loadPath path with
+    | Ok(_, db) -> db
+    | Error e -> failtestf "failed to load %s: %s" path (SemctlError.message e)
+
+/// Path in SEMCTL_SAMPLE_MODEL when configured and non-empty.
+let sampleModelPath () : string option =
+    match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
+    | null
+    | "" -> None
+    | p -> Some p
+
+/// Path in SEMCTL_SAMPLE_MODEL, skipping the test when unset.
+let requireSampleModel () : string =
+    match sampleModelPath () with
+    | Some p -> p
+    | None -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
 
 /// A temp folder that deletes itself.
 type TempDir() =

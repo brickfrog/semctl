@@ -13,14 +13,10 @@ let private snapshot (dir: string) =
     |> Array.sort
     |> Array.map (fun f -> f, File.ReadAllText f)
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 let private errorOf (r: Run) =
-    use doc = json r
-    let e = doc.RootElement.GetProperty("error")
+    let doc = json r
+    let e = doc.GetProperty("error")
     e.GetProperty("code").GetString(), e.Clone()
 
 [<Tests>]
@@ -77,8 +73,8 @@ let tests =
 
                 let r = semctl [ "script"; "export"; t.Path; "[Total]"; "--json" ]
                 Expect.equal r.Code ExitCode.ok r.Err
-                use doc = json r
-                let root = doc.RootElement
+                let doc = json r
+                let root = doc
                 Expect.equal (root.GetProperty("command").GetString()) "script export" ""
 
                 Expect.equal
@@ -139,7 +135,7 @@ let tests =
                 let r = semctl [ "script"; "apply"; t.Path; script; "--save" ]
                 Expect.equal r.Code ExitCode.ok r.Err
                 Expect.stringContains r.Err "Saved pbip" ""
-                let margin = (load t.Path).Model.Tables.["Sales"].Measures.["Margin"]
+                let margin = (loadModel t.Path).Model.Tables.["Sales"].Measures.["Margin"]
                 Expect.equal margin.Expression "[Total] * 0.2" ""
                 Expect.equal margin.DisplayFolder "KPIs" ""
 
@@ -156,8 +152,8 @@ let tests =
                 write script "MEASURE 'Sales'[Total]\n    Description = \"The sum\"\n"
                 let r = semctl [ "script"; "apply"; t.Path; script; "--json" ]
                 Expect.equal r.Code ExitCode.ok r.Out
-                use doc = json r
-                let root = doc.RootElement
+                let doc = json r
+                let root = doc
                 Expect.equal (root.GetProperty("command").GetString()) "script apply" ""
                 Expect.isTrue (root.GetProperty("dryRun").GetBoolean()) ""
                 let change = root.GetProperty("changes").[0]
@@ -223,8 +219,7 @@ let tests =
                 Expect.equal r.Code ExitCode.usage r.Err
         ]
 
-        testSequenced
-        <| testList "stdin" [
+        testList "stdin" [
             testCase "apply - reads the script from stdin"
             <| fun () ->
                 use t = project ()
@@ -240,7 +235,7 @@ let tests =
 
                 Expect.equal r.Code ExitCode.ok r.Err
                 Expect.stringContains r.Err "Applied 1 object from <stdin> (1 new)" ""
-                Expect.equal (load t.Path).Model.Tables.["Sales"].Measures.["Q"].Expression "[Total] / 4" ""
+                Expect.equal (loadModel t.Path).Model.Tables.["Sales"].Measures.["Q"].Expression "[Total] / 4" ""
 
             testCase "errors in stdin say <stdin>"
             <| fun () ->

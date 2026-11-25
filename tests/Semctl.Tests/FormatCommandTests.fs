@@ -81,7 +81,7 @@ let looseTests =
             let stamp = File.GetLastWriteTimeUtc path
             let r = semctl [ "format"; path; "--save"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            Expect.isFalse ((json r).RootElement.TryGetProperty "saved" |> fst) ""
+            Expect.isFalse ((json r).TryGetProperty "saved" |> fst) ""
             Expect.equal (File.GetLastWriteTimeUtc path) stamp "not rewritten"
 
         testCase "--save --json says where it saved; no BOM is added to a file without one"
@@ -91,7 +91,7 @@ let looseTests =
             File.WriteAllText(path, "sum(T[a])")
             let r = semctl [ "format"; path; "--save"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            let j = (json r).RootElement
+            let j = (json r)
             Expect.equal (j.GetProperty("formatted").GetString()) "SUM ( T[a] )" ""
             Expect.equal (j.GetProperty("saved").GetProperty("path").GetString()) (Path.GetFullPath path) ""
             Expect.equal (File.ReadAllBytes path) "SUM ( T[a] )"B ""
@@ -174,14 +174,14 @@ let looseTests =
         <| fun () ->
             let r = semctl [ "format"; "--expr"; "sum(x)"; "--json" ]
             Expect.equal r.Code ExitCode.ok ""
-            let j = (json r).RootElement
+            let j = (json r)
             Expect.isTrue (j.GetProperty("success").GetBoolean()) ""
             Expect.equal (j.GetProperty("formatted").GetString()) "SUM ( x )" ""
             Expect.equal (j.GetProperty("errors").GetArrayLength()) 0 ""
 
             let r = semctl [ "format"; "--expr"; "1 +\n  )"; "--json" ]
             Expect.equal r.Code ExitCode.input ""
-            let j = (json r).RootElement
+            let j = (json r)
             Expect.isFalse (j.GetProperty("success").GetBoolean()) ""
             Expect.isFalse (j.TryGetProperty "formatted" |> fst) ""
             let e = j.GetProperty("errors").[0]
@@ -198,7 +198,7 @@ let looseTests =
             Expect.equal r.Code ExitCode.ok r.Err
 
             let r = semctl [ "format"; "--expr"; "sum(x)"; "--check"; "--json" ]
-            Expect.isTrue ((json r).RootElement.GetProperty("changed").GetBoolean()) ""
+            Expect.isTrue ((json r).GetProperty("changed").GetBoolean()) ""
 
         testCase "usage errors: model options with loose DAX, --expr with a file, nothing to format"
         <| fun () ->
@@ -215,8 +215,7 @@ let looseTests =
 
 [<Tests>]
 let stdinTests =
-    testSequenced
-    <| testList "format command: stdin" [
+    testList "format command: stdin" [
         testCase "- reads stdin"
         <| fun () ->
             let r = semctlWithStdin "var a = 1 return a" [ "format"; "-" ]
@@ -284,7 +283,7 @@ let modelTests =
             let path = model t
             let r = semctl [ "format"; path; "--check"; "--json" ]
             Expect.equal r.Code ExitCode.findings ""
-            let j = (json r).RootElement
+            let j = (json r)
             Expect.isTrue (j.GetProperty("check").GetBoolean()) ""
 
             let unformatted = [
@@ -302,7 +301,7 @@ let modelTests =
             let path = model t
             let r = semctl [ "format"; path; "[Ugly]"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            let j = (json r).RootElement
+            let j = (json r)
             Expect.isTrue (j.GetProperty("dryRun").GetBoolean()) ""
             Expect.equal (j.GetProperty("changes").GetArrayLength()) 1 ""
             Expect.equal (j.GetProperty("introducedErrors").GetArrayLength()) 0 ""

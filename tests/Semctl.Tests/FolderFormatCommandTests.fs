@@ -20,8 +20,8 @@ let tests =
                 semctl [ "convert"; t.Path; folder; "--serialization"; "database.json"; "--json" ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let output = doc.RootElement.GetProperty "output"
+            let doc = json r
+            let output = doc.GetProperty "output"
             Expect.equal (output.GetProperty("format").GetString()) "database.json" ""
             Expect.isTrue (File.Exists(Path.Combine(folder, "database.json"))) ""
             Expect.isTrue (File.Exists(Path.Combine(folder, "tables", "Sales", "measures", "Total.json"))) ""
@@ -35,12 +35,9 @@ let tests =
                 ]
 
             Expect.equal back.Code ExitCode.ok back.Err
-            use backDoc = json back
+            let backDoc = json back
 
-            Expect.equal
-                (backDoc.RootElement.GetProperty("source").GetProperty("format").GetString())
-                "database.json"
-                ""
+            Expect.equal (backDoc.GetProperty("source").GetProperty("format").GetString()) "database.json" ""
 
         testCase "-f database.json and a destination ending in database.json both mean the folder"
         <| fun () ->

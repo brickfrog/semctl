@@ -120,6 +120,7 @@ type Outcome =
 
 /// Where a command writes, and whether it should write JSON.
 type Ctx = {
+    In: TextReader
     Out: TextWriter
     Err: TextWriter
     Json: bool

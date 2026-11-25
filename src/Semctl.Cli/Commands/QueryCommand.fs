@@ -140,7 +140,7 @@ let private queryJson (source: string) (results: QueryResult list) (elapsed: Tim
         "durationMs", num (int elapsed.TotalMilliseconds)
     ]
 
-let private readDax (args: ParseResults<Args>) (rest: string list) : Result<string, Outcome> =
+let private readDax (stdin: TextReader) (args: ParseResults<Args>) (rest: string list) : Result<string, Outcome> =
     match args.TryGetResult Args.File, rest with
     | Some _, _ :: _ -> Error(UsageError "give the query as an argument or with --file, not both")
     | Some path, [] ->
@@ -150,7 +150,7 @@ let private readDax (args: ParseResults<Args>) (rest: string list) : Result<stri
         | :? FileNotFoundException
         | :? DirectoryNotFoundException -> Error(Failed(PathNotFound(Path.GetFullPath path)))
         | e -> Error(Failed(LoadFailed(path, e.Message)))
-    | None, [ "-" ] -> Ok(Console.In.ReadToEnd())
+    | None, [ "-" ] -> Ok(stdin.ReadToEnd())
     | None, [ dax ] -> Ok dax
     | None, [] -> Error(UsageError "expected a DAX query: an argument, `-` (standard input) or --file <path>")
     | None, _ -> Error(UsageError "expected one DAX query (quote it)")
@@ -429,7 +429,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
             UsageError
                 $"'{source}' is model files: give the fixture data to evaluate over with --data <directory> (see `sm data init`), or query a server model (xmla:<server>;<database>)"
         | Some dataDir ->
-            match readDax args rest with
+            match readDax ctx.In args rest with
             | Error outcome -> outcome
             | Ok dax when String.IsNullOrWhiteSpace dax -> UsageError "the DAX query is empty"
             | Ok dax ->
@@ -440,7 +440,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
 
                 local ctx args source dataDir dax maxRows clock
     | source :: rest ->
-        match readDax args rest with
+        match readDax ctx.In args rest with
         | Error outcome -> outcome
         | Ok dax when String.IsNullOrWhiteSpace dax -> UsageError "the DAX query is empty"
         | Ok dax ->

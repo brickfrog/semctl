@@ -479,10 +479,9 @@ let tests =
 
         testCase "sample model: every exact location holds the object's keyword and name"
         <| fun () ->
-            match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-            | null
-            | "" -> skiptest "SEMCTL_SAMPLE_MODEL not set"
-            | sample ->
+            match sampleModelPath () with
+            | None -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+            | Some sample ->
                 use t = new TempDir()
 
                 for command in [ "validate"; "bpa"; "lint" ] do

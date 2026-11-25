@@ -1,6 +1,7 @@
 module Semctl.Cli.AddCommand
 
 open System
+open System.IO
 open Argu
 open Microsoft.AnalysisServices.Tabular
 open Semctl
@@ -266,7 +267,7 @@ let private calendarCategory (text: string) : Result<CalendarCategory, string> =
             }
 
 /// `-` reads the value from stdin (once); a trailing line break is dropped.
-let private reader () =
+let private reader (stdin: TextReader) =
     let mutable used = false
 
     fun (flag: string) (value: string) ->
@@ -276,10 +277,10 @@ let private reader () =
             Error $"{flag} -: only one option can read stdin"
         else
             used <- true
-            Ok(Console.In.ReadToEnd().TrimEnd('\r', '\n'))
+            Ok(stdin.ReadToEnd().TrimEnd('\r', '\n'))
 
-let private details (args: ParseResults<Args>) (kind: ObjectKind) : Result<Details, string> =
-    let read = reader ()
+let private details (stdin: TextReader) (args: ParseResults<Args>) (kind: ObjectKind) : Result<Details, string> =
+    let read = reader stdin
 
     let get flag (a: Quotations.Expr<string -> Args>) =
         args.TryGetResult a |> Option.map (read flag)
@@ -411,7 +412,7 @@ let private details (args: ParseResults<Args>) (kind: ObjectKind) : Result<Detai
                 Ok(Details.Calendar(categories, parseList (args.GetResults Args.Time_Related))))
     | k -> Error $"sm can't add a {ObjectKind.token k}"
 
-let private spec (args: ParseResults<Args>) (objectText: string) =
+let private spec (stdin: TextReader) (args: ParseResults<Args>) (objectText: string) =
     parseRef objectText
     |> Result.bind (fun r ->
         let wrong =
@@ -421,7 +422,7 @@ let private spec (args: ParseResults<Args>) (objectText: string) =
 
         match wrong with
         | [] when List.contains r.Kind addableKinds ->
-            details args r.Kind
+            details stdin args r.Kind
             |> Result.map (fun d -> {
                 Ref = r
                 Details = d
@@ -451,7 +452,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) =
 
     match
         opts
-        |> Result.bind (fun o -> spec args objectText |> Result.map (fun s -> o, s))
+        |> Result.bind (fun o -> spec ctx.In args objectText |> Result.map (fun s -> o, s))
     with
     | Error message -> UsageError message
     | Ok(opts, spec) -> Mutation.run ctx "add" opts model (fun db -> AddObject.add db spec)

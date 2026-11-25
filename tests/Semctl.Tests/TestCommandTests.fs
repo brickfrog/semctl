@@ -53,20 +53,20 @@ let private tests (t: TempDir) (yaml: string) =
 
 /// (name, outcome) of every test in a JSON report.
 let private outcomes (r: Run) =
-    use doc = json r
+    let doc = json r
 
     [
-        for s in doc.RootElement.GetProperty("suites").EnumerateArray() do
+        for s in doc.GetProperty("suites").EnumerateArray() do
             for t in s.GetProperty("tests").EnumerateArray() ->
                 t.GetProperty("name").GetString(), t.GetProperty("outcome").GetString()
     ]
 
 /// The JSON of one test in a report.
 let private testJson (r: Run) (name: string) (f: JsonElement -> 'T) : 'T =
-    use doc = json r
+    let doc = json r
 
     let found =
-        doc.RootElement.GetProperty("suites").EnumerateArray()
+        doc.GetProperty("suites").EnumerateArray()
         |> Seq.collect (fun s -> s.GetProperty("tests").EnumerateArray())
         |> Seq.tryFind (fun t -> t.GetProperty("name").GetString() = name)
 
@@ -81,17 +81,17 @@ let private differences (r: Run) (name: string) =
     testJson r name (fun t -> [ for d in t.GetProperty("differences").EnumerateArray() -> d.GetString() ])
 
 let private summary (r: Run) =
-    use doc = json r
-    let s = doc.RootElement.GetProperty "testSummary"
+    let doc = json r
+    let s = doc.GetProperty "testSummary"
 
     [ "passed"; "failed"; "errored"; "unsupported"; "skipped"; "total" ]
     |> List.map (fun k -> s.GetProperty(k).GetInt32())
 
 let private codes (r: Run) =
-    use doc = json r
+    let doc = json r
 
     [
-        for f in doc.RootElement.GetProperty("findings").EnumerateArray() -> f.GetProperty("code").GetString()
+        for f in doc.GetProperty("findings").EnumerateArray() -> f.GetProperty("code").GetString()
     ]
 
 let private lines (s: string) =
@@ -442,8 +442,8 @@ let tests' =
             Expect.equal (message r "pending") "pending" "pending"
             Expect.equal (message r "skipped") "not yet" "skip reason"
 
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "test run" "command"
             Expect.equal (root.GetProperty("source").GetString()) path "source"
             Expect.equal (root.GetProperty("summary").GetProperty("errors").GetInt32()) 3 "error findings"
@@ -615,8 +615,8 @@ tests:
 
             let r = semctl [ "test"; "run"; path; file; "--json" ]
             Expect.equal r.Code ExitCode.input r.Out
-            use doc = json r
-            let error = doc.RootElement.GetProperty "error"
+            let doc = json r
+            let error = doc.GetProperty "error"
             Expect.equal (error.GetProperty("code").GetString()) "invalid-fixture" "code"
 
             Expect.stringContains
@@ -692,11 +692,11 @@ tests:
             let j = semctl [ "test"; "run"; path; "--json"; "--ci"; "github" ]
             Expect.equal j.Code ExitCode.findings j.Out
             Expect.equal (codes j) [ "TEST_SUITE_INVALID" ] "finding"
-            use doc = json j
-            let invalid = doc.RootElement.GetProperty("invalidSuites").[0]
+            let doc = json j
+            let invalid = doc.GetProperty("invalidSuites").[0]
             Expect.equal (invalid.GetProperty("file").GetString()) broken "file"
             Expect.stringContains (invalid.GetProperty("validationErrors").[0].GetString()) ":4:5: unknown key" "error"
-            Expect.equal (doc.RootElement.GetProperty("testSummary").GetProperty("invalidSuites").GetInt32()) 1 "count"
+            Expect.equal (doc.GetProperty("testSummary").GetProperty("invalidSuites").GetInt32()) 1 "count"
             Expect.stringStarts j.Err "::error title=TEST_SUITE_INVALID::" "annotation")
 
         testCase "where suites are looked for; none is an error" (fun () ->
@@ -705,10 +705,10 @@ tests:
             let none = semctl [ "test"; "run"; path; "--json" ]
             Expect.equal none.Code ExitCode.input none.Out
             Expect.stringContains none.Out "no-test-suites" "no suites"
-            use noneDoc = json none
+            let noneDoc = json none
 
             Expect.stringContains
-                (noneDoc.RootElement.GetProperty("error").GetProperty("message").GetString())
+                (noneDoc.GetProperty("error").GetProperty("message").GetString())
                 (t.Combine ".sm-tests")
                 "says where it looked"
 
@@ -861,10 +861,10 @@ tests:
             // In JSON too the refusal is the one document on stdout, and nothing was run.
             let refused = semctl [ "test"; "run"; path; "--trx"; path; "--json" ]
             Expect.equal refused.Code ExitCode.output refused.Out
-            use refusedDoc = json refused
+            let refusedDoc = json refused
 
             Expect.equal
-                (refusedDoc.RootElement.GetProperty("error").GetProperty("code").GetString())
+                (refusedDoc.GetProperty("error").GetProperty("code").GetString())
                 "destination-not-empty"
                 "the error alone"
 
@@ -947,14 +947,11 @@ tests:
 
             // Recording again changes nothing, byte for byte.
             let again = semctl [ "test"; "snapshot"; path; "--save"; "--json" ]
-            use doc = json again
+            let doc = json again
 
-            Expect.equal
-                (doc.RootElement.GetProperty("files").[0].GetProperty("changed").GetBoolean())
-                false
-                "unchanged"
+            Expect.equal (doc.GetProperty("files").[0].GetProperty("changed").GetBoolean()) false "unchanged"
 
-            Expect.equal (doc.RootElement.GetProperty("summary").GetProperty("unchanged").GetInt32()) 3 "unchanged"
+            Expect.equal (doc.GetProperty("summary").GetProperty("unchanged").GetInt32()) 3 "unchanged"
             Expect.equal (File.ReadAllText snapshots) text "the same bytes"
 
             // Now the tests pass (the one that can't be recorded is unsupported, a warning).
@@ -1135,8 +1132,8 @@ tests:
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.equal (lines r.Out) [ $"S  ({file})"; "  a  [x]"; "  b  (pending)" ] "listed"
             let j = semctl [ "test"; "list"; t.Combine ".sm-tests"; "--json" ]
-            use doc = json j
-            let first = doc.RootElement.GetProperty("suites").[0].GetProperty("tests").[0]
+            let doc = json j
+            let first = doc.GetProperty("suites").[0].GetProperty("tests").[0]
 
             Expect.equal
                 (first.GetProperty("query").GetString())
@@ -1193,8 +1190,8 @@ tests:
                 "code"
 
             Expect.stringContains (message r "own data") "a server model is tested on the data it holds" "why skipped"
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("source").GetString()) $"xmla:{workspace};Test" "source"
+            let doc = json r
+            Expect.equal (doc.GetProperty("source").GetString()) $"xmla:{workspace};Test" "source"
 
             // One connection for the whole run; the queries are the ones a local run evaluates.
             Expect.equal server.Requests.Length 1 "one connection"
@@ -1279,9 +1276,9 @@ tests:
                 "only the changed value differs; a type alone is not a difference"
 
             Expect.equal (message r "amount") "row 0, [Value]: 625.001 (double), expected 625 (int64)" "difference"
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("command").GetString()) "test compare" "command"
-            Expect.equal (doc.RootElement.GetProperty("against").GetString()) other "against"
+            let doc = json r
+            Expect.equal (doc.GetProperty("command").GetString()) "test compare" "command"
+            Expect.equal (doc.GetProperty("against").GetString()) other "against"
 
             let types =
                 semctl [ "test"; "compare"; path; "--against"; other; "--types"; "--json" ]

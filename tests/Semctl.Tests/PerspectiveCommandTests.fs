@@ -4,13 +4,10 @@ open System.IO
 open System.Text.Json
 open Expecto
 open Semctl
+open Semctl.Tests.Fixtures
 open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 let private snapshot (dir: string) =
     Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
@@ -18,7 +15,7 @@ let private snapshot (dir: string) =
     |> Array.map (fun f -> f, File.ReadAllText f)
 
 let private members (path: string) =
-    Perspectives.members (load path).Model.Perspectives.["Sales View"]
+    Perspectives.members (loadModel path).Model.Perspectives.["Sales View"]
     |> List.map ObjectRef.format
 
 [<Tests>]
@@ -75,7 +72,7 @@ let tests =
             use t = project ()
             let r = semctl [ "perspective"; "add"; t.Path; "Sales View"; "[Total]"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Out
-            let doc = (json r).RootElement
+            let doc = (json r)
             Expect.equal (doc.GetProperty("command").GetString()) "perspective add" ""
             let c = doc.GetProperty("changes").[0]
             Expect.equal (c.GetProperty("objectPath").GetString()) "perspective:Sales View" ""
@@ -93,13 +90,12 @@ let tests =
             let r = semctl [ "perspective"; "list"; t.Path ]
             Expect.equal r.Out "perspective:Sales View  1 table, 3 columns, 0 measures, 1 hierarchy\n" ""
 
-            let all =
-                (json (semctl [ "perspective"; "list"; t.Path; "--json" ])).RootElement.[0]
+            let all = (json (semctl [ "perspective"; "list"; t.Path; "--json" ])).[0]
 
             Expect.equal (all.GetProperty("columns").GetInt32()) 3 ""
 
             let one =
-                (json (semctl [ "perspective"; "list"; t.Path; "perspective:Sales View"; "--json" ])).RootElement
+                (json (semctl [ "perspective"; "list"; t.Path; "perspective:Sales View"; "--json" ]))
 
             Expect.equal
                 [
@@ -125,7 +121,7 @@ let tests =
             Expect.equal level.Code ExitCode.input level.Out
 
             Expect.equal
-                ((json level).RootElement.GetProperty("error").GetProperty("code").GetString())
+                ((json level).GetProperty("error").GetProperty("code").GetString())
                 "unsupported-perspective-change"
                 ""
 

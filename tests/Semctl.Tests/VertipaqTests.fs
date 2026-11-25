@@ -53,12 +53,6 @@ let private col (s: Stats) (t: string) (c: string) =
 let private relFrom (s: Stats) (t: string) (c: string) =
     s.Relationships |> List.find (fun r -> r.FromTable = t && r.FromColumn = c)
 
-let private json (r: Run) =
-    use doc = JsonDocument.Parse r.Out
-    doc.RootElement.Clone()
-
-let private errorCode (r: Run) =
-    (json r).GetProperty("error").GetProperty("code").GetString()
 
 let private has (e: JsonElement) (name: string) =
     let mutable v = Unchecked.defaultof<JsonElement>

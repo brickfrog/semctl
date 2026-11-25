@@ -14,10 +14,6 @@ let private snapshot (dir: string) =
     |> Array.sort
     |> Array.map (fun f -> f, File.ReadAllText f)
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
 let private semanticModel (t: TempDir) = t.Combine "Sales.SemanticModel"
 
@@ -45,7 +41,7 @@ let tests =
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.stringContains r.Err "Saved pbip" ""
 
-            let db = load t.Path
+            let db = loadModel t.Path
             let sales = db.Model.Tables.["Sales"]
             Expect.isTrue (sales.Measures.Contains "Total Sales") ""
             Expect.isFalse (sales.Measures.Contains "Total") ""
@@ -66,7 +62,7 @@ let tests =
             let tables = t.Combine("Sales.SemanticModel", "definition", "tables")
             Expect.isTrue (File.Exists(Path.Combine(tables, "Calendar Date.tmdl"))) ""
             Expect.isFalse (File.Exists(Path.Combine(tables, "Date.tmdl"))) "the stale file is removed"
-            let db = load t.Path
+            let db = loadModel t.Path
             let rel = db.Model.Relationships.["Sales-Date"] :?> SingleColumnRelationship
             Expect.equal rel.ToTable.Name "Calendar Date" ""
 
@@ -96,7 +92,7 @@ let tests =
             let text = File.ReadAllText bim
             Expect.stringContains text "\r\n" "keeps CRLF"
             Expect.isFalse (text.Replace("\r\n", "").Contains "\n") "only CRLF"
-            Expect.isTrue ((load bim).Model.Tables.["Sales"].Measures.Contains "T") ""
+            Expect.isTrue ((loadModel bim).Model.Tables.["Sales"].Measures.Contains "T") ""
 
             let tmdl = t.Combine "tmdl"
 
@@ -105,7 +101,7 @@ let tests =
 
             Expect.equal (semctl [ "rename"; tmdl; "Sales[Amount]"; "Net"; "--save" ]).Code ExitCode.ok ""
             Expect.isFalse (File.Exists(Path.Combine(tmdl, "definition.pbism"))) "not turned into PBIP"
-            Expect.equal (load tmdl).Model.Tables.["Sales"].Measures.["Total"].Expression "SUM(Sales[Net])" ""
+            Expect.equal (loadModel tmdl).Model.Tables.["Sales"].Measures.["Total"].Expression "SUM(Sales[Net])" ""
 
         testCase "--save-to writes elsewhere and leaves the model alone"
         <| fun () ->
@@ -116,7 +112,7 @@ let tests =
             let r = semctl [ "rename"; t.Path; "[Total]"; "Total Sales"; "--save-to"; out ]
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.equal (snapshot t.Path) before "source untouched"
-            Expect.isTrue ((load out).Model.Tables.["Sales"].Measures.Contains "Total Sales") ""
+            Expect.isTrue ((loadModel out).Model.Tables.["Sales"].Measures.Contains "Total Sales") ""
 
             let again = semctl [ "rename"; t.Path; "[Total]"; "X"; "--save-to"; out ]
             Expect.equal again.Code ExitCode.output "won't overwrite without --force"
@@ -186,8 +182,8 @@ let tests =
             use t = project ()
             let dry = semctl [ "rename"; t.Path; "[Total]"; "Total Sales"; "--json" ]
             Expect.equal dry.Code ExitCode.ok dry.Err
-            use doc = json dry
-            let root = doc.RootElement
+            let doc = json dry
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "rename" ""
             Expect.isTrue (root.GetProperty("dryRun").GetBoolean()) ""
             let changes = root.GetProperty("changes").EnumerateArray() |> List.ofSeq
@@ -217,8 +213,8 @@ let tests =
 
             let real = semctl [ "rename"; t.Path; "[Total]"; "Total Sales"; "--json"; "--save" ]
             Expect.equal real.Code ExitCode.ok real.Err
-            use doc = json real
-            let saved = doc.RootElement.GetProperty "saved"
+            let doc = json real
+            let saved = doc.GetProperty "saved"
             Expect.equal (saved.GetProperty("format").GetString()) "pbip" ""
             Expect.equal (saved.GetProperty("path").GetString()) (Path.GetFullPath(semanticModel t)) ""
 
@@ -226,6 +222,6 @@ let tests =
                 semctl [ "rename"; t.Path; "[Total (hidden)]"; "total sales"; "--json" ]
 
             Expect.equal failed.Code ExitCode.input ""
-            use doc = json failed
-            Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "name-collision" ""
+            let doc = json failed
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "name-collision" ""
     ]

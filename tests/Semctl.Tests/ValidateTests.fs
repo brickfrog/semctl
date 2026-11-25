@@ -35,11 +35,7 @@ let private calculatedTable (db: Database) name expression =
     db.Model.Tables.Add t
     t
 
-let private samplePath =
-    match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-    | null
-    | "" -> None
-    | p -> Some p
+let private samplePath = sampleModelPath ()
 
 [<Tests>]
 let tests =

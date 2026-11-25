@@ -499,8 +499,8 @@ let commandTests =
             let out = t.Combine "tmdl-out"
             let r = semctl [ "data"; "embed"; model; data; out; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Out
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "data embed" ""
             Expect.equal (root.GetProperty("directory").GetString()) (Path.GetFullPath data) ""
             Expect.equal (root.GetProperty("output").GetProperty("format").GetString()) "tmdl" ""
@@ -540,13 +540,10 @@ let commandTests =
             let out = t.Combine "embedded.bim"
             let r = semctl [ "data"; "embed"; model; data; out; "--json" ]
             Expect.equal r.Code ExitCode.input r.Out
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "invalid-fixture" ""
+            let doc = json r
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "invalid-fixture" ""
 
-            Expect.stringContains
-                (doc.RootElement.GetProperty("error").GetProperty("message").GetString())
-                "sm data check"
-                ""
+            Expect.stringContains (doc.GetProperty("error").GetProperty("message").GetString()) "sm data check" ""
 
             Expect.isFalse (File.Exists out) "nothing written"
 

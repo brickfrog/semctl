@@ -215,6 +215,7 @@ let private runSql (connect: SqlAddress -> ISqlDescriber) (args: string list) =
     use err = new StringWriter()
 
     let ctx: Ctx = {
+        In = TextReader.Null
         Out = out
         Err = err
         Json = false
@@ -807,10 +808,9 @@ let tests =
 
             testCase "the sample model (SEMCTL_SAMPLE_MODEL): every table has M steps beyond navigation, so all skip"
             <| fun () ->
-                match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-                | null
-                | "" -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-                | sample ->
+                match sampleModelPath () with
+                | None -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+                | Some sample ->
                     // A SQL connection is opened only for a table sm can describe; here there is none,
                     // so this runs (and passes) with no server at all.
                     let r =

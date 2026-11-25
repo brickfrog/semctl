@@ -4,6 +4,7 @@ open System.IO
 open System.Text.Json
 open Expecto
 open Semctl
+open Semctl.Tests.Fixtures
 open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
@@ -13,18 +14,12 @@ let private snapshot (dir: string) =
     |> Array.sort
     |> Array.map (fun f -> f, File.ReadAllText f)
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
 
-let private changes (doc: JsonDocument) = [
-    for c in doc.RootElement.GetProperty("changes").EnumerateArray() ->
+let private changes (doc: JsonElement) = [
+    for c in doc.GetProperty("changes").EnumerateArray() ->
         c.GetProperty("objectPath").GetString(), c.GetProperty("changeKind").GetString()
 ]
 
-let private errorCode (doc: JsonDocument) =
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 [<Tests>]
 let tests =
@@ -49,7 +44,7 @@ let tests =
             Expect.stringContains r.Err "Saved pbip" ""
             let tables = t.Combine("Sales.SemanticModel", "definition", "tables")
             Expect.isFalse (File.Exists(Path.Combine(tables, "Sales.tmdl"))) "the stale file is removed"
-            let db = load t.Path
+            let db = loadModel t.Path
             Expect.isFalse (db.Model.Tables.Contains "Sales") ""
             Expect.equal db.Model.Relationships.Count 0 ""
             Expect.isTrue (db.Model.Tables.Contains "Date") "the rest stays"
@@ -60,7 +55,7 @@ let tests =
             let r = semctl [ "remove"; t.Path; "Date[Year]"; "[Total (hidden)]"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Out
             let doc = json r
-            Expect.equal (doc.RootElement.GetProperty("command").GetString()) "remove" ""
+            Expect.equal (doc.GetProperty("command").GetString()) "remove" ""
 
             Expect.equal
                 (changes doc |> List.filter (fun (_, k) -> k = "deleted") |> List.sort)
@@ -72,8 +67,8 @@ let tests =
                 ""
 
             Expect.isTrue (changes doc |> List.contains ("level:Date/Calendar/Month", "modified")) "renumbered"
-            Expect.isTrue (doc.RootElement.GetProperty("dryRun").GetBoolean()) ""
-            Expect.equal (doc.RootElement.GetProperty("introducedErrors").GetArrayLength()) 0 ""
+            Expect.isTrue (doc.GetProperty("dryRun").GetBoolean()) ""
+            Expect.equal (doc.GetProperty("introducedErrors").GetArrayLength()) 0 ""
 
         testCase "remove: refused while referenced (exit 3), listing what refers to it"
         <| fun () ->
@@ -84,7 +79,7 @@ let tests =
             Expect.stringContains r.Err "measure:Sales/Total  expression:1  Sales[Amount]  -> column:Sales/Amount" ""
             let j = semctl [ "remove"; t.Path; "Sales[Amount]"; "--json" ]
             Expect.equal j.Code ExitCode.input ""
-            Expect.equal (errorCode (json j)) "remove-blocked" ""
+            Expect.equal (errorCode j) "remove-blocked" ""
 
         testCase "remove --force: broken references show up as introduced errors, and --save goes ahead"
         <| fun () ->
@@ -94,18 +89,18 @@ let tests =
             let doc = json r
 
             let introduced = [
-                for f in doc.RootElement.GetProperty("introducedErrors").EnumerateArray() ->
+                for f in doc.GetProperty("introducedErrors").EnumerateArray() ->
                     f.GetProperty("objectPath").GetString(), f.GetProperty("code").GetString()
             ]
 
             Expect.equal introduced [ "measure:Sales/Total", "unresolved-reference" ] ""
-            Expect.equal (doc.RootElement.GetProperty("warnings").GetArrayLength()) 1 ""
+            Expect.equal (doc.GetProperty("warnings").GetArrayLength()) 1 ""
 
             let saved = semctl [ "remove"; t.Path; "Sales[Amount]"; "--force"; "--save" ]
             Expect.equal saved.Code ExitCode.ok saved.Err
             Expect.stringContains saved.Err "sm: warning: left a broken reference (--force)" ""
             Expect.stringContains saved.Err "this change introduces 1 error" ""
-            Expect.isFalse ((load t.Path).Model.Tables.["Sales"].Columns.Contains "Amount") ""
+            Expect.isFalse ((loadModel t.Path).Model.Tables.["Sales"].Columns.Contains "Amount") ""
 
         testCase "remove: missing objects fail (exit 3) unless --if-exists"
         <| fun () ->
@@ -124,7 +119,7 @@ let tests =
             Expect.stringContains m.Err "the model itself can't be removed" ""
             let p = semctl [ "remove"; t.Path; "partition:Sales/Sales"; "--json" ]
             Expect.equal p.Code ExitCode.input ""
-            Expect.equal (errorCode (json p)) "unsupported-remove" ""
+            Expect.equal (errorCode p) "unsupported-remove" ""
             Expect.equal (semctl [ "remove"; t.Path ]).Code ExitCode.usage ""
 
         testCase "move: a dry run shows a move, not a delete and a create"
@@ -135,7 +130,7 @@ let tests =
             Expect.equal r.Code ExitCode.ok r.Out
             let doc = json r
             Expect.equal (changes doc) [ "measure:Date/Total", "moved" ] ""
-            let change = doc.RootElement.GetProperty("changes").[0]
+            let change = doc.GetProperty("changes").[0]
             Expect.equal (change.GetProperty("movedFromObjectPath").GetString()) "measure:Sales/Total" ""
             Expect.equal (snapshot t.Path) before "nothing written"
 
@@ -157,7 +152,7 @@ let tests =
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.stringContains r.Out "> measure:Sales/Total -> measure:Date/Total" ""
             Expect.stringContains r.Err "Moved measure:Sales/Total -> measure:Date/Total" ""
-            let db = load t.Path
+            let db = loadModel t.Path
             let moved = db.Model.Tables.["Date"].Measures.["Total"]
             Expect.equal moved.DisplayFolder "KPIs" ""
             Expect.equal moved.Expression "SUM(Sales[Amount])" ""
@@ -169,7 +164,7 @@ let tests =
             use t = project ()
             let cg = semctl [ "move"; t.Path; "[Total]"; "Time Intelligence"; "--json" ]
             Expect.equal cg.Code ExitCode.input ""
-            Expect.equal (errorCode (json cg)) "unsupported-move" ""
+            Expect.equal (errorCode cg) "unsupported-move" ""
             Expect.equal (semctl [ "move"; t.Path; "[Total]"; "Nope" ]).Code ExitCode.input ""
             Expect.equal (semctl [ "move"; t.Path; "Sales[Amount]"; "Date" ]).Code ExitCode.input ""
             let same = semctl [ "move"; t.Path; "[Total]"; "Sales" ]

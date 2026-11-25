@@ -35,7 +35,7 @@ let private setup (t: TempDir) (rules: (string * string * string * string) list)
     write rulesPath json
     path, rulesPath
 
-let private load (path: string) =
+let private loadModel (path: string) =
     match ModelIO.loadPath path with
     | Ok(_, db) -> db
     | Error e -> failtest (SemctlError.message e)
@@ -75,7 +75,7 @@ let tests =
             Expect.stringContains r.Err "sm: warning: CHARS: not fixed on measure:Sales/Total: only literal values" ""
             Expect.stringContains r.Err "1 finding of rules without a fix expression" ""
             Expect.stringContains r.Err "Dry run - nothing saved." ""
-            Expect.isFalse (load path).Model.Tables.["Date"].Columns.["DateKey"].IsHidden "nothing written"
+            Expect.isFalse (loadModel path).Model.Tables.["Date"].Columns.["DateKey"].IsHidden "nothing written"
 
         testCase "--save writes; a second run has nothing left to fix"
         <| fun () ->
@@ -83,7 +83,7 @@ let tests =
             let path, rules = setup t standard
             let r = semctl [ "bpa"; path; "--no-builtin"; "--rules"; rules; "--fix"; "--save" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            let db = load path
+            let db = loadModel path
             Expect.isTrue db.Model.Tables.["Date"].Columns.["DateKey"].IsHidden ""
             Expect.equal db.Model.Tables.["Sales"].Measures.["Total"].FormatString "#,0.0%;-#,0.0%;#,0.0%" ""
             Expect.isFalse (db.Model.Tables.["Sales"].Measures.ContainsName "Total (hidden)") ""
@@ -114,8 +114,8 @@ let tests =
 
             let r = semctl [ "bpa"; path; "--no-builtin"; "--rules"; rules; "--fix"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "bpa" ""
             Expect.isTrue (root.GetProperty("dryRun").GetBoolean()) ""
             Expect.equal (root.GetProperty("summary").GetProperty("modified").GetInt32()) 2 ""
@@ -229,6 +229,6 @@ let tests =
                 semctl [ "bpa"; path; "--no-builtin"; "--rules"; rules; "--fix"; "--save-to"; out ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            Expect.isTrue (load out).Model.Tables.["Date"].Columns.["DateKey"].IsHidden ""
-            Expect.isFalse (load path).Model.Tables.["Date"].Columns.["DateKey"].IsHidden ""
+            Expect.isTrue (loadModel out).Model.Tables.["Date"].Columns.["DateKey"].IsHidden ""
+            Expect.isFalse (loadModel path).Model.Tables.["Date"].Columns.["DateKey"].IsHidden ""
     ]

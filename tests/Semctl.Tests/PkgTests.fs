@@ -836,13 +836,13 @@ let commandTests =
                 ]
 
             Expect.equal saved.Code ExitCode.ok saved.Err
-            use doc = json saved
-            Expect.isFalse (doc.RootElement.GetProperty("dryRun").GetBoolean()) ""
+            let doc = json saved
+            Expect.isFalse (doc.GetProperty("dryRun").GetBoolean()) ""
 
             let list = semctl [ "pkg"; "list"; model; "--json" ]
             Expect.equal list.Code ExitCode.ok list.Err
-            use l = json list
-            let pkgs = l.RootElement.GetProperty("packages")
+            let l = json list
+            let pkgs = l.GetProperty("packages")
             Expect.equal (pkgs.GetArrayLength()) 1 ""
             let first = pkgs.[0]
             Expect.equal (first.GetProperty("id").GetString()) "TimeSeries.MovingAverage" ""
@@ -885,15 +885,15 @@ let commandTests =
             Expect.equal add.Code ExitCode.ok add.Err
             let r = semctl [ "pkg"; "remove"; model; "My.Lib"; "--save"; "--json" ]
             Expect.equal r.Code ExitCode.input $"refused: {r.Out}{r.Err}"
-            use doc = json r
-            Expect.equal (doc.RootElement.GetProperty("error").GetProperty("code").GetString()) "remove-blocked" r.Out
+            let doc = json r
+            Expect.equal (doc.GetProperty("error").GetProperty("code").GetString()) "remove-blocked" r.Out
             Expect.stringContains (semctl [ "pkg"; "list"; model ]).Out "My.Lib 1.0.0" "still installed"
 
             // Without --save the dry run shows the call it leaves broken as an introduced error.
             let dry = semctl [ "pkg"; "remove"; model; "My.Lib"; "--force"; "--json" ]
             Expect.equal dry.Code ExitCode.ok dry.Err
-            use dryDoc = json dry
-            let introduced = dryDoc.RootElement.GetProperty("introducedErrors")
+            let dryDoc = json dry
+            let introduced = dryDoc.GetProperty("introducedErrors")
             Expect.equal (introduced.GetArrayLength()) 1 dry.Out
             Expect.equal (introduced.[0].GetProperty("code").GetString()) "unknown-function" dry.Out
 
@@ -929,17 +929,14 @@ let commandTests =
                 semctlWithEnv [ PkgCommand.sourceVariable, vendored ] [ "pkg"; "search"; "moving"; "--json" ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
+            let doc = json r
 
-            Expect.equal
-                (doc.RootElement.GetProperty("packages").[0].GetProperty("id").GetString())
-                "TimeSeries.MovingAverage"
-                ""
+            Expect.equal (doc.GetProperty("packages").[0].GetProperty("id").GetString()) "TimeSeries.MovingAverage" ""
 
             let none = semctl [ "pkg"; "search"; "x"; "--json" ]
             Expect.equal none.Code ExitCode.usage none.Out
-            use e = json none
-            Expect.equal (e.RootElement.GetProperty("error").GetProperty("code").GetString()) "no-package-source" ""
+            let e = json none
+            Expect.equal (e.GetProperty("error").GetProperty("code").GetString()) "no-package-source" ""
 
             let offline =
                 semctlWithEnv [ PkgCommand.sourceVariable, "daxlib" ] [ "pkg"; "show"; "X.Y"; "--offline" ]
@@ -957,8 +954,8 @@ let commandTests =
                 semctl [ "pkg"; "show"; "TimeSeries.MovingAvrage"; "--from"; vendored; "--json" ]
 
             Expect.equal missing.Code ExitCode.input missing.Out
-            use doc = json missing
-            let e = doc.RootElement.GetProperty("error")
+            let doc = json missing
+            let e = doc.GetProperty("error")
             Expect.equal (e.GetProperty("code").GetString()) "package-not-found" ""
             Expect.equal (e.GetProperty("suggestions").[0].GetString()) "TimeSeries.MovingAverage" ""
         }
@@ -969,17 +966,16 @@ let commandTests =
 [<Tests>]
 let sampleTests =
     testList "pkg sample model (SEMCTL_SAMPLE_MODEL)" [
-        match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-        | null
-        | "" -> testCase "not configured" <| fun () -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
-        | path ->
+        match sampleModelPath () with
+        | None -> testCase "not configured" <| fun () -> skiptest "SEMCTL_SAMPLE_MODEL is not set"
+        | Some path ->
             test "list reads what TE3 installed into spaceparts, and the functions changed since" {
                 let r = semctl [ "pkg"; "list"; path; "--json" ]
                 Expect.equal r.Code ExitCode.ok r.Err
-                use doc = json r
+                let doc = json r
 
                 let packages = [
-                    for p in doc.RootElement.GetProperty("packages").EnumerateArray() ->
+                    for p in doc.GetProperty("packages").EnumerateArray() ->
                         let fs = [
                             for f in p.GetProperty("functions").EnumerateArray() -> f.GetProperty("state").GetString()
                         ]

@@ -6,12 +6,9 @@ open System
 open System.Text.Json
 open Expecto
 open Semctl
+open Semctl.Tests.Fixtures
 
-let private samplePath =
-    match Environment.GetEnvironmentVariable "SEMCTL_SAMPLE_MODEL" with
-    | null
-    | "" -> None
-    | p -> Some p
+let private samplePath = sampleModelPath ()
 
 /// (key, value) of every string in a document, in order.
 let private strings (json: string) =

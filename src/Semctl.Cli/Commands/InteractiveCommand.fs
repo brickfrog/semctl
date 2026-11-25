@@ -670,7 +670,7 @@ let run (ctx: Ctx) (args: ParseResults<Args>) (input: TextReader option) (host: 
             let lines =
                 match input with
                 | Some reader -> readerSource reader
-                | None when piped -> readerSource Console.In
+                | None when piped -> readerSource ctx.In
                 | None -> consoleSource
 
             match runSession ctx host options model source db lines with

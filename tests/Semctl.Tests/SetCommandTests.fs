@@ -16,14 +16,6 @@ let private snapshot (dir: string) =
     |> Array.sort
     |> Array.map (fun f -> f, File.ReadAllText f)
 
-let private load (path: string) =
-    match ModelIO.loadPath path with
-    | Ok(_, db) -> db
-    | Error e -> failtestf "%s" (SemctlError.message e)
-
-let private errorCode (r: Run) =
-    use doc = json r
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 [<Tests>]
 let tests =
@@ -64,7 +56,7 @@ let tests =
 
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.stringContains r.Err "Saved pbip" ""
-            let amount = (load t.Path).Model.Tables.["Sales"].Columns.["Amount"]
+            let amount = (loadModel t.Path).Model.Tables.["Sales"].Columns.["Amount"]
             Expect.isTrue amount.IsHidden ""
             Expect.equal amount.SummarizeBy AggregateFunction.None ""
             Expect.equal amount.Annotations.["Owner"].Value "finance" ""
@@ -75,7 +67,7 @@ let tests =
             Expect.equal r.Code ExitCode.ok r.Err
 
             Expect.equal
-                (load t.Path).Model.Tables.["Sales"].Measures.["Total"].KPI.TargetExpression
+                (loadModel t.Path).Model.Tables.["Sales"].Measures.["Total"].KPI.TargetExpression
                 "100"
                 "sub-objects too"
 
@@ -102,7 +94,10 @@ let tests =
 
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.stringContains r.Err "Cleared formatString, description" ""
-            Expect.isTrue (String.IsNullOrEmpty (load t.Path).Model.Tables.["Sales"].Measures.["Total"].FormatString) ""
+
+            Expect.isTrue
+                (String.IsNullOrEmpty (loadModel t.Path).Model.Tables.["Sales"].Measures.["Total"].FormatString)
+                ""
 
         testCase "--save-to writes elsewhere"
         <| fun () ->
@@ -116,7 +111,7 @@ let tests =
 
             Expect.equal r.Code ExitCode.ok r.Err
             Expect.equal (snapshot t.Path) before "source untouched"
-            Expect.equal (load out).Model.Tables.["Sales"].Measures.["Total"].DisplayFolder "KPIs" ""
+            Expect.equal (loadModel out).Model.Tables.["Sales"].Measures.["Total"].DisplayFolder "KPIs" ""
 
         testCase "--stat and --name-only"
         <| fun () ->
@@ -151,8 +146,8 @@ let tests =
                 semctl [ "set"; t.Path; "Date[Month]"; "-p"; "sortByColumn=DateKey"; "--json" ]
 
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "set" ""
             Expect.isTrue (root.GetProperty("dryRun").GetBoolean()) ""
             let change = root.GetProperty("changes").[0]
@@ -192,7 +187,10 @@ let tests =
             let forced = semctl (args @ [ "--force" ])
             Expect.equal forced.Code ExitCode.ok forced.Err
 
-            Expect.equal (load t.Path).Model.Tables.["Sales"].Measures.["Total"].Expression "SUM('Missing'[Amount])" ""
+            Expect.equal
+                (loadModel t.Path).Model.Tables.["Sales"].Measures.["Total"].Expression
+                "SUM('Missing'[Amount])"
+                ""
 
         testCase "exit codes"
         <| fun () ->
@@ -227,24 +225,25 @@ let tests =
             Expect.equal (errorCode (run [ "[Total]"; "-p"; "name=X" ])) "read-only-property" ""
             Expect.equal (errorCode (run [ "[Total]"; "-p"; "isHidden=2" ])) "invalid-property-value" ""
 
-        // Console.In is process-wide: keep this one off the parallel runner.
-        testSequenced (
-            testCase "-p <path>=- reads the value from stdin" (fun () ->
-                use t = project ()
-                let previous = Console.In
+        testCase "-p <path>=- reads the value from stdin" (fun () ->
+            use t = project ()
 
-                try
-                    Console.SetIn(new StringReader("SUMX(Sales, Sales[Amount])\n"))
-                    let r = semctl [ "set"; t.Path; "[Total]"; "-p"; "expression=-"; "--save" ]
-                    Expect.equal r.Code ExitCode.ok r.Err
-                finally
-                    Console.SetIn previous
+            let r =
+                semctlWithStdin "SUMX(Sales, Sales[Amount])\n" [
+                    "set"
+                    t.Path
+                    "[Total]"
+                    "-p"
+                    "expression=-"
+                    "--save"
+                ]
 
-                Expect.equal
-                    (load t.Path).Model.Tables.["Sales"].Measures.["Total"].Expression
-                    "SUMX(Sales, Sales[Amount])"
-                    "")
-        )
+            Expect.equal r.Code ExitCode.ok r.Err
+
+            Expect.equal
+                (loadModel t.Path).Model.Tables.["Sales"].Measures.["Total"].Expression
+                "SUMX(Sales, Sales[Amount])"
+                "")
 
         testList "get --properties" [
             testCase "an aligned table of writable properties"
@@ -283,9 +282,9 @@ let tests =
                 use t = project ()
                 let r = semctl [ "get"; t.Path; "Sales[Amount]"; "--properties"; "--json" ]
                 Expect.equal r.Code ExitCode.ok r.Err
-                use doc = json r
-                Expect.equal doc.RootElement.ValueKind JsonValueKind.Array ""
-                let items = doc.RootElement.EnumerateArray() |> List.ofSeq
+                let doc = json r
+                Expect.equal doc.ValueKind JsonValueKind.Array ""
+                let items = doc.EnumerateArray() |> List.ofSeq
 
                 let find (path: string) =
                     items |> List.find (fun i -> i.GetProperty("property").GetString() = path)
@@ -317,10 +316,10 @@ let tests =
                 let all =
                     semctl [ "get"; t.Path; "Sales[Amount]"; "--properties"; "--all"; "--json" ]
 
-                use doc = json all
+                let doc = json all
 
                 let name =
-                    doc.RootElement.EnumerateArray()
+                    doc.EnumerateArray()
                     |> Seq.find (fun i -> i.GetProperty("property").GetString() = "name")
 
                 Expect.isFalse (name.GetProperty("writable").GetBoolean()) ""
@@ -330,9 +329,9 @@ let tests =
             <| fun () ->
                 use t = project ()
                 let r = semctl [ "get"; t.Path; "[Total]"; "--properties"; "--json" ]
-                use doc = json r
+                let doc = json r
 
-                for item in doc.RootElement.EnumerateArray() do
+                for item in doc.EnumerateArray() do
                     let path = item.GetProperty("property").GetString().Replace("<name>", "X")
                     let s = semctl [ "set"; t.Path; "[Total]"; "--unset"; path ]
                     Expect.equal s.Code ExitCode.ok $"{path}: {s.Err}"

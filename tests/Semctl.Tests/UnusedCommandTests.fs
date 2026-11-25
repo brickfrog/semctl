@@ -4,9 +4,7 @@ open Expecto
 open Semctl.Tests.CliHarness
 open Semctl.Cli.Common
 
-let private refs (r: Run) = [
-    for e in (json r).RootElement.EnumerateArray() -> e.GetProperty("ref").GetString()
-]
+let private refs (r: Run) = [ for e in (json r).EnumerateArray() -> e.GetProperty("ref").GetString() ]
 
 [<Tests>]
 let tests =
@@ -54,7 +52,7 @@ let tests =
                 "-t keeps one table"
 
             let total =
-                (json r).RootElement.EnumerateArray()
+                (json r).EnumerateArray()
                 |> Seq.find (fun e -> e.GetProperty("ref").GetString() = "measure:Sales/Total")
 
             Expect.equal (total.GetProperty("kind").GetString()) "measure" ""
@@ -100,7 +98,7 @@ let tests =
             Expect.equal r.Code ExitCode.usage ""
 
             Expect.equal
-                ((json r).RootElement.GetProperty("error").GetProperty("code").GetString())
+                ((json r).GetProperty("error").GetProperty("code").GetString())
                 "usage"
                 "usage errors are JSON with --json"
 

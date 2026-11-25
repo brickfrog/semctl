@@ -124,8 +124,8 @@ let tests =
             use t = new TempDir()
             let r = semctl [ "validate"; writeBim t (broken ()); "--json" ]
             Expect.equal r.Code ExitCode.findings r.Out
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("summary").GetProperty("total").GetInt32()) 8 ""
 
             let findings = [

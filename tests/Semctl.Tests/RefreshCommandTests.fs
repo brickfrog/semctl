@@ -52,9 +52,6 @@ let private salesServer () =
 let private remote = $"xmla:{workspace};Sales"
 let private run (server: FakeServer) (args: string list) = semctlOn server tokenEnv args
 
-let private errorCode (r: Run) =
-    use doc = json r
-    doc.RootElement.GetProperty("error").GetProperty("code").GetString()
 
 let private sameJson (actual: string) (expected: string) =
     if not (JsonNode.DeepEquals(JsonNode.Parse actual, JsonNode.Parse expected)) then
@@ -173,8 +170,8 @@ let tests =
 
             Expect.equal r.Code 0 r.Err
             Expect.equal r.Err "" "nothing beside the document"
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "refresh" ""
             Expect.equal (root.GetProperty("source").GetString()) remote ""
             Expect.equal (root.GetProperty("server").GetString()) workspace ""
@@ -215,9 +212,9 @@ let tests =
             let dated =
                 run server [ "refresh"; remote; "Orders"; "--effective-date"; "2024-06-30"; "--json" ]
 
-            use doc = json dated
-            Expect.isTrue (doc.RootElement.GetProperty("applyRefreshPolicy").GetBoolean()) "implied"
-            Expect.equal (doc.RootElement.GetProperty("effectiveDate").GetString()) "2024-06-30" "ISO in the document"
+            let doc = json dated
+            Expect.isTrue (doc.GetProperty("applyRefreshPolicy").GetBoolean()) "implied"
+            Expect.equal (doc.GetProperty("effectiveDate").GetString()) "2024-06-30" "ISO in the document"
 
         testCase "--execute runs exactly the script the dry run shows, and reports progress on stderr"
         <| fun () ->
@@ -252,8 +249,8 @@ let tests =
             let r = run server [ "refresh"; remote; "--execute"; "--json"; "--progress"; "all" ]
             Expect.equal r.Code 0 r.Out
             Expect.equal r.Err "" ""
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.isFalse (root.GetProperty("dryRun").GetBoolean()) ""
             Expect.isTrue (root.GetProperty("refreshed").GetBoolean()) ""
             Expect.equal (root.GetProperty("durationMs").ValueKind) JsonValueKind.Number ""
@@ -308,10 +305,10 @@ let tests =
             Expect.equal j.Code ExitCode.remote j.Out
             Expect.equal (errorCode j) "refresh-failed" ""
             Expect.isFalse (j.Out.Contains fakeToken) ""
-            use doc = json j
-            Expect.isFalse (doc.RootElement.GetProperty("refreshed").GetBoolean()) ""
-            Expect.isFalse (doc.RootElement.GetProperty("dryRun").GetBoolean()) ""
-            Expect.equal (doc.RootElement.GetProperty("progress").GetArrayLength()) 2 "kept with the failure"
+            let doc = json j
+            Expect.isFalse (doc.GetProperty("refreshed").GetBoolean()) ""
+            Expect.isFalse (doc.GetProperty("dryRun").GetBoolean()) ""
+            Expect.equal (doc.GetProperty("progress").GetArrayLength()) 2 "kept with the failure"
 
         testCase "the script being refused outright: exit 5"
         <| fun () ->
@@ -337,9 +334,9 @@ let tests =
 
             Expect.stringContains r.Err "Refreshed 'Sales'" ""
             let j = run server [ "refresh"; remote; "--execute"; "--json" ]
-            use doc = json j
-            Expect.stringContains (doc.RootElement.GetProperty("traceError").GetString()) "no permission" ""
-            Expect.isTrue (doc.RootElement.GetProperty("refreshed").GetBoolean()) ""
+            let doc = json j
+            Expect.stringContains (doc.GetProperty("traceError").GetString()) "no permission" ""
+            Expect.isTrue (doc.GetProperty("refreshed").GetBoolean()) ""
 
         testCase "what can't be refreshed is refused before anything runs"
         <| fun () ->

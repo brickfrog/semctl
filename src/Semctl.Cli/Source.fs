@@ -12,7 +12,10 @@ open Semctl.Cli.Common
 /// What the connection layer needs from a command's context.
 let access (ctx: Ctx) : Remote.Access = {
     Connector = ctx.Connector
-    Environment = Credentials.processEnvironment ctx.GetEnv
+    Environment = {
+        Credentials.processEnvironment ctx.GetEnv with
+            ReadSecret = Credentials.readSecret ctx.In
+    }
     Notify = fun message -> ctx.Err.WriteLine message
     IsWindows = OperatingSystem.IsWindows()
 }

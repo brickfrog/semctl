@@ -89,8 +89,8 @@ let tests =
             use t = new TempDir()
             let r = semctl [ "lint"; lintModel t []; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "lint" ""
             Expect.equal (root.GetProperty("fixable").GetInt32()) 2 ""
             let summary = root.GetProperty "summary"
@@ -182,8 +182,8 @@ let tests =
             use t = new TempDir()
             let r = semctl [ "lint"; lintModel t []; "--fix"; "--json" ]
             Expect.equal r.Code ExitCode.ok r.Err
-            use doc = json r
-            let root = doc.RootElement
+            let doc = json r
+            let root = doc
             Expect.equal (root.GetProperty("command").GetString()) "lint" ""
             Expect.isTrue (root.GetProperty("dryRun").GetBoolean()) ""
             Expect.equal (root.GetProperty("summary").GetProperty("modified").GetInt32()) 2 ""
@@ -239,8 +239,8 @@ let tests =
             Expect.stringContains r.Out "1 finding ignored by SemctlLint_IgnoreRules annotations." ""
 
             let j = semctl [ "lint"; path; "--json" ]
-            use doc = json j
-            let ignored = doc.RootElement.GetProperty("ignored")
+            let doc = json j
+            let ignored = doc.GetProperty("ignored")
             Expect.equal (ignored.GetArrayLength()) 1 ""
             Expect.equal (ignored.[0].GetProperty("code").GetString()) "DI004" ""
             let fix = semctl [ "lint"; path; "--fix"; "--name-only" ]

@@ -14,6 +14,7 @@ open System.Text.Json
 open System.Text.Json.Nodes
 open Microsoft.AnalysisServices.Tabular
 open Semctl
+open Semctl.Tests.Fixtures
 
 // ---- The corpus on disk ---------------------------------------------------------------------------
 
@@ -731,38 +732,30 @@ let private rawValue (v: QueryValue) : DaxValue =
     | QueryValue.Boolean b -> DaxValue.Boolean b
     | QueryValue.Binary _ -> bad "a model column can't be binary"
 
-let private scratch () =
-    Path.Combine(Path.GetTempPath(), "semctl-tests", "conformance-" + Guid.NewGuid().ToString "N")
-
 /// Build the database, write the rows as a fixture and load them back through `Fixture`.
 let prepare (name: string) (def: ModelDef) : Result<Prepared, string> =
-    let directory = scratch ()
+    use dir = new TempDir()
+    let directory = dir.Path
 
     try
-        try
-            let db = buildDatabase name def
-            writeFixture def directory
+        let db = buildDatabase name def
+        writeFixture def directory
 
-            match Fixture.loadAndCheck db directory with
-            | Error e -> Error(SemctlError.message e)
-            | Ok(loaded, issues) ->
-                Ok {
-                    Database = db
-                    Store = loaded.Store
-                    Issues = issues
-                    Rows =
-                        def.Tables
-                        |> List.map (fun t -> t.Name, t.Rows |> List.map (Array.map rawValue))
-                        |> Map.ofList
-                }
-        with
-        | Bad message -> Error message
-        | e -> Error $"the model doesn't build: {e.Message}"
-    finally
-        try
-            Directory.Delete(directory, true)
-        with _ ->
-            ()
+        match Fixture.loadAndCheck db directory with
+        | Error e -> Error(SemctlError.message e)
+        | Ok(loaded, issues) ->
+            Ok {
+                Database = db
+                Store = loaded.Store
+                Issues = issues
+                Rows =
+                    def.Tables
+                    |> List.map (fun t -> t.Name, t.Rows |> List.map (Array.map rawValue))
+                    |> Map.ofList
+            }
+    with
+    | Bad message -> Error message
+    | e -> Error $"the model doesn't build: {e.Message}"
 
 /// A model's rows by table name (names are case-insensitive); none for a table it doesn't load.
 let rawRows (p: Prepared) (table: string) : DaxValue array list =
