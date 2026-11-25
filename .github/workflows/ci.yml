@@ -46,7 +46,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.fsproj', 'Directory.Build.props', 'global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.fsproj', 'Directory.Build.props', 'Directory.Packages.props', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
       - run: dotnet restore
       - run: dotnet tool restore
@@ -74,7 +74,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.fsproj', 'Directory.Build.props', 'global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.fsproj', 'Directory.Build.props', 'Directory.Packages.props', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
       - run: dotnet build -c Release
       - run: dotnet test -c Release --no-build

@@ -12,4 +12,8 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(MSBuildProjectExtension)' == '.fsproj'">
+    <PackageReference Include="FSharp.Core" ExcludeAssets="contentFiles" />
+  </ItemGroup>
 </Project>
